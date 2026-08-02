@@ -1931,6 +1931,9 @@ ON CONFLICT(key) DO UPDATE SET
           if (record != null && record.recordKey != mutation.operationId)
             record,
         ]);
+        if (plan == null) {
+          await _restoreRejectedMaintenanceCompletionPreimage(mutation);
+        }
       });
       await (db.update(db.syncOutbox)..where(
             (row) =>
@@ -1947,6 +1950,83 @@ ON CONFLICT(key) DO UPDATE SET
             ),
           );
     });
+  }
+
+  Future<void> _restoreRejectedMaintenanceCompletionPreimage(
+    LocalSyncMutation mutation,
+  ) async {
+    final payloadJson = mutation.payloadJson;
+    if (mutation.entity != 'maintenance_completion' ||
+        payloadJson == null ||
+        payloadJson.trim().isEmpty) {
+      return;
+    }
+
+    final payload = _decodeMaintenancePayload(payloadJson);
+    if (payload == null) return;
+    final planValues = _maintenanceCompletionPlanPreimage(payload);
+    if (planValues == null) return;
+    final planId = planValues['id']?.toString();
+    if (planId == null || planId.isEmpty) return;
+
+    final current = await (db.select(
+      db.maintenancePlans,
+    )..where((row) => row.id.equals(planId))).getSingleOrNull();
+    if (current == null || current.updatedAt.isAfter(mutation.changedAt)) {
+      return;
+    }
+
+    await (db.update(
+      db.maintenancePlans,
+    )..where((row) => row.id.equals(planId))).write(
+      MaintenancePlansCompanion(
+        assetId: Value(_stringValue(planValues, 'asset_id', current.assetId)),
+        title: Value(_stringValue(planValues, 'title', current.title)),
+        instructions: Value(
+          _nullableStringValue(
+            planValues,
+            'instructions',
+            current.instructions,
+          ),
+        ),
+        recurrenceInterval: Value(
+          _intValue(
+            planValues,
+            'recurrence_interval',
+            current.recurrenceInterval,
+          ),
+        ),
+        recurrenceUnit: Value(
+          _stringValue(planValues, 'recurrence_unit', current.recurrenceUnit),
+        ),
+        priority: Value(_stringValue(planValues, 'priority', current.priority)),
+        nextDueDate: Value(
+          _dateValue(planValues, 'next_due_date', current.nextDueDate),
+        ),
+        reminderDaysBefore: Value(
+          _intValue(
+            planValues,
+            'reminder_days_before',
+            current.reminderDaysBefore,
+          ),
+        ),
+        isEnabled: Value(
+          _boolValue(planValues, 'is_enabled', current.isEnabled),
+        ),
+        healthGroup: Value(
+          _stringValue(planValues, 'health_group', current.healthGroup),
+        ),
+        createdAt: Value(
+          _dateValue(planValues, 'created_at', current.createdAt),
+        ),
+        updatedAt: Value(
+          _dateValue(planValues, 'updated_at', current.updatedAt),
+        ),
+        archivedAt: Value(
+          _nullableDateValue(planValues, 'archived_at', current.archivedAt),
+        ),
+      ),
+    );
   }
 
   Future<void> markMutationSucceeded(
@@ -2188,6 +2268,87 @@ ON CONFLICT(key) DO UPDATE SET
       // Database state is authoritative; stale local media is best-effort.
     }
   }
+}
+
+Map<String, dynamic>? _decodeMaintenancePayload(String payloadJson) {
+  try {
+    final decoded = jsonDecode(payloadJson);
+    if (decoded is! Map) return null;
+    return Map<String, dynamic>.from(decoded);
+  } on Object {
+    return null;
+  }
+}
+
+Map<String, dynamic>? _maintenanceCompletionPlanPreimage(
+  Map<String, dynamic> payload,
+) {
+  final rawPreimage = payload['preimage'];
+  if (rawPreimage is Map) {
+    final rawPlan = rawPreimage['plan'];
+    if (rawPlan is Map) {
+      return Map<String, dynamic>.from(rawPlan);
+    }
+  }
+
+  final rawPlan = payload['plan'];
+  final expectedDueDate = payload['expected_next_due_date'];
+  if (rawPlan is! Map || expectedDueDate == null) return null;
+  return {
+    ...Map<String, dynamic>.from(rawPlan),
+    'next_due_date': expectedDueDate,
+  };
+}
+
+String _stringValue(Map<String, dynamic> values, String key, String fallback) {
+  final value = values[key];
+  return value == null ? fallback : value.toString();
+}
+
+String? _nullableStringValue(
+  Map<String, dynamic> values,
+  String key,
+  String? fallback,
+) {
+  if (!values.containsKey(key)) return fallback;
+  final value = values[key];
+  return value?.toString();
+}
+
+int _intValue(Map<String, dynamic> values, String key, int fallback) {
+  final value = values[key];
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? fallback;
+  return fallback;
+}
+
+bool _boolValue(Map<String, dynamic> values, String key, bool fallback) {
+  final value = values[key];
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) return value.toLowerCase() == 'true';
+  return fallback;
+}
+
+DateTime _dateValue(
+  Map<String, dynamic> values,
+  String key,
+  DateTime fallback,
+) {
+  return _nullableDateValue(values, key, fallback) ?? fallback;
+}
+
+DateTime? _nullableDateValue(
+  Map<String, dynamic> values,
+  String key,
+  DateTime? fallback,
+) {
+  if (!values.containsKey(key)) return fallback;
+  final value = values[key];
+  if (value == null) return null;
+  if (value is DateTime) return value.toUtc();
+  return DateTime.tryParse(value.toString())?.toUtc() ?? fallback;
 }
 
 Map<String, dynamic> _toRemoteCompatible(

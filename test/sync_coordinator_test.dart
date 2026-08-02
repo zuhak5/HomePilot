@@ -31,6 +31,7 @@ class _StatefulGateway implements SupabaseSyncGateway {
   String? maintenanceCanonicalPlanTitle;
   int? failMaintenanceCompletionCall;
   bool maintenanceConflictOnce = false;
+  bool maintenanceConflictWithCanonicalPlan = false;
   Completer<void>? materializeMediaGate;
   Completer<void>? pullGate;
   Completer<void>? startRealtimeGate;
@@ -112,6 +113,32 @@ class _StatefulGateway implements SupabaseSyncGateway {
     final planSpec = syncSpecByEntity['maintenance_plan']!;
     final recordSpec = syncSpecByEntity['maintenance_record']!;
     final recordKey = recordValues['id']! as String;
+
+    if (maintenanceConflictWithCanonicalPlan) {
+      final expectedDue = DateTime.parse(
+        payload['expected_next_due_date']! as String,
+      ).toUtc();
+      return MaintenanceCompletionResult(
+        status: MaintenanceCompletionStatus.conflict,
+        retryable: false,
+        conflictReason: 'occurrence_changed',
+        currentPlanRevision: 8,
+        plan: SyncRecord(
+          spec: planSpec,
+          recordKey: planValues['id']! as String,
+          values: {
+            ...planValues,
+            'next_due_date': expectedDue.toIso8601String(),
+            'updated_at': expectedDue.toIso8601String(),
+          },
+          clientModifiedAt: expectedDue,
+          originDeviceId: 'remote-device',
+          revision: 8,
+          syncSeq: 8,
+          serverUpdatedAt: expectedDue,
+        ),
+      );
+    }
 
     if (maintenanceConflictOnce && maintenanceCompletionCalls == 1) {
       final expectedDue = DateTime.parse(
@@ -1388,6 +1415,14 @@ void main() {
     expect(completionMutations, hasLength(1));
     expect(completionMutations.single.operation, 'execute');
     expect(completionMutations.single.payloadJson, isNotNull);
+    final completionPayload =
+        jsonDecode(completionMutations.single.payloadJson!)
+            as Map<String, dynamic>;
+    expect(
+      completionPayload['idempotency_key'],
+      completionMutations.single.recordKey,
+    );
+    expect(completionPayload['preimage'], isA<Map<String, dynamic>>());
     expect(
       queuedBeforeSync.where(
         (row) =>
@@ -1404,11 +1439,15 @@ void main() {
     final gateway = _StatefulGateway()
       ..maintenanceCanonicalPlanTitle = 'Canonical cloud filter title'
       ..maintenanceConflictOnce = true;
+    var reminderReconciliations = 0;
     final coordinator = SyncCoordinator(
       auth,
       store,
       gateway,
       connectivity: connectivity,
+      reconcileMaintenanceCompletionReminders: () async {
+        reminderReconciliations += 1;
+      },
     );
     addTearDown(coordinator.dispose);
 
@@ -1419,6 +1458,7 @@ void main() {
 
     expect(gateway.pullCalls, isEmpty);
     expect(gateway.maintenanceCompletionCalls, 2);
+    expect(reminderReconciliations, 1);
     expect(gateway.writeCalls['maintenance_plan'] ?? 0, 0);
     expect(gateway.writeCalls['maintenance_record'] ?? 0, 0);
     expect(
@@ -1482,12 +1522,16 @@ void main() {
       addTearDown(connectivity.controller.close);
 
       final gateway = _StatefulGateway()..failMaintenanceCompletionCall = 1;
+      var reminderReconciliations = 0;
 
       final coordinator = SyncCoordinator(
         auth,
         store,
         gateway,
         connectivity: connectivity,
+        reconcileMaintenanceCompletionReminders: () async {
+          reminderReconciliations += 1;
+        },
         listenToAuthChanges: false,
       );
       addTearDown(coordinator.dispose);
@@ -1529,6 +1573,7 @@ void main() {
         1,
         reason: 'a terminal maintenance conflict must never retry the RPC',
       );
+      expect(reminderReconciliations, 0);
 
       final retained =
           await (db.select(db.syncOutbox)..where(
@@ -1557,6 +1602,319 @@ void main() {
         contains(SyncPhase.error),
         reason: 'the terminal conflict must publish an error status event',
       );
+    },
+  );
+
+  test(
+    'authoritative maintenance conflict reconciles reminders once',
+    () async {
+      final db = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(db.close);
+
+      final store = LocalSyncStore(db);
+      await store.account();
+      await store.setEnabled(enabled: true, boundUserId: 'user-1');
+      await store.recordSyncSuccess(DateTime.utc(2026, 6, 30));
+
+      await store.withOutboxSuppressed(() async {
+        await DriftAssetRepository(db).saveArea(
+          id: 'area_first_floor',
+          name: 'First Floor',
+          kind: AreaKind.indoor,
+          sortOrder: 0,
+        );
+        await db
+            .into(db.rooms)
+            .insert(
+              RoomsCompanion.insert(
+                id: 'canonical-conflict-maintenance-room',
+                areaId: 'area_first_floor',
+                name: 'Canonical conflict maintenance room',
+              ),
+            );
+        await db
+            .into(db.assets)
+            .insert(
+              AssetsCompanion.insert(
+                id: 'canonical-conflict-maintenance-asset',
+                name: 'Canonical conflict maintenance asset',
+                categoryId: 'category_general',
+                roomId: 'canonical-conflict-maintenance-room',
+              ),
+            );
+        await db
+            .into(db.maintenancePlans)
+            .insert(
+              MaintenancePlansCompanion.insert(
+                id: 'canonical-conflict-maintenance-plan',
+                assetId: 'canonical-conflict-maintenance-asset',
+                title: 'Canonical conflict completion task',
+                recurrenceInterval: 1,
+                recurrenceUnit: 'months',
+                priority: 'medium',
+                nextDueDate: DateTime.utc(2026, 7),
+                healthGroup: 'other',
+              ),
+            );
+      });
+      await db.delete(db.syncOutbox).go();
+
+      final completed = await DriftMaintenanceRepository(db).completePlan(
+        'canonical-conflict-maintenance-plan',
+        completedAt: DateTime.utc(2026, 7),
+      );
+      expect(completed, isTrue);
+
+      final auth = _FakeAuthRepository(const AuthSession(userId: 'user-1'));
+      addTearDown(auth.controller.close);
+      final gateway = _StatefulGateway()
+        ..maintenanceConflictWithCanonicalPlan = true;
+      var reminderReconciliations = 0;
+      final coordinator = SyncCoordinator(
+        auth,
+        store,
+        gateway,
+        reconcileMaintenanceCompletionReminders: () async {
+          reminderReconciliations += 1;
+        },
+        listenToAuthChanges: false,
+      );
+      addTearDown(coordinator.dispose);
+
+      await expectLater(coordinator.syncNow(), throwsA(isA<SupabaseFailure>()));
+
+      expect(gateway.maintenanceCompletionCalls, 1);
+      expect(reminderReconciliations, 1);
+
+      final failedRows = await (db.select(
+        db.syncOutbox,
+      )..where((row) => row.entity.equals('maintenance_completion'))).get();
+      expect(failedRows.single.state, SyncMutationState.failedVisible.name);
+      expect(failedRows.single.lastErrorCode, 'occurrence_changed');
+
+      final plan =
+          await (db.select(db.maintenancePlans)..where(
+                (row) => row.id.equals('canonical-conflict-maintenance-plan'),
+              ))
+              .getSingle();
+      expect(plan.nextDueDate.toUtc(), DateTime.utc(2026, 7));
+    },
+  );
+
+  test(
+    'accepted maintenance completion clears pending work without a second push',
+    () async {
+      final db = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(db.close);
+
+      final store = LocalSyncStore(db);
+      await store.account();
+      await store.setEnabled(enabled: true, boundUserId: 'user-1');
+      await store.recordSyncSuccess(DateTime.utc(2026, 6, 30));
+
+      await store.withOutboxSuppressed(() async {
+        await DriftAssetRepository(db).saveArea(
+          id: 'area_first_floor',
+          name: 'First Floor',
+          kind: AreaKind.indoor,
+          sortOrder: 0,
+        );
+        await db
+            .into(db.rooms)
+            .insert(
+              RoomsCompanion.insert(
+                id: 'accepted-maintenance-room',
+                areaId: 'area_first_floor',
+                name: 'Accepted maintenance room',
+              ),
+            );
+        await db
+            .into(db.assets)
+            .insert(
+              AssetsCompanion.insert(
+                id: 'accepted-maintenance-asset',
+                name: 'Accepted maintenance asset',
+                categoryId: 'category_general',
+                roomId: 'accepted-maintenance-room',
+              ),
+            );
+        await db
+            .into(db.maintenancePlans)
+            .insert(
+              MaintenancePlansCompanion.insert(
+                id: 'accepted-maintenance-plan',
+                assetId: 'accepted-maintenance-asset',
+                title: 'Accepted completion task',
+                recurrenceInterval: 1,
+                recurrenceUnit: 'months',
+                priority: 'medium',
+                nextDueDate: DateTime.utc(2026, 7),
+                healthGroup: 'other',
+              ),
+            );
+      });
+      await db.delete(db.syncOutbox).go();
+
+      final completed = await DriftMaintenanceRepository(db).completePlan(
+        'accepted-maintenance-plan',
+        completedAt: DateTime.utc(2026, 7),
+      );
+      expect(completed, isTrue);
+
+      final queuedBeforeSync = await db.select(db.syncOutbox).get();
+      expect(
+        queuedBeforeSync
+            .where((row) => row.entity == 'maintenance_completion')
+            .toList(),
+        hasLength(1),
+      );
+      expect(
+        queuedBeforeSync.where(
+          (row) =>
+              row.entity == 'maintenance_plan' ||
+              row.entity == 'maintenance_record',
+        ),
+        isEmpty,
+      );
+
+      final auth = _FakeAuthRepository(const AuthSession(userId: 'user-1'));
+      addTearDown(auth.controller.close);
+      final gateway = _StatefulGateway();
+      var reminderReconciliations = 0;
+      final coordinator = SyncCoordinator(
+        auth,
+        store,
+        gateway,
+        reconcileMaintenanceCompletionReminders: () async {
+          reminderReconciliations += 1;
+        },
+        listenToAuthChanges: false,
+      );
+      addTearDown(coordinator.dispose);
+
+      await coordinator.syncNow();
+
+      expect(gateway.maintenanceCompletionCalls, 1);
+      expect(reminderReconciliations, 1);
+      expect(await store.pendingCount(), 0);
+      expect(await db.select(db.syncOutbox).get(), isEmpty);
+
+      await coordinator.syncNow();
+
+      expect(
+        gateway.maintenanceCompletionCalls,
+        1,
+        reason: 'accepted completion must not require another push',
+      );
+      expect(reminderReconciliations, 1);
+      expect(gateway.writeCalls['maintenance_plan'] ?? 0, 0);
+      expect(gateway.writeCalls['maintenance_record'] ?? 0, 0);
+      expect(await store.pendingCount(), 0);
+      expect(await db.select(db.syncOutbox).get(), isEmpty);
+    },
+  );
+
+  test(
+    'already-applied maintenance completion clears pending work after restart',
+    () async {
+      final db = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(db.close);
+
+      final store = LocalSyncStore(db);
+      await store.account();
+      await store.setEnabled(enabled: true, boundUserId: 'user-1');
+      await store.recordSyncSuccess(DateTime.utc(2026, 6, 30));
+
+      await store.withOutboxSuppressed(() async {
+        await DriftAssetRepository(db).saveArea(
+          id: 'area_first_floor',
+          name: 'First Floor',
+          kind: AreaKind.indoor,
+          sortOrder: 0,
+        );
+        await db
+            .into(db.rooms)
+            .insert(
+              RoomsCompanion.insert(
+                id: 'already-applied-maintenance-room',
+                areaId: 'area_first_floor',
+                name: 'Already applied maintenance room',
+              ),
+            );
+        await db
+            .into(db.assets)
+            .insert(
+              AssetsCompanion.insert(
+                id: 'already-applied-maintenance-asset',
+                name: 'Already applied maintenance asset',
+                categoryId: 'category_general',
+                roomId: 'already-applied-maintenance-room',
+              ),
+            );
+        await db
+            .into(db.maintenancePlans)
+            .insert(
+              MaintenancePlansCompanion.insert(
+                id: 'already-applied-maintenance-plan',
+                assetId: 'already-applied-maintenance-asset',
+                title: 'Already applied completion task',
+                recurrenceInterval: 1,
+                recurrenceUnit: 'months',
+                priority: 'medium',
+                nextDueDate: DateTime.utc(2026, 7),
+                healthGroup: 'other',
+              ),
+            );
+      });
+      await db.delete(db.syncOutbox).go();
+
+      final completed = await DriftMaintenanceRepository(db).completePlan(
+        'already-applied-maintenance-plan',
+        completedAt: DateTime.utc(2026, 7),
+      );
+      expect(completed, isTrue);
+
+      final mutation = (await store.pendingMutations()).singleWhere(
+        (item) => item.entity == 'maintenance_completion',
+      );
+      final account = await store.account();
+      final gateway = _StatefulGateway();
+
+      await gateway.completeMaintenance(
+        payloadJson: mutation.payloadJson!,
+        userId: 'user-1',
+        deviceId: account.deviceId,
+      );
+
+      final restartedStore = LocalSyncStore(db);
+      var reminderReconciliations = 0;
+      final auth = _FakeAuthRepository(const AuthSession(userId: 'user-1'));
+      addTearDown(auth.controller.close);
+      final coordinator = SyncCoordinator(
+        auth,
+        restartedStore,
+        gateway,
+        reconcileMaintenanceCompletionReminders: () async {
+          reminderReconciliations += 1;
+        },
+        listenToAuthChanges: false,
+      );
+      addTearDown(coordinator.dispose);
+
+      await coordinator.syncNow();
+
+      expect(gateway.maintenanceCompletionCalls, 2);
+      expect(reminderReconciliations, 1);
+      expect(await restartedStore.pendingCount(), 0);
+      expect(await db.select(db.syncOutbox).get(), isEmpty);
+
+      await coordinator.syncNow();
+
+      expect(gateway.maintenanceCompletionCalls, 2);
+      expect(reminderReconciliations, 1);
+      expect(gateway.writeCalls['maintenance_plan'] ?? 0, 0);
+      expect(gateway.writeCalls['maintenance_record'] ?? 0, 0);
+      expect(await restartedStore.pendingCount(), 0);
     },
   );
 

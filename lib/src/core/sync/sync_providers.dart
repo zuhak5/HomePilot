@@ -18,6 +18,11 @@ final syncConnectivityProvider = StreamProvider<bool>((ref) {
   return ref.watch(syncConnectivityInstanceProvider).watchOnline();
 });
 
+typedef MaintenanceCompletionReminderReconciler = Future<void> Function();
+
+final maintenanceCompletionReminderReconcilerProvider =
+    Provider<MaintenanceCompletionReminderReconciler?>((ref) => null);
+
 final syncCoordinatorProvider = Provider<SyncCoordinator?>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final authRepository = ref.watch(authRepositoryProvider);
@@ -33,6 +38,9 @@ final syncCoordinatorProvider = Provider<SyncCoordinator?>((ref) {
     connectivity: ref.watch(syncConnectivityInstanceProvider),
     realtime: gateway,
     configureBackgroundSync: configureCloudSyncBackgroundTask,
+    reconcileMaintenanceCompletionReminders: ref.watch(
+      maintenanceCompletionReminderReconcilerProvider,
+    ),
     autoEnableOnAuthChange: false,
   );
   ref.onDispose(coordinator.dispose);

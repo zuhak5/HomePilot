@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homepilot/src/core/data/repositories.dart';
 import 'package:homepilot/src/core/database/app_database.dart';
 import 'package:homepilot/src/core/domain/models.dart';
+import 'package:homepilot/src/core/services/reminder_schedule_reconciler.dart';
 import 'package:homepilot/src/core/sync/local_sync_store.dart';
 import 'package:homepilot/src/core/sync/sync_dtos.dart';
 
@@ -88,6 +91,121 @@ void main() {
       expect(persisted.state, SyncMutationState.conflictRecovery);
       expect(persisted.lastErrorCode, 'stale_plan_revision');
       expect(persisted.payloadJson, contains('"expected_plan_revision":7'));
+    },
+  );
+
+  test(
+    'rejected maintenance completion rolls back committed local state',
+    () async {
+      final repository = DriftAssetRepository(db);
+      await _seedTestAreas(db, store);
+      final roomId = await repository.saveRoom(
+        areaId: 'area_first_floor',
+        name: 'Maintenance rollback room',
+      );
+      final assetId = await repository.saveAsset(
+        name: 'Maintenance rollback asset',
+        categoryId: 'category_general',
+        roomId: roomId,
+      );
+
+      final initialDueDate = DateTime.utc(2026, 7, 28);
+      final initialUpdatedAt = DateTime.utc(2026, 7, 1, 8);
+      await store.withOutboxSuppressed(() async {
+        await db
+            .into(db.maintenancePlans)
+            .insert(
+              MaintenancePlansCompanion.insert(
+                id: 'rejected-maintenance-plan',
+                assetId: assetId,
+                title: 'Rejected completion task',
+                recurrenceInterval: 1,
+                recurrenceUnit: 'months',
+                priority: 'medium',
+                nextDueDate: initialDueDate,
+                reminderDaysBefore: const Value(1),
+                healthGroup: 'other',
+                updatedAt: Value(initialUpdatedAt),
+              ),
+            );
+      });
+      await db.delete(db.syncOutbox).go();
+
+      final initialReminder = ReminderScheduleEntry(
+        identity: 'task:rejected-maintenance-plan',
+        notificationId: 10123,
+        planRevision: initialUpdatedAt.toIso8601String(),
+        scheduledAt: DateTime.utc(2026, 7, 27, 9),
+        timezone: 'Asia/Baghdad',
+        localComponents: '2026-07-27T12:00:00',
+        scheduleMode: 'inexactAllowWhileIdle',
+        contentVersion: 'initial',
+      );
+      await DriftReminderScheduleStore(db).replaceAll([initialReminder]);
+
+      final maintenance = DriftMaintenanceRepository(
+        db,
+        now: () => DateTime.utc(2026, 7, 28, 9),
+      );
+      expect(
+        await maintenance.completePlan(
+          'rejected-maintenance-plan',
+          completedAt: initialDueDate,
+          expectedNextDueDate: initialDueDate,
+        ),
+        isTrue,
+      );
+
+      final mutation = (await store.pendingMutations()).singleWhere(
+        (item) => item.entity == 'maintenance_completion',
+      );
+      final queuedPayload =
+          jsonDecode(mutation.payloadJson!) as Map<String, dynamic>;
+      expect(queuedPayload['idempotency_key'], mutation.operationId);
+      expect(queuedPayload['expected_next_due_date'], isNotNull);
+      final preimage = queuedPayload['preimage'] as Map<String, dynamic>;
+      final preimagePlan = preimage['plan'] as Map<String, dynamic>;
+      expect(preimagePlan['next_due_date'], initialDueDate.toIso8601String());
+      expect(
+        await (db.select(
+          db.maintenanceRecords,
+        )..where((row) => row.id.equals(mutation.operationId))).get(),
+        hasLength(1),
+        reason: 'the current implementation is optimistic before sync',
+      );
+
+      await store.markMaintenanceCompletionFailedVisible(
+        mutation,
+        errorCode: 'occurrence_changed',
+        message: 'The maintenance plan changed on another device.',
+      );
+
+      final restoredPlan =
+          await (db.select(db.maintenancePlans)
+                ..where((row) => row.id.equals('rejected-maintenance-plan')))
+              .getSingle();
+      expect(restoredPlan.nextDueDate.toUtc(), initialDueDate);
+      expect(
+        await (db.select(
+          db.maintenanceRecords,
+        )..where((row) => row.id.equals(mutation.operationId))).get(),
+        isEmpty,
+      );
+
+      final failedRows = await (db.select(
+        db.syncOutbox,
+      )..where((row) => row.entity.equals('maintenance_completion'))).get();
+      final failed = failedRows.singleWhere(
+        (row) => row.recordKey == mutation.operationId,
+      );
+      expect(failed.state, SyncMutationState.failedVisible.name);
+      expect(failed.lastErrorCode, 'occurrence_changed');
+
+      final reminders = await DriftReminderScheduleStore(db).readAll();
+      expect(reminders, hasLength(1));
+      expect(reminders.single.identity, initialReminder.identity);
+      expect(reminders.single.scheduledAt.toUtc(), initialReminder.scheduledAt);
+      expect(reminders.single.planRevision, initialReminder.planRevision);
     },
   );
 

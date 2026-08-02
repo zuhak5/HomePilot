@@ -503,15 +503,14 @@ void main() {
     final streak = FakeStreakService();
     final task = _taskItem(DateTime(2026, 6, 28));
     final maintenance = FakeMaintenanceRepository(initialTasks: [task]);
+    final scheduler = FakeNotificationScheduler();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           maintenanceRepositoryProvider.overrideWithValue(maintenance),
           streakServiceProvider.overrideWithValue(streak),
-          notificationSchedulerProvider.overrideWithValue(
-            FakeNotificationScheduler(),
-          ),
+          notificationSchedulerProvider.overrideWithValue(scheduler),
         ],
         child: MaterialApp(
           theme: testLightTheme(),
@@ -539,10 +538,13 @@ void main() {
       hk_ui.kActionToastDuration,
     );
     expect(tester.widget<SnackBar>(find.byType(SnackBar)).persist, isFalse);
+    expect(scheduler.refreshCount, 0);
+    expect(scheduler.cancelled, isEmpty);
 
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
     expect(maintenance.undoCount, 1);
+    expect(scheduler.refreshCount, 1);
     expect(find.text('Completion undone.'), findsOneWidget);
   });
 

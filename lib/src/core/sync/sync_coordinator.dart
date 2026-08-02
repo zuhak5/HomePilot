@@ -19,11 +19,14 @@ class SyncCoordinator implements CloudSyncRepository {
     SyncConnectivity? connectivity,
     this._realtime,
     this.configureBackgroundSync,
+    Future<void> Function()? reconcileMaintenanceCompletionReminders,
     this.leaseScope = 'foreground',
     bool listenToAuthChanges = true,
-    this._autoEnableOnAuthChange = true,
+    this.autoEnableOnAuthChange = true,
     this.localFinalizationTimeout = const Duration(seconds: 8),
   }) : _connectivity = connectivity ?? const AlwaysOnlineSyncConnectivity(),
+       _maintenanceCompletionReminderReconciler =
+           reconcileMaintenanceCompletionReminders,
        _automaticSyncEnabled = connectivity != null || _realtime != null {
     _accountSubscription = _localStore.watchAccount().listen(
       (account) => _handleAccountChanged(account.enabled),
@@ -56,9 +59,10 @@ class SyncCoordinator implements CloudSyncRepository {
   final SyncConnectivity _connectivity;
   final RealtimeSyncSource? _realtime;
   final Future<void> Function(bool enabled)? configureBackgroundSync;
+  final Future<void> Function()? _maintenanceCompletionReminderReconciler;
   final String leaseScope;
   final bool _automaticSyncEnabled;
-  final bool _autoEnableOnAuthChange;
+  final bool autoEnableOnAuthChange;
   final Duration localFinalizationTimeout;
   final StreamController<SyncStatus> _statusController =
       StreamController<SyncStatus>.broadcast();
@@ -1107,6 +1111,9 @@ class SyncCoordinator implements CloudSyncRepository {
       plan: result.plan,
       record: result.record,
     );
+    if (result.plan != null) {
+      await _reconcileMaintenanceCompletionReminders(mutation);
+    }
     AppLogger.warning(
       'sync_maintenance_completion_failed_visible',
       fields: {
@@ -1141,6 +1148,7 @@ class SyncCoordinator implements CloudSyncRepository {
       plan: plan,
       record: record,
     );
+    await _reconcileMaintenanceCompletionReminders(mutation);
     AppLogger.info(
       'sync_maintenance_completion_acknowledged',
       fields: {
@@ -1149,6 +1157,26 @@ class SyncCoordinator implements CloudSyncRepository {
             result.status == MaintenanceCompletionStatus.alreadyApplied,
       },
     );
+  }
+
+  Future<void> _reconcileMaintenanceCompletionReminders(
+    LocalSyncMutation mutation,
+  ) async {
+    final reconcile = _maintenanceCompletionReminderReconciler;
+    if (reconcile == null) return;
+    try {
+      await reconcile();
+      AppLogger.info(
+        'sync_maintenance_completion_reminder_reconciled',
+        fields: {'operation': _diagnosticId(mutation.operationId)},
+      );
+    } on Object catch (error) {
+      AppLogger.warning(
+        'sync_maintenance_completion_reminder_reconciliation_failed',
+        error: error,
+        fields: {'operation': _diagnosticId(mutation.operationId)},
+      );
+    }
   }
 
   Future<MaintenanceCompletionResult> _recoverLegacyMaintenanceConflict(
@@ -1580,7 +1608,7 @@ class SyncCoordinator implements CloudSyncRepository {
       _phaseOverride = SyncPhase.initializing;
       _messageOverride = null;
       await _emit();
-      if (!_autoEnableOnAuthChange) return;
+      if (!autoEnableOnAuthChange) return;
       await enable();
       return;
     }
