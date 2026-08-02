@@ -162,6 +162,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Stop Gradle daemons before cache save
+        if: always()
+        shell: pwsh
+        run: |
+          Push-Location "android"
+
+          try {
+            & ".\gradlew.bat" --stop
+
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
+            }
+
+            Start-Sleep -Seconds 2
+          }
+          finally {
+            Pop-Location
+          }
+
       - name: Remove temporary credentials
         if: always()
         shell: pwsh
