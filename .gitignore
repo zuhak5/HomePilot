@@ -73,7 +73,6 @@ app.*.map.json
 !/config/*.example.json
 /.env
 /.env.*
-!/.env.example
 /supabase/.env
 !/supabase/.env.example
 
