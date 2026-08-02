@@ -1,24 +1,33 @@
 {
   "id": "./",
-  "name": "HomePilot Android Releases",
-  "short_name": "HomePilot",
+  "name": "VersionDeck — HomePilot Releases",
+  "short_name": "VersionDeck",
   "description": "Official signed HomePilot APK releases, changelogs, and checksums.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#07101f",
-  "theme_color": "#0b1220",
-  "categories": ["utilities", "productivity", "lifestyle"],
+  "background_color": "#f7f7f5",
+  "theme_color": "#111827",
+  "categories": [
+    "utilities",
+    "productivity"
+  ],
   "icons": [
     {
-      "src": "assets/homepilot-app-icon.png",
-      "sizes": "604x604",
+      "src": "assets/versiondeck-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "assets/homepilot-mark.svg",
+      "src": "assets/versiondeck-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/versiondeck-mark.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
@@ -26,16 +35,28 @@
   ],
   "shortcuts": [
     {
-      "name": "Latest APK",
-      "short_name": "Download",
+      "name": "Latest HomePilot APK",
+      "short_name": "Latest APK",
       "url": "./#latest-heading",
-      "icons": [{ "src": "assets/homepilot-app-icon.png", "sizes": "604x604", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/versiondeck-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
-      "name": "Release archive",
-      "short_name": "Releases",
+      "name": "HomePilot version archive",
+      "short_name": "Versions",
       "url": "./#releases",
-      "icons": [{ "src": "assets/homepilot-app-icon.png", "sizes": "604x604", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/versiondeck-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

@@ -1,4 +1,4 @@
-name: Deploy Download PWA
+name: Deploy VersionDeck
 
 on:
   push:
@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Publish HomePilot release hub
+    name: Publish VersionDeck
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -33,10 +33,7 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Copy production app icon
-        run: cp assets/brand/homepilot-app-icon.png download-site/assets/homepilot-app-icon.png
-
-      - name: Upload PWA artifact
+      - name: Upload VersionDeck artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: download-site
