@@ -86,7 +86,7 @@ The production config must provide `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, a
 
 - App name: `HomePilot`
 - Android application id: `com.homepilot.app`
-- Current version: `1.3.0+15`
+- Current version: `1.3.1+16`
 - Primary backend: Supabase Auth, Postgres, Realtime, and private Storage
 - Local store: temporary authenticated Drift/SQLite cache and offline mutation queue
 
