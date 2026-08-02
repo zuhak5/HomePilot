@@ -233,6 +233,8 @@ h3 {
 }
 
 .button {
+  min-width: 0;
+  max-width: 100%;
   min-height: 46px;
   display: inline-flex;
   align-items: center;
@@ -275,6 +277,7 @@ h3 {
 
 .latest-card {
   min-height: 292px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: clamp(24px, 5vw, 42px);
@@ -287,6 +290,15 @@ h3 {
   grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
   align-items: end;
   gap: 38px;
+}
+
+.latest-layout > * {
+  min-width: 0;
+}
+
+.latest-actions {
+  width: 100%;
+  min-width: 0;
 }
 
 .latest-status {
@@ -330,6 +342,7 @@ h3 {
 
 .latest-summary {
   max-width: 620px;
+  overflow-wrap: anywhere;
   margin: 17px 0 0;
   color: var(--muted);
 }
@@ -361,6 +374,7 @@ h3 {
 }
 
 .checksum {
+  max-width: 100%;
   margin-top: 22px;
   display: flex;
   align-items: center;
@@ -393,7 +407,7 @@ h3 {
 }
 
 .releases-section {
-  padding-block: 54px 80px;
+  padding-block: 40px 72px;
 }
 
 .archive-header {
@@ -701,11 +715,11 @@ h3 {
   }
 
   .hero {
-    padding-block: 64px 40px;
+    padding-block: 48px 30px;
   }
 
   h1 {
-    font-size: clamp(3.2rem, 17vw, 5rem);
+    font-size: clamp(3rem, 15vw, 4.5rem);
   }
 
   .latest-section {
@@ -719,7 +733,7 @@ h3 {
   }
 
   .latest-actions {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .release-row {

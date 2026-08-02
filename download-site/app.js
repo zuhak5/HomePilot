@@ -78,8 +78,16 @@
       ?.toLowerCase() || "";
   }
 
+  function normalizeMarkdown(value) {
+    return (value || "")
+      .replace(/\s+(#{1,4})\s+/g, "\n$1 ")
+      .replace(/\s+\*\s+(?=[A-Z0-9])/g, "\n* ")
+      .replace(/\s+-\s+(?=[A-Z0-9])/g, "\n- ")
+      .trim();
+  }
+
   function changelogBody(release) {
-    return (release.body || "")
+    return normalizeMarkdown(release.body || "")
       .replace(/##\s*Build details[\s\S]*/i, "")
       .replace(/##\s*What's changed/i, "")
       .trim();
@@ -92,12 +100,17 @@
       return "Signed production build of HomePilot for Android.";
     }
 
-    return body
+    const ignored = /^(included|notes|changes|what's changed|build details)$/i;
+
+    const parts = body
       .split(/\r?\n/)
       .map((line) => line.replace(/^[-*#\s]+/, "").trim())
       .filter(Boolean)
-      .slice(0, 2)
-      .join(" ")
+      .filter((line) => !ignored.test(line))
+      .filter((line) => !/^HomePilot\s+\d/i.test(line));
+
+    return (parts.slice(0, 2).join(" ") ||
+      "Signed production build of HomePilot for Android.")
       .slice(0, 220);
   }
 
@@ -132,7 +145,9 @@
   function renderMarkdown(container, markdown) {
     container.replaceChildren();
 
-    const source = (markdown || "No changelog was supplied.")
+    const source = normalizeMarkdown(
+      markdown || "No changelog was supplied.",
+    )
       .replace(/##\s*Build details[\s\S]*/i, "")
       .replace(/##\s*What's changed/i, "")
       .trim();
