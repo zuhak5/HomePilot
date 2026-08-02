@@ -1,0 +1,11 @@
+{
+  "name": "homepilot-tooling",
+  "private": true,
+  "scripts": {
+    "supabase:lint": "supabase db lint --local --level error --fail-on error",
+    "supabase:test": "supabase test db --local supabase/tests/database"
+  },
+  "devDependencies": {
+    "supabase": "^2.109.1"
+  }
+}

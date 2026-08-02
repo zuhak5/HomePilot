@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="homepilot_ad_surface">#101F18</color>
+    <color name="homepilot_ad_border">#234034</color>
+    <color name="homepilot_ad_primary">#54DA88</color>
+    <color name="homepilot_ad_text_primary">#F4F8F5</color>
+    <color name="homepilot_ad_text_secondary">#AAB8B0</color>
+</resources>

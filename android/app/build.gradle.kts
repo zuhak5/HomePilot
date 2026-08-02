@@ -1,0 +1,158 @@
+import java.util.Properties
+import java.util.Base64
+import java.nio.charset.StandardCharsets
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val productionBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("Prod", ignoreCase = true)
+}
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+fun keystoreProperty(name: String): String =
+    keystoreProperties.getProperty(name)
+        ?: error("Missing Android release signing property '$name' in android/key.properties")
+
+fun productionDartDefines(): Map<String, String> {
+    val encodedDefines = providers.gradleProperty("dart-defines").orNull
+        ?: return emptyMap()
+    return encodedDefines
+        .split(",")
+        .mapNotNull { encoded ->
+            runCatching {
+                String(
+                    Base64.getDecoder().decode(encoded),
+                    StandardCharsets.UTF_8,
+                )
+            }.getOrNull()
+        }
+        .mapNotNull { definition ->
+            val separator = definition.indexOf('=')
+            if (separator <= 0) {
+                null
+            } else {
+                definition.substring(0, separator) to definition.substring(separator + 1)
+            }
+        }
+        .toMap()
+}
+
+plugins {
+    id("com.android.application")
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
+android {
+    namespace = "com.homepilot.app"
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
+
+    sourceSets {
+        getByName("main") {
+            java.setSrcDirs(listOf("src/main/kotlin"))
+        }
+    }
+
+    buildFeatures {
+        resValues = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    defaultConfig {
+        applicationId = "com.homepilot.app"
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "HomePilot Dev")
+        }
+        create("staging") {
+            dimension = "environment"
+            applicationIdSuffix = ".staging"
+            versionNameSuffix = "-staging"
+            resValue("string", "app_name", "HomePilot Staging")
+        }
+        create("prod") {
+            dimension = "environment"
+            resValue("string", "app_name", "HomePilot")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperty("keyAlias")
+            keyPassword = keystoreProperty("keyPassword")
+            storeFile = file(keystoreProperty("storeFile"))
+            storePassword = keystoreProperty("storePassword")
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
+    lint {
+        checkReleaseBuilds = false
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    implementation("androidx.core:core:1.18.0")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+}
+
+tasks.configureEach {
+    if (name.startsWith("preProd") && name.endsWith("Build")) {
+        doFirst {
+            if (!productionBuildRequested) {
+                return@doFirst
+            }
+            val defines = productionDartDefines()
+            check(defines["APP_ENV"] == "prod") {
+                "Production builds require APP_ENV=prod. " +
+                    "Use --dart-define-from-file=config/prod.json."
+            }
+            check(!defines["SUPABASE_URL"].isNullOrBlank()) {
+                "Production builds require SUPABASE_URL."
+            }
+            check(!defines["SUPABASE_PUBLISHABLE_KEY"].isNullOrBlank()) {
+                "Production builds require SUPABASE_PUBLISHABLE_KEY."
+            }
+            check(!defines["GOOGLE_WEB_CLIENT_ID"].isNullOrBlank()) {
+                "Production builds require GOOGLE_WEB_CLIENT_ID for native Google sign-in."
+            }
+        }
+    }
+}
