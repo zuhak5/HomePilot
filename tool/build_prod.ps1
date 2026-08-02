@@ -145,7 +145,15 @@ try {
     Initialize-BuildWorkspace
     Invoke-Flutter -Arguments @('analyze', '--no-pub')
     if (-not $SkipTests) {
-        Invoke-Flutter -Arguments @('test', '--no-pub', '--concurrency=1', '--timeout', '2m')
+        Invoke-Flutter -Arguments @(
+            'test',
+            '--no-pub',
+            '--concurrency=1',
+            '--timeout',
+            '2m',
+            '--exclude-tags',
+            'production-config'
+        )
         Invoke-Flutter -Arguments (@(
             'test',
             '--no-pub',

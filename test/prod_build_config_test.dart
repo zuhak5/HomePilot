@@ -17,6 +17,7 @@ void main() {
       expect(config.supabasePublishableKey, startsWith('sb_publishable_'));
       expect(config.googleWebClientId, endsWith('.apps.googleusercontent.com'));
     },
+    tags: 'production-config',
     skip: verifyProductionConfig
         ? false
         : 'Run with config/prod.json to validate production packaging.',
