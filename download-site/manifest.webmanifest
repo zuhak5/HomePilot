@@ -1,0 +1,41 @@
+{
+  "id": "./",
+  "name": "HomePilot Android Releases",
+  "short_name": "HomePilot",
+  "description": "Official signed HomePilot APK releases, changelogs, and checksums.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#07101f",
+  "theme_color": "#0b1220",
+  "categories": ["utilities", "productivity", "lifestyle"],
+  "icons": [
+    {
+      "src": "assets/homepilot-app-icon.png",
+      "sizes": "604x604",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/homepilot-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Latest APK",
+      "short_name": "Download",
+      "url": "./#latest-heading",
+      "icons": [{ "src": "assets/homepilot-app-icon.png", "sizes": "604x604", "type": "image/png" }]
+    },
+    {
+      "name": "Release archive",
+      "short_name": "Releases",
+      "url": "./#releases",
+      "icons": [{ "src": "assets/homepilot-app-icon.png", "sizes": "604x604", "type": "image/png" }]
+    }
+  ]
+}
