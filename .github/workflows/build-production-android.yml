@@ -2,6 +2,11 @@ name: Build Production APK
 
 on:
   workflow_dispatch:
+    inputs:
+      changelog:
+        description: "Release changelog in Markdown"
+        required: true
+        type: string
 
 jobs:
   build-production-apk:
@@ -11,7 +16,7 @@ jobs:
     environment: production
 
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Check out repository
@@ -154,6 +159,80 @@ jobs:
             -Algorithm SHA256 |
             Format-List
 
+      - name: Prepare release files
+        id: release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $VersionLine = Get-Content "pubspec.yaml" |
+            Where-Object { $_ -match '^version:\s*' } |
+            Select-Object -First 1
+
+          if (-not $VersionLine) {
+            throw "Version was not found in pubspec.yaml."
+          }
+
+          $VersionValue = (
+            $VersionLine -replace '^version:\s*', ''
+          ).Trim()
+
+          if ($VersionValue -notmatch '^(.+)\+(\d+)$') {
+            throw "Expected version format x.y.z+build, got: $VersionValue"
+          }
+
+          $VersionName = $Matches[1]
+          $BuildNumber = $Matches[2]
+          $Tag = "v$VersionName-build.$BuildNumber"
+          $ReleaseName = "HomePilot $VersionName (Build $BuildNumber)"
+          $ApkName = "HomePilot-$VersionName-build-$BuildNumber.apk"
+
+          $SourceApk = Join-Path `
+            $PWD `
+            "build\app\outputs\flutter-apk\app-release.apk"
+
+          $ReleaseDirectory = Join-Path $PWD "release"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $ReleaseDirectory `
+            -Force |
+            Out-Null
+
+          $ReleaseApk = Join-Path `
+            $ReleaseDirectory `
+            $ApkName
+
+          Copy-Item `
+            -LiteralPath $SourceApk `
+            -Destination $ReleaseApk `
+            -Force
+
+          $Hash = (
+            Get-FileHash `
+              -LiteralPath $ReleaseApk `
+              -Algorithm SHA256
+          ).Hash.ToLowerInvariant()
+
+          $ChecksumFile = "$ReleaseApk.sha256"
+
+          "$Hash  $ApkName" |
+            Set-Content `
+              -LiteralPath $ChecksumFile `
+              -Encoding utf8NoBOM
+
+          "version_name=$VersionName" >> $env:GITHUB_OUTPUT
+          "build_number=$BuildNumber" >> $env:GITHUB_OUTPUT
+          "tag=$Tag" >> $env:GITHUB_OUTPUT
+          "release_name=$ReleaseName" >> $env:GITHUB_OUTPUT
+          "apk_name=$ApkName" >> $env:GITHUB_OUTPUT
+          "apk_path=$ReleaseApk" >> $env:GITHUB_OUTPUT
+          "checksum_path=$ChecksumFile" >> $env:GITHUB_OUTPUT
+          "sha256=$Hash" >> $env:GITHUB_OUTPUT
+
+          Get-Item $ReleaseApk, $ChecksumFile |
+            Select-Object FullName, Length
+
       - name: Upload production APK
         uses: actions/upload-artifact@v7
         with:
@@ -161,6 +240,74 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGELOG: ${{ inputs.changelog }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_NAME: ${{ steps.release.outputs.release_name }}
+          VERSION_NAME: ${{ steps.release.outputs.version_name }}
+          BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
+          APK_NAME: ${{ steps.release.outputs.apk_name }}
+          APK_PATH: ${{ steps.release.outputs.apk_path }}
+          CHECKSUM_PATH: ${{ steps.release.outputs.checksum_path }}
+          APK_SHA256: ${{ steps.release.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:CHANGELOG)) {
+            throw "The release changelog cannot be empty."
+          }
+
+          & gh release view `
+            $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY *> $null
+
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release already exists: $env:RELEASE_TAG"
+          }
+
+          $NotesPath = Join-Path `
+            $PWD `
+            "release\release-notes.md"
+
+          $Notes = @"
+          ## What's changed
+
+          $env:CHANGELOG
+
+          ## Build details
+
+          - Version: $env:VERSION_NAME
+          - Build: $env:BUILD_NUMBER
+          - File: $env:APK_NAME
+          - SHA-256: ``$env:APK_SHA256``
+          "@
+
+          $Utf8NoBom = New-Object `
+            System.Text.UTF8Encoding($false)
+
+          [System.IO.File]::WriteAllText(
+            $NotesPath,
+            $Notes,
+            $Utf8NoBom
+          )
+
+          & gh release create `
+            $env:RELEASE_TAG `
+            $env:APK_PATH `
+            $env:CHECKSUM_PATH `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title $env:RELEASE_NAME `
+            --notes-file $NotesPath `
+            --latest
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release creation failed."
+          }
 
       - name: Stop Gradle daemons before cache save
         if: always()
