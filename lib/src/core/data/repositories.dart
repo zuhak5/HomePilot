@@ -1758,8 +1758,27 @@ class DriftMaintenanceRepository
       final payload = jsonEncode({
         'version': 1,
         'operation_id': completionId,
+        'idempotency_key': completionId,
         'expected_plan_revision': planShadow?.remoteRevision,
         'expected_next_due_date': previousDueDate.toUtc().toIso8601String(),
+        'preimage': {
+          'plan': {
+            'id': plan.id,
+            'asset_id': plan.assetId,
+            'title': plan.title,
+            'instructions': plan.instructions,
+            'recurrence_interval': plan.recurrenceInterval,
+            'recurrence_unit': plan.recurrenceUnit,
+            'priority': plan.priority,
+            'next_due_date': previousDueDate.toUtc().toIso8601String(),
+            'reminder_days_before': plan.reminderDaysBefore,
+            'is_enabled': plan.isEnabled,
+            'health_group': plan.healthGroup,
+            'created_at': plan.createdAt.toUtc().toIso8601String(),
+            'updated_at': plan.updatedAt.toUtc().toIso8601String(),
+            'archived_at': plan.archivedAt?.toUtc().toIso8601String(),
+          },
+        },
         'plan': {
           'id': plan.id,
           'asset_id': plan.assetId,

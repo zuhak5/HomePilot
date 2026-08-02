@@ -194,6 +194,13 @@ class _HomePilotBootstrapState extends State<HomePilotBootstrap> {
               localSyncStoreProvider.overrideWithValue(
                 LocalSyncStore(database),
               ),
+              maintenanceCompletionReminderReconcilerProvider.overrideWith(
+                (ref) => () async {
+                  await ref
+                      .read(notificationSchedulerProvider)
+                      .refreshSchedules();
+                },
+              ),
               accountDeletionLocalCleanupProvider.overrideWithValue(
                 (userId) => LocalAccountDataCleaner(
                   LocalSyncStore(database),
@@ -13602,8 +13609,6 @@ Future<bool> completeTaskWithFeedback(
   if (!_prefersReducedMotion(context)) {
     await Future<void>.delayed(const Duration(milliseconds: 450));
   }
-  await cancelPlanReminderSchedules(ref, [task.plan.id]);
-  await refreshNotificationSchedules(ref);
   if (!context.mounted) {
     return true;
   }

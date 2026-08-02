@@ -7,13 +7,28 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 val productionBuildRequested = gradle.startParameter.taskNames.any { taskName ->
     taskName.contains("Prod", ignoreCase = true)
 }
+val releaseSigningRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("Release", ignoreCase = true) ||
+        taskName.contains("Prod", ignoreCase = true)
+}
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
-fun keystoreProperty(name: String): String =
-    keystoreProperties.getProperty(name)
-        ?: error("Missing Android release signing property '$name' in android/key.properties")
+val releaseSigningPropertyNames =
+    listOf("keyAlias", "keyPassword", "storeFile", "storePassword")
+val releaseSigningConfigured = releaseSigningPropertyNames.all { name ->
+    !keystoreProperties.getProperty(name).isNullOrBlank()
+}
+
+if (releaseSigningRequested && !releaseSigningConfigured) {
+    val missing = releaseSigningPropertyNames
+        .filter { name -> keystoreProperties.getProperty(name).isNullOrBlank() }
+        .joinToString()
+    error("Missing Android release signing properties in android/key.properties: $missing")
+}
+
+fun keystoreProperty(name: String): String = keystoreProperties.getProperty(name)
 
 fun productionDartDefines(): Map<String, String> {
     val encodedDefines = providers.gradleProperty("dart-defines").orNull
@@ -95,17 +110,21 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperty("keyAlias")
-            keyPassword = keystoreProperty("keyPassword")
-            storeFile = file(keystoreProperty("storeFile"))
-            storePassword = keystoreProperty("storePassword")
+        if (releaseSigningConfigured) {
+            create("release") {
+                keyAlias = keystoreProperty("keyAlias")
+                keyPassword = keystoreProperty("keyPassword")
+                storeFile = file(keystoreProperty("storeFile"))
+                storePassword = keystoreProperty("storePassword")
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
