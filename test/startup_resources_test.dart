@@ -429,10 +429,18 @@ void main() {
     expect(lockfile, isNot(contains('\n  jni_util:')));
 
     for (final mode in ['debug', 'profile', 'release']) {
-      final registrant = File(
+      final registrantFile = File(
         'android/app/src/$mode/java/io/flutter/plugins/'
         'GeneratedPluginRegistrant.java',
-      ).readAsStringSync();
+      );
+
+      // Generated plugin registrants are ignored and may not exist in a
+      // clean checkout until Flutter performs an Android build.
+      if (!registrantFile.existsSync()) {
+        continue;
+      }
+
+      final registrant = registrantFile.readAsStringSync();
       expect(
         registrant,
         contains('new io.flutter.plugins.pathprovider.PathProviderPlugin()'),
