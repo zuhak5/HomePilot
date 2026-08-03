@@ -398,7 +398,8 @@ const syncEntitySpecs = <SyncEntitySpec>[
         "key IN ('theme', 'app_language', 'app_language_explicit', 'theme_time_of_day_enabled', "
         "'notifications_enabled', "
         "'notification_preferences', 'onboarding_completed', "
-        "'permission_education_seen', 'home_location')",
+        "'permission_education_seen', 'permission_education_seen_v2', "
+        "'home_location')",
   ),
   SyncEntitySpec(
     entity: 'streak',

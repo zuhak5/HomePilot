@@ -803,7 +803,7 @@ void main() {
             .having(
               (item) => item.recordKey,
               'record key',
-              'permission_education_seen',
+              'permission_education_seen_v2',
             )
             .having((item) => item.operation, 'operation', 'upsert'),
       ),
@@ -811,6 +811,10 @@ void main() {
     expect(
       syncSpecByEntity['user_setting']!.localWhere,
       contains("'permission_education_seen'"),
+    );
+    expect(
+      syncSpecByEntity['user_setting']!.localWhere,
+      contains("'permission_education_seen_v2'"),
     );
   });
 

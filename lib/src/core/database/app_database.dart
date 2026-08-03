@@ -940,6 +940,7 @@ SET
             "'theme_time_of_day_enabled', "
             "'notifications_enabled', 'notification_preferences', "
             "'onboarding_completed', 'permission_education_seen', "
+            "'permission_education_seen_v2', "
             "'home_location')",
       );
       await _enqueueV8Snapshot(
@@ -1315,7 +1316,8 @@ WHERE id = 1
         "'theme', 'app_language', 'app_language_explicit', 'theme_time_of_day_enabled', "
         "'notifications_enabled', "
         "'notification_preferences', 'onboarding_completed', "
-        "'permission_education_seen', 'home_location'";
+        "'permission_education_seen', 'permission_education_seen_v2', "
+        "'home_location'";
     const deviceSettingKeys = "'weather_cache'";
     for (final (entity, keys) in [
       ('user_setting', userSettingKeys),
@@ -1528,6 +1530,11 @@ END
         ),
         SettingsCompanion.insert(
           key: 'permission_education_seen',
+          value: 'false',
+          updatedAt: Value(now),
+        ),
+        SettingsCompanion.insert(
+          key: 'permission_education_seen_v2',
           value: 'false',
           updatedAt: Value(now),
         ),

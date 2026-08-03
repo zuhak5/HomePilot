@@ -2467,6 +2467,10 @@ const _seedValues = <String, Map<String, Map<String, Object?>>>{
       'key': 'permission_education_seen',
       'value': 'false',
     },
+    'permission_education_seen_v2': {
+      'key': 'permission_education_seen_v2',
+      'value': 'false',
+    },
   },
   'streak': {
     'default': {
