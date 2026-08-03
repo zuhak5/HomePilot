@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/observability/sentry_logger_bridge.dart';
+import '../../../core/observability/sentry_scope.dart';
+import '../../../core/observability/sentry_tracing.dart';
 import '../../../core/supabase/supabase_failure.dart';
 import '../domain/auth_repository.dart';
 import 'native_google_sign_in.dart';
@@ -29,6 +34,7 @@ class SupabaseAuthRepository implements AuthRepository {
       event: AuthEventType.initialSession,
       session: currentSession,
     );
+    unawaited(_recordAuthState(previous));
     yield previous;
     await for (final state in _client.auth.onAuthStateChange) {
       final next = AuthStateChange(
@@ -36,6 +42,7 @@ class SupabaseAuthRepository implements AuthRepository {
         session: _sessionFromSupabase(state.session),
       );
       if (!next.hasSameIdentityAndEvent(previous)) {
+        unawaited(_recordAuthState(next));
         yield next;
       }
       previous = next;
@@ -45,13 +52,45 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<void> signInWithGoogle() async {
     try {
-      final tokens = await _googleSignIn.signIn();
-      await _client.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: tokens.idToken,
-        accessToken: tokens.accessToken,
+      await traceHomePilotOperation<void>(
+        'auth.google_sign_in',
+        () async {
+          final tokens = await _googleSignIn.signIn();
+          await traceHomePilotOperation<void>(
+            'auth.supabase_token_exchange',
+            () async {
+              await _client.auth.signInWithIdToken(
+                provider: OAuthProvider.google,
+                idToken: tokens.idToken,
+                accessToken: tokens.accessToken,
+              );
+            },
+            attributes: const {
+              'provider': 'google',
+              'execution': 'main',
+            },
+          );
+        },
+        attributes: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
       );
-    } on Object catch (error) {
+      await setSentryAuthenticated(
+        authenticated: true,
+        event: 'auth.signed_in',
+      );
+    } on Object catch (error, stackTrace) {
+      final failure = SupabaseFailure.from(error);
+      reportOperationFailure(
+        operation: 'auth_google_sign_in_failed',
+        error: failure,
+        stackTrace: stackTrace,
+        fields: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
+      );
       await _throwAuthFailure(error);
     }
   }
@@ -59,17 +98,63 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<void> signOut({bool allDevices = false}) async {
     try {
-      await _client.auth.signOut(
-        scope: allDevices ? SignOutScope.global : SignOutScope.local,
+      await traceHomePilotOperation<void>(
+        'auth.sign_out',
+        () async {
+          await _client.auth.signOut(
+            scope: allDevices ? SignOutScope.global : SignOutScope.local,
+          );
+          await _googleSignIn.signOut();
+        },
+        attributes: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
       );
-      await _googleSignIn.signOut();
-    } on Object catch (error) {
-      throw SupabaseFailure.from(error);
+      await clearSentryAccountScope(event: 'auth.signed_out');
+    } on Object catch (error, stackTrace) {
+      final failure = SupabaseFailure.from(error);
+      reportOperationFailure(
+        operation: 'auth_sign_out_failed',
+        error: failure,
+        stackTrace: stackTrace,
+        fields: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
+      );
+      throw failure;
     }
   }
 
   @override
   Future<void> deleteAccount() async {
+    try {
+      await traceHomePilotOperation<void>(
+        'auth.account_delete',
+        _deleteAccount,
+        attributes: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
+      );
+      await clearSentryAccountScope(event: 'auth.account_deleted');
+    } on Object catch (error, stackTrace) {
+      final failure = SupabaseFailure.from(error);
+      reportOperationFailure(
+        operation: 'auth_account_delete_failed',
+        error: failure,
+        stackTrace: stackTrace,
+        fields: const {
+          'provider': 'google',
+          'execution': 'main',
+        },
+      );
+      throw failure;
+    }
+  }
+
+  Future<void> _deleteAccount() async {
     var cloudDeleted = false;
     var deletionPrepared = false;
     String? originalUserId;
@@ -125,7 +210,11 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
       try {
-        await onAccountDeleted(originalUserId);
+        await traceHomePilotOperation<void>(
+          'auth.account_delete.local_cleanup',
+          () async => onAccountDeleted(originalUserId!),
+          attributes: const {'execution': 'main'},
+        );
       } on Object {
         throw const SupabaseFailure(
           kind: SupabaseFailureKind.unknown,
@@ -168,7 +257,13 @@ class SupabaseAuthRepository implements AuthRepository {
   Future<void> _cancelPreparedDeletion(String userId) async {
     try {
       await onAccountDeletionCancelled(userId);
-    } on Object {
+    } on Object catch (error, stackTrace) {
+      reportOperationFailure(
+        operation: 'auth_account_delete_cancel_cleanup_failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: const {'execution': 'main'},
+      );
       // Preserve the original remote deletion failure for the caller.
     }
   }
@@ -184,6 +279,11 @@ class SupabaseAuthRepository implements AuthRepository {
     } on Object {
       // Supabase recovery must not depend on Google cleanup.
     }
+    try {
+      await clearSentryAccountScope(event: 'auth.signed_out');
+    } on Object {
+      // Observability must never prevent local authentication cleanup.
+    }
   }
 
   Future<Never> _throwAuthFailure(Object error) async {
@@ -198,8 +298,35 @@ class SupabaseAuthRepository implements AuthRepository {
       } on Object {
         // Supabase recovery must not depend on Google cleanup.
       }
+      try {
+        await clearSentryAccountScope(event: 'auth.signed_out');
+      } on Object {
+        // Observability must never block session recovery.
+      }
     }
     throw SupabaseFailure.from(error);
+  }
+
+  Future<void> _recordAuthState(AuthStateChange state) async {
+    final event = switch (state.event) {
+      AuthEventType.initialSession => 'auth.initial_session',
+      AuthEventType.signedIn => 'auth.signed_in',
+      AuthEventType.signedOut => 'auth.signed_out',
+      AuthEventType.tokenRefreshed => 'auth.token_refreshed',
+      AuthEventType.userDeleted => 'auth.account_deleted',
+      _ => 'auth.state_changed',
+    };
+    try {
+      if (state.session == null ||
+          state.event == AuthEventType.signedOut ||
+          state.event == AuthEventType.userDeleted) {
+        await clearSentryAccountScope(event: event);
+      } else {
+        await setSentryAuthenticated(authenticated: true, event: event);
+      }
+    } on Object {
+      // Scope updates are best-effort and must not affect auth state delivery.
+    }
   }
 }
 
