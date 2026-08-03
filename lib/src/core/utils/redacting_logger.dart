@@ -13,6 +13,8 @@ class AppDiagnosticEvent {
     required this.runId,
     required this.fields,
     this.errorType,
+    this.error,
+    this.stackTrace,
   });
 
   final DateTime timestamp;
@@ -21,6 +23,8 @@ class AppDiagnosticEvent {
   final String runId;
   final Map<String, Object?> fields;
   final String? errorType;
+  final Object? error;
+  final StackTrace? stackTrace;
 
   Map<String, Object?> toJson() => {
     'timestamp': timestamp.toUtc().toIso8601String(),
@@ -46,9 +50,10 @@ abstract final class AppLogger {
   static void warning(
     String event, {
     Object? error,
+    StackTrace? stackTrace,
     Map<String, Object?> fields = const {},
   }) {
-    _write('WARN', event, error: error, fields: fields);
+    _write('WARN', event, error: error, stackTrace: stackTrace, fields: fields);
   }
 
   static List<AppDiagnosticEvent> snapshot({bool errorsOnly = false}) {
@@ -74,6 +79,7 @@ abstract final class AppLogger {
     String level,
     String event, {
     Object? error,
+    StackTrace? stackTrace,
     required Map<String, Object?> fields,
   }) {
     final safeEvent = _safeToken(event);
@@ -91,6 +97,8 @@ abstract final class AppLogger {
       runId: runId,
       fields: safeFields,
       errorType: error?.runtimeType.toString(),
+      error: error,
+      stackTrace: stackTrace,
     );
     _events.add(diagnostic);
     if (_events.length > maximumRetainedEvents) {

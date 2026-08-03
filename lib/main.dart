@@ -19,6 +19,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -32,6 +33,9 @@ import 'src/core/domain/feature_models.dart' as features;
 import 'src/core/domain/models.dart';
 import 'src/core/domain/render_fingerprints.dart';
 import 'src/core/domain/task_selectors.dart';
+import 'src/core/observability/observability_config.dart';
+import 'src/core/observability/sentry_bootstrap.dart';
+import 'src/core/observability/sentry_navigation.dart';
 import 'src/core/services/action_feedback_service.dart';
 import 'src/core/services/feedback_messenger.dart';
 import 'src/core/services/app_permission_coordinator.dart';
@@ -371,24 +375,50 @@ Future<void> _removeUnsupportedCloudSession(
 
 Future<void> main() async {
   final startupClock = Stopwatch()..start();
-  WidgetsFlutterBinding.ensureInitialized();
+  SentryWidgetsFlutterBinding.ensureInitialized();
   await configurePreferredOrientations();
   late final AppConfig config;
   try {
     config = AppConfig.fromEnvironment();
-  } on AppConfigException catch (error) {
-    AppLogger.warning('startup_configuration', error: error);
+  } on AppConfigException catch (error, stackTrace) {
+    AppLogger.warning(
+      'startup_configuration',
+      error: error,
+      stackTrace: stackTrace,
+    );
     runApp(const HomePilotStartupFailure());
     return;
   }
-  final database = AppDatabase();
-  runApp(
-    _DeferredHomePilotBootstrap(
-      database: database,
-      config: config,
-      elapsedBeforeFirstFrame: startupClock.elapsed,
-    ),
-  );
+
+  Future<void> runHomePilot() async {
+    final database = AppDatabase();
+    runApp(
+      _DeferredHomePilotBootstrap(
+        database: database,
+        config: config,
+        elapsedBeforeFirstFrame: startupClock.elapsed,
+      ),
+    );
+  }
+
+  try {
+    final observability = await ObservabilityConfig.fromAppConfig(config);
+    if (!observability.enabled) {
+      await runHomePilot();
+      return;
+    }
+    await initializeHomePilotSentry(
+      config: observability,
+      appRunner: runHomePilot,
+    );
+  } on Object catch (error, stackTrace) {
+    AppLogger.warning(
+      'sentry_configuration_failed',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    await runHomePilot();
+  }
 }
 
 class _DeferredHomePilotBootstrap extends StatefulWidget {
@@ -1857,10 +1887,15 @@ Page<void> _appRoutePage(
   Widget child,
 ) {
   if (_prefersReducedMotion(context)) {
-    return NoTransitionPage<void>(key: state.pageKey, child: child);
+    return NoTransitionPage<void>(
+      key: state.pageKey,
+      name: normalizeSentryRoute(state.fullPath ?? state.uri.path),
+      child: child,
+    );
   }
   return CustomTransitionPage<void>(
     key: state.pageKey,
+    name: normalizeSentryRoute(state.fullPath ?? state.uri.path),
     child: child,
     transitionDuration: _routeTransitionDuration,
     reverseTransitionDuration: _routeTransitionReverseDuration,
@@ -1890,6 +1925,7 @@ Page<void> _appRoutePage(
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
+    observers: [homePilotSentryNavigatorObserver()],
     routes: [
       ShellRoute(
         builder: (context, state, child) => HomeShell(child: child),
