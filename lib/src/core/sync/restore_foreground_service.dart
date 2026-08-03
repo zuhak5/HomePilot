@@ -188,7 +188,7 @@ class _RestoreTaskHandler extends TaskHandler {
         stackTrace: stackTrace,
         fields: {
           'execution': 'foreground_service',
-          if (activeStage != null) 'restore_stage': activeStage.name,
+          if (activeStage != null) 'restore_stage': activeStage!.name,
         },
       );
       try {
