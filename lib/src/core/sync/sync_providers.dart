@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import 'background_sync_scheduler.dart';
 import 'local_sync_store.dart';
+import 'observed_sync_repository.dart';
 import 'supabase_sync_gateway.dart';
 import 'sync_coordinator.dart';
 import 'sync_contracts.dart';
@@ -47,10 +48,11 @@ final syncCoordinatorProvider = Provider<SyncCoordinator?>((ref) {
   return coordinator;
 });
 
-final cloudSyncRepositoryProvider = Provider<CloudSyncRepository>(
-  (ref) =>
-      ref.watch(syncCoordinatorProvider) ?? const DisabledCloudSyncRepository(),
-);
+final cloudSyncRepositoryProvider = Provider<CloudSyncRepository>((ref) {
+  final coordinator = ref.watch(syncCoordinatorProvider);
+  if (coordinator == null) return const DisabledCloudSyncRepository();
+  return ObservedCloudSyncRepository(coordinator);
+});
 
 final syncStatusProvider = StreamProvider<SyncStatus>((ref) {
   return ref.watch(cloudSyncRepositoryProvider).watchStatus();
