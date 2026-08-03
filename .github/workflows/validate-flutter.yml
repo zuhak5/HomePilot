@@ -73,12 +73,25 @@ jobs:
         run: flutter analyze --no-pub
 
       - name: Run tests
-        run: >-
-          flutter test
-          --no-pub
-          --concurrency=1
-          --timeout 3m
-          --exclude-tags production-config
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter test \
+            --no-pub \
+            --concurrency=1 \
+            --timeout 3m \
+            --reporter expanded \
+            --exclude-tags production-config \
+            2>&1 | tee flutter-test-output.log
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-test-output
+          path: flutter-test-output.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Validate production configuration schema
         run: >-
