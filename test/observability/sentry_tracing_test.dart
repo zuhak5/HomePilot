@@ -30,6 +30,7 @@ void main() {
     expect(traceSampleRateFor(prod, 'auth.account_delete'), 1);
     expect(traceSampleRateFor(prod, 'sync.manual'), 0.10);
     expect(traceSampleRateFor(prod, 'sync.automatic'), 0.03);
+    expect(traceSampleRateFor(prod, 'sync.resume'), 0.03);
     expect(traceSampleRateFor(prod, '/account'), 0.02);
     expect(traceSampleRateFor(prod, 'app.operation'), 0.05);
   });
@@ -67,6 +68,8 @@ void main() {
 
   test('unknown transaction names collapse to a bounded operation', () {
     expect(normalizeTraceOperation('sync.run'), 'sync.run');
+    expect(normalizeTraceOperation('sync.resume'), 'sync.resume');
+    expect(normalizeTraceOperation('auth.google_sign_in'), 'auth.google_sign_in');
     expect(normalizeTraceOperation('room-user-value'), 'app.operation');
   });
 }
