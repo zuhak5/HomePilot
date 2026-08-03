@@ -9,10 +9,17 @@ Future<void> configureHomePilotSentryScope(
   ObservabilityConfig config, {
   String? runId,
 }) async {
-  await Sentry.configureScope(
-    (scope) =>
-        applyHomePilotBaseScope(scope, config, runId: runId ?? AppLogger.runId),
-  );
+  try {
+    await Sentry.configureScope(
+      (scope) => applyHomePilotBaseScope(
+        scope,
+        config,
+        runId: runId ?? AppLogger.runId,
+      ),
+    );
+  } on Object {
+    // Scope enrichment is best-effort and must never affect application flow.
+  }
 }
 
 Future<void> applyHomePilotBaseScope(
@@ -33,32 +40,40 @@ Future<void> setSentryAuthenticated({
   required bool authenticated,
   String event = 'auth.state_changed',
 }) async {
-  await Sentry.configureScope(
-    (scope) =>
-        applySentryAuthenticatedScope(scope, authenticated: authenticated),
-  );
-  await Sentry.addBreadcrumb(
-    Breadcrumb(
-      category: 'homepilot',
-      message: event,
-      data: {
-        'event': event,
-        'provider': 'google',
-        'authenticated': authenticated,
-      },
-    ),
-  );
+  try {
+    await Sentry.configureScope(
+      (scope) =>
+          applySentryAuthenticatedScope(scope, authenticated: authenticated),
+    );
+    await Sentry.addBreadcrumb(
+      Breadcrumb(
+        category: 'homepilot',
+        message: event,
+        data: {
+          'event': event,
+          'provider': 'google',
+          'authenticated': authenticated,
+        },
+      ),
+    );
+  } on Object {
+    // Observability must not change authentication outcomes.
+  }
 }
 
 Future<void> clearSentryAccountScope({String event = 'auth.signed_out'}) async {
-  await Sentry.configureScope(applySentryAccountClearedScope);
-  await Sentry.addBreadcrumb(
-    Breadcrumb(
-      category: 'homepilot',
-      message: event,
-      data: {'event': event, 'authenticated': false},
-    ),
-  );
+  try {
+    await Sentry.configureScope(applySentryAccountClearedScope);
+    await Sentry.addBreadcrumb(
+      Breadcrumb(
+        category: 'homepilot',
+        message: event,
+        data: {'event': event, 'authenticated': false},
+      ),
+    );
+  } on Object {
+    // Observability must not block sign-out or account deletion cleanup.
+  }
 }
 
 Future<void> applySentryAuthenticatedScope(
@@ -82,15 +97,19 @@ Future<void> setSentryUiState({
   String? theme,
   bool? syncEnabled,
 }) async {
-  await Sentry.configureScope((scope) async {
-    if (locale != null && const {'en', 'ar'}.contains(locale)) {
-      await scope.setTag('locale', locale);
-    }
-    if (theme != null && const {'light', 'dark', 'system'}.contains(theme)) {
-      await scope.setTag('theme', theme);
-    }
-    if (syncEnabled != null) {
-      await scope.setTag('sync_enabled', syncEnabled.toString());
-    }
-  });
+  try {
+    await Sentry.configureScope((scope) async {
+      if (locale != null && const {'en', 'ar'}.contains(locale)) {
+        await scope.setTag('locale', locale);
+      }
+      if (theme != null && const {'light', 'dark', 'system'}.contains(theme)) {
+        await scope.setTag('theme', theme);
+      }
+      if (syncEnabled != null) {
+        await scope.setTag('sync_enabled', syncEnabled.toString());
+      }
+    });
+  } on Object {
+    // UI state enrichment is best-effort.
+  }
 }
