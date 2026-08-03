@@ -107,32 +107,33 @@ class _RestoreTaskHandler extends TaskHandler {
       await traceHomePilotOperation<void>(
         'restore.foreground_cycle',
         () async {
-          var progress = await traceHomePilotOperation<InitialHydrationProgress?>(
-            'restore.read_progress',
-            _readProgress,
-            attributes: const {'execution': 'foreground_service'},
-          );
-          if (progress == null || !progress.isActive) {
+          final initialProgress =
+              await traceHomePilotOperation<InitialHydrationProgress?>(
+                'restore.read_progress',
+                _readProgress,
+                attributes: const {'execution': 'foreground_service'},
+              );
+          if (initialProgress == null || !initialProgress.isActive) {
             await FlutterForegroundTask.stopService();
             return;
           }
-          activeStage = progress.stage;
+          activeStage = initialProgress.stage;
           final l10n = await _backgroundRestoreLocalizations();
           await traceHomePilotOperation<void>(
             'restore.update_notification',
             () async {
               await FlutterForegroundTask.updateService(
                 notificationTitle: l10n.restoringHomePilot,
-                notificationText: _notificationText(l10n, progress!),
+                notificationText: _notificationText(l10n, initialProgress),
               );
             },
             attributes: {
               'execution': 'foreground_service',
-              'restore_stage': progress.stage.name,
-              'percentage': progress.percentage,
+              'restore_stage': initialProgress.stage.name,
+              'percentage': initialProgress.percentage,
             },
           );
-          if (progress.state != RestoreRunState.completed) {
+          if (initialProgress.state != RestoreRunState.completed) {
             await traceHomePilotOperation<void>(
               'restore.cloud_sync',
               () async {
@@ -142,37 +143,40 @@ class _RestoreTaskHandler extends TaskHandler {
               },
               attributes: {
                 'execution': 'foreground_service',
-                'restore_stage': progress.stage.name,
+                'restore_stage': initialProgress.stage.name,
                 'lease_scope': 'restore-service',
-                'percentage': progress.percentage,
+                'percentage': initialProgress.percentage,
               },
             );
           }
-          progress = await traceHomePilotOperation<InitialHydrationProgress?>(
-            'restore.read_progress',
-            _readProgress,
-            attributes: const {'execution': 'foreground_service'},
-          );
-          if (progress == null || !progress.isActive) {
+          final latestProgress =
+              await traceHomePilotOperation<InitialHydrationProgress?>(
+                'restore.read_progress',
+                _readProgress,
+                attributes: const {'execution': 'foreground_service'},
+              );
+          if (latestProgress == null || !latestProgress.isActive) {
             await traceHomePilotOperation<void>(
               'restore.finalize',
-              FlutterForegroundTask.stopService,
+              () async {
+                await FlutterForegroundTask.stopService();
+              },
               attributes: const {'execution': 'foreground_service'},
             );
           } else {
-            activeStage = progress.stage;
+            activeStage = latestProgress.stage;
             await traceHomePilotOperation<void>(
               'restore.update_notification',
               () async {
                 await FlutterForegroundTask.updateService(
                   notificationTitle: l10n.restoringHomePilot,
-                  notificationText: _notificationText(l10n, progress!),
+                  notificationText: _notificationText(l10n, latestProgress),
                 );
               },
               attributes: {
                 'execution': 'foreground_service',
-                'restore_stage': progress.stage.name,
-                'percentage': progress.percentage,
+                'restore_stage': latestProgress.stage.name,
+                'percentage': latestProgress.percentage,
               },
             );
           }
