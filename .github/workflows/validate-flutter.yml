@@ -17,13 +17,11 @@ jobs:
     timeout-minutes: 30
 
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -36,6 +34,7 @@ jobs:
         run: |
           flutter --version
           dart --version
+          pwsh --version
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -46,24 +45,29 @@ jobs:
       - name: Generate source files
         run: dart run build_runner build
 
-      - name: Apply canonical Dart formatting
-        run: dart format lib test
-
-      - name: Commit one-time branch formatting
-        if: github.event_name == 'pull_request' && github.head_ref == 'codex/sentry-observability'
-        run: |
-          if git diff --quiet -- lib test; then
-            echo "Dart sources are already formatted."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib test
-          git commit -m "Apply canonical Dart formatting"
-          git push origin HEAD:${{ github.head_ref }}
-
       - name: Verify formatting
-        run: git diff --exit-code -- lib test
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Parse production PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($Script in @(
+            "tool/build_prod.ps1",
+            "tool/publish_sentry_release.ps1"
+          )) {
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $Script),
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+            if ($Errors.Count -gt 0) {
+              $Errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell parsing failed for $Script."
+            }
+          }
 
       - name: Analyze
         run: flutter analyze --no-pub
