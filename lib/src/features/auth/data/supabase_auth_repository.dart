@@ -65,16 +65,10 @@ class SupabaseAuthRepository implements AuthRepository {
                 accessToken: tokens.accessToken,
               );
             },
-            attributes: const {
-              'provider': 'google',
-              'execution': 'main',
-            },
+            attributes: const {'provider': 'google', 'execution': 'main'},
           );
         },
-        attributes: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
+        attributes: const {'provider': 'google', 'execution': 'main'},
       );
       await setSentryAuthenticated(
         authenticated: true,
@@ -86,10 +80,7 @@ class SupabaseAuthRepository implements AuthRepository {
         operation: 'auth_google_sign_in_failed',
         error: failure,
         stackTrace: stackTrace,
-        fields: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
+        fields: const {'provider': 'google', 'execution': 'main'},
       );
       await _throwAuthFailure(error);
     }
@@ -98,19 +89,12 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<void> signOut({bool allDevices = false}) async {
     try {
-      await traceHomePilotOperation<void>(
-        'auth.sign_out',
-        () async {
-          await _client.auth.signOut(
-            scope: allDevices ? SignOutScope.global : SignOutScope.local,
-          );
-          await _googleSignIn.signOut();
-        },
-        attributes: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
-      );
+      await traceHomePilotOperation<void>('auth.sign_out', () async {
+        await _client.auth.signOut(
+          scope: allDevices ? SignOutScope.global : SignOutScope.local,
+        );
+        await _googleSignIn.signOut();
+      }, attributes: const {'provider': 'google', 'execution': 'main'});
       await clearSentryAccountScope(event: 'auth.signed_out');
     } on Object catch (error, stackTrace) {
       final failure = SupabaseFailure.from(error);
@@ -118,10 +102,7 @@ class SupabaseAuthRepository implements AuthRepository {
         operation: 'auth_sign_out_failed',
         error: failure,
         stackTrace: stackTrace,
-        fields: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
+        fields: const {'provider': 'google', 'execution': 'main'},
       );
       throw failure;
     }
@@ -133,10 +114,7 @@ class SupabaseAuthRepository implements AuthRepository {
       await traceHomePilotOperation<void>(
         'auth.account_delete',
         _deleteAccount,
-        attributes: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
+        attributes: const {'provider': 'google', 'execution': 'main'},
       );
       await clearSentryAccountScope(event: 'auth.account_deleted');
     } on Object catch (error, stackTrace) {
@@ -145,10 +123,7 @@ class SupabaseAuthRepository implements AuthRepository {
         operation: 'auth_account_delete_failed',
         error: failure,
         stackTrace: stackTrace,
-        fields: const {
-          'provider': 'google',
-          'execution': 'main',
-        },
+        fields: const {'provider': 'google', 'execution': 'main'},
       );
       throw failure;
     }

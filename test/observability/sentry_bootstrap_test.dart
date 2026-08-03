@@ -75,24 +75,27 @@ void main() {
     expect(appRuns, 1);
   });
 
-  test('initializer timeout starts the app without waiting indefinitely', () async {
-    var appRuns = 0;
-    final releaseInitializer = Completer<void>();
+  test(
+    'initializer timeout starts the app without waiting indefinitely',
+    () async {
+      var appRuns = 0;
+      final releaseInitializer = Completer<void>();
 
-    await initializeHomePilotSentry(
-      config: config,
-      appRunner: () async => appRuns++,
-      initializationTimeout: const Duration(milliseconds: 1),
-      initializer: (configure, appRunner) async {
-        configure(SentryFlutterOptions());
-        await releaseInitializer.future;
-        await appRunner();
-      },
-    );
+      await initializeHomePilotSentry(
+        config: config,
+        appRunner: () async => appRuns++,
+        initializationTimeout: const Duration(milliseconds: 1),
+        initializer: (configure, appRunner) async {
+          configure(SentryFlutterOptions());
+          await releaseInitializer.future;
+          await appRunner();
+        },
+      );
 
-    expect(appRuns, 1);
-    releaseInitializer.complete();
-    await Future<void>.delayed(Duration.zero);
-    expect(appRuns, 1);
-  });
+      expect(appRuns, 1);
+      releaseInitializer.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(appRuns, 1);
+    },
+  );
 }

@@ -69,7 +69,10 @@ void main() {
   test('unknown transaction names collapse to a bounded operation', () {
     expect(normalizeTraceOperation('sync.run'), 'sync.run');
     expect(normalizeTraceOperation('sync.resume'), 'sync.resume');
-    expect(normalizeTraceOperation('auth.google_sign_in'), 'auth.google_sign_in');
+    expect(
+      normalizeTraceOperation('auth.google_sign_in'),
+      'auth.google_sign_in',
+    );
     expect(normalizeTraceOperation('room-user-value'), 'app.operation');
   });
 }

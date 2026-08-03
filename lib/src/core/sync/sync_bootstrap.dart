@@ -48,20 +48,14 @@ class _CloudSyncBootstrapState extends ConsumerState<CloudSyncBootstrap>
       await traceHomePilotOperation<void>(
         'sync.resume',
         () async => coordinator.onAppResumed(),
-        attributes: const {
-          'sync_mode': 'automatic',
-          'execution': 'main',
-        },
+        attributes: const {'sync_mode': 'automatic', 'execution': 'main'},
       );
     } on Object catch (error, stackTrace) {
       reportOperationFailure(
         operation: 'sync_resume_failed',
         error: error,
         stackTrace: stackTrace,
-        fields: const {
-          'sync_mode': 'automatic',
-          'execution': 'main',
-        },
+        fields: const {'sync_mode': 'automatic', 'execution': 'main'},
       );
       // The coordinator persists and exposes failures through SyncStatus.
       // Startup and the offline app must remain available.
@@ -75,20 +69,14 @@ class _CloudSyncBootstrapState extends ConsumerState<CloudSyncBootstrap>
       await traceHomePilotOperation<void>(
         'sync.pause',
         () async => coordinator.onAppPaused(),
-        attributes: const {
-          'sync_mode': 'automatic',
-          'execution': 'main',
-        },
+        attributes: const {'sync_mode': 'automatic', 'execution': 'main'},
       );
     } on Object catch (error, stackTrace) {
       reportOperationFailure(
         operation: 'sync_pause_failed',
         error: error,
         stackTrace: stackTrace,
-        fields: const {
-          'sync_mode': 'automatic',
-          'execution': 'main',
-        },
+        fields: const {'sync_mode': 'automatic', 'execution': 'main'},
       );
     }
   }

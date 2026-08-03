@@ -137,9 +137,7 @@ class _RestoreTaskHandler extends TaskHandler {
             await traceHomePilotOperation<void>(
               'restore.cloud_sync',
               () async {
-                await runCloudSyncInBackground(
-                  leaseScope: 'restore-service',
-                );
+                await runCloudSyncInBackground(leaseScope: 'restore-service');
               },
               attributes: {
                 'execution': 'foreground_service',

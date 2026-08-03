@@ -15,18 +15,15 @@ void main() {
     await repository.fullReconcile();
     await repository.syncNow();
 
-    expect(
-      delegate.calls,
-      [
-        'status',
-        'enable',
-        'disable',
-        'unlink',
-        'retry',
-        'fullReconcile',
-        'syncNow',
-      ],
-    );
+    expect(delegate.calls, [
+      'status',
+      'enable',
+      'disable',
+      'unlink',
+      'retry',
+      'fullReconcile',
+      'syncNow',
+    ]);
   });
 
   test('forwards status stream values', () async {
