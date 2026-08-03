@@ -16,6 +16,7 @@ export interface AccountDeletionServices {
   beginCleanup(userId: string, objectPaths: string[]): Promise<string>;
   removeObjects(objectPaths: string[]): Promise<void>;
   deleteUser(userId: string): Promise<void>;
+  completeCleanup(jobId: string): Promise<void>;
   recordCleanupError(jobId: string, errorCode: string): Promise<void>;
 }
 
@@ -78,19 +79,23 @@ export async function handleDeleteAccount(
     const initialObjectPaths = await services.listObjectPaths(userId);
     cleanupJobId = await services.beginCleanup(userId, initialObjectPaths);
 
-    // Revoking every session closes the Storage write race before the service
-    // account removes files and the Auth user. Storage RLS also verifies that
-    // the caller's session row still exists.
-    phase = "revoke_sessions";
-    await services.signOutGlobally(token);
-
     phase = "remove_storage";
     await removeAllUserObjects(services, userId);
+
+    phase = "revoke_sessions";
+    await services.signOutGlobally(token);
 
     phase = "delete_auth_user";
     await services.deleteUser(userId);
 
-    return jsonResponse(200, { deleted: true });
+    phase = "complete_cleanup";
+    await services.completeCleanup(cleanupJobId);
+
+    return jsonResponse(200, {
+      deleted: true,
+      status: "deleted",
+      user_id: userId,
+    });
   } catch (error) {
     const errorCode = `${phase}_failed`;
     if (cleanupJobId != null) {
@@ -106,6 +111,9 @@ export async function handleDeleteAccount(
         return jsonResponse(503, { error: "session_revocation_failed" });
       case "remove_storage":
         return jsonResponse(503, { error: "storage_cleanup_failed" });
+      case "delete_auth_user":
+      case "complete_cleanup":
+        return jsonResponse(500, { error: "account_deletion_failed" });
       default:
         return jsonResponse(500, { error: "account_deletion_failed" });
     }
@@ -166,6 +174,13 @@ function createAccountDeletionServices(
       removeObjectsWithRetry(admin, "user-media", objectPaths),
     async deleteUser(userId: string): Promise<void> {
       const { error } = await admin.auth.admin.deleteUser(userId);
+      if (error) throw error;
+    },
+    async completeCleanup(jobId: string): Promise<void> {
+      const { error } = await admin.rpc("complete_homepilot_account_cleanup", {
+        p_job_id: jobId,
+        p_error: null,
+      });
       if (error) throw error;
     },
     async recordCleanupError(jobId: string, errorCode: string): Promise<void> {

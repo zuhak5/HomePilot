@@ -79,11 +79,17 @@ Future<bool> runCloudSyncInBackground({
     final client = await SupabaseBootstrap.initialize(config);
     final session = client.auth.currentSession;
     if (session == null) return true;
-    final account = await store.account();
-    if (!account.enabled || account.boundUserId != session.user.id) return true;
+    final account = await store.existingAccount();
+    if (account == null ||
+        !account.enabled ||
+        account.boundUserId != session.user.id) {
+      return true;
+    }
     final auth = SupabaseAuthRepository(
       client,
       NativeGoogleSignInGateway(serverClientId: config.googleWebClientId),
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
     final gateway = SupabaseSyncGateway(client);

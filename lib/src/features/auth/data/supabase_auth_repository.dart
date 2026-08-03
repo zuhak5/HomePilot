@@ -8,11 +8,15 @@ class SupabaseAuthRepository implements AuthRepository {
   SupabaseAuthRepository(
     this._client,
     this._googleSignIn, {
+    required this.onAccountDeletionPrepared,
+    required this.onAccountDeletionCancelled,
     required this.onAccountDeleted,
   });
 
   final SupabaseClient _client;
   final GoogleSignInGateway _googleSignIn;
+  final Future<void> Function(String userId) onAccountDeletionPrepared;
+  final Future<void> Function(String userId) onAccountDeletionCancelled;
   final Future<void> Function(String userId) onAccountDeleted;
 
   @override
@@ -67,8 +71,10 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<void> deleteAccount() async {
     var cloudDeleted = false;
+    var deletionPrepared = false;
+    String? originalUserId;
     try {
-      final originalUserId = _client.auth.currentSession?.user.id;
+      originalUserId = _client.auth.currentSession?.user.id;
       if (originalUserId == null) {
         throw const SupabaseFailure(
           kind: SupabaseFailureKind.authentication,
@@ -91,6 +97,8 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
 
+      await onAccountDeletionPrepared(originalUserId);
+      deletionPrepared = true;
       final response = await _client.functions.invoke(
         'delete-account',
         body: const {'confirmation': 'delete-my-account'},
@@ -103,6 +111,19 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
       cloudDeleted = true;
+      final deletedUserId = data['user_id'] is String
+          ? data['user_id'] as String
+          : originalUserId;
+      final status = data['status'];
+      if (deletedUserId != originalUserId ||
+          (status != null &&
+              status != 'deleted' &&
+              status != 'already_deleted')) {
+        throw const SupabaseFailure(
+          kind: SupabaseFailureKind.unknown,
+          message: 'The cloud account deletion receipt was invalid.',
+        );
+      }
       try {
         await onAccountDeleted(originalUserId);
       } on Object {
@@ -122,10 +143,8 @@ class SupabaseAuthRepository implements AuthRepository {
         throw SupabaseFailure.from(error);
       }
       final functionErrorCode = _functionErrorCode(error);
-      if (functionErrorCode == 'storage_cleanup_failed' ||
-          functionErrorCode == 'session_revocation_failed' ||
-          functionErrorCode == 'account_deletion_failed') {
-        await _clearLocalAuthentication();
+      if (deletionPrepared && originalUserId != null) {
+        await _cancelPreparedDeletion(originalUserId);
       }
       if (functionErrorCode == 'recent_reauthentication_required') {
         throw const SupabaseFailure(
@@ -143,6 +162,14 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
       await _throwAuthFailure(error);
+    }
+  }
+
+  Future<void> _cancelPreparedDeletion(String userId) async {
+    try {
+      await onAccountDeletionCancelled(userId);
+    } on Object {
+      // Preserve the original remote deletion failure for the caller.
     }
   }
 

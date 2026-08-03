@@ -553,6 +553,15 @@ class _FakeConnectivity implements SyncConnectivity {
   }
 }
 
+Future<void> _waitFor(FutureOr<bool> Function() condition) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (DateTime.now().isBefore(deadline)) {
+    if (await condition()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('Timed out waiting for test condition.');
+}
+
 void main() {
   setUpAll(() {
     registerFallbackValue(syncEntitySpecs.first);
@@ -590,6 +599,75 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('account deletion barrier discards late active pull results', () async {
+    final db = AppDatabase(executor: NativeDatabase.memory());
+    addTearDown(db.close);
+    final store = LocalSyncStore(db);
+    final initialAccount = await store.account();
+    await store.setEnabled(
+      enabled: true,
+      boundUserId: 'user-1',
+      migrationState: 'active',
+    );
+    await store.recordSyncSuccess(DateTime.utc(2026, 8, 3, 10));
+    final auth = _FakeAuthRepository(const AuthSession(userId: 'user-1'));
+    addTearDown(auth.controller.close);
+    final gateway = _StatefulGateway()..pullGate = Completer<void>();
+    await gateway.write(
+      record: SyncRecord(
+        spec: syncSpecByEntity['area']!,
+        recordKey: 'remote-area-after-delete',
+        values: {
+          'id': 'remote-area-after-delete',
+          'name': 'Late remote area',
+          'kind': 'indoor',
+          'sort_order': 0,
+          'created_at': DateTime.utc(2026, 8, 3, 9),
+          'updated_at': DateTime.utc(2026, 8, 3, 9),
+          'archived_at': null,
+        },
+        clientModifiedAt: DateTime.utc(2026, 8, 3, 9),
+        originDeviceId: 'remote-device',
+      ),
+      userId: 'user-1',
+      deviceId: initialAccount.deviceId,
+      expectedRevision: null,
+    );
+    final coordinator = SyncCoordinator(
+      auth,
+      store,
+      gateway,
+      connectivity: _FakeConnectivity(true),
+      listenToAuthChanges: false,
+    );
+    addTearDown(coordinator.dispose);
+
+    final syncFuture = coordinator.syncIncremental();
+    await _waitFor(() => gateway.pullCalls.isNotEmpty);
+
+    final prepareFuture = coordinator.prepareForAccountDeletion('user-1');
+    await _waitFor(() async {
+      final status = await coordinator.status();
+      return status.message == 'Account deletion is in progress.';
+    });
+
+    await store.clearAllAccountData(expectedUserId: 'user-1');
+    gateway.pullGate!.complete();
+
+    await syncFuture;
+    await prepareFuture;
+
+    expect(
+      await (db.select(
+        db.areas,
+      )..where((area) => area.id.equals('remote-area-after-delete'))).get(),
+      isEmpty,
+    );
+    expect(await db.select(db.syncCursors).get(), isEmpty);
+    expect(await db.select(db.syncOutbox).get(), isEmpty);
+    expect(await store.existingAccount(), isNull);
   });
 
   test(
