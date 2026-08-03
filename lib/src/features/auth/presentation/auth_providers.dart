@@ -9,6 +9,7 @@ import '../data/supabase_auth_repository.dart';
 import '../domain/auth_repository.dart';
 
 typedef AccountDeletionLocalCleanup = Future<void> Function(String userId);
+typedef AccountDeletionLifecycleHook = Future<void> Function(String userId);
 
 final appConfigProvider = Provider<AppConfig>((ref) => AppConfig.test());
 
@@ -16,6 +17,14 @@ final supabaseClientProvider = Provider<SupabaseClient?>((ref) => null);
 
 final accountDeletionLocalCleanupProvider =
     Provider<AccountDeletionLocalCleanup>((ref) => (_) async {});
+
+final accountDeletionPrepareProvider = Provider<AccountDeletionLifecycleHook>(
+  (ref) => (_) async {},
+);
+
+final accountDeletionCancelProvider = Provider<AccountDeletionLifecycleHook>(
+  (ref) => (_) async {},
+);
 
 final appBuildInfoProvider = FutureProvider<AppBuildInfo>((ref) async {
   final packageInfo = await PackageInfo.fromPlatform();
@@ -35,6 +44,8 @@ final authRepositoryProvider = Provider<AuthRepository?>((ref) {
   return SupabaseAuthRepository(
     client,
     NativeGoogleSignInGateway(serverClientId: config.googleWebClientId),
+    onAccountDeletionPrepared: ref.watch(accountDeletionPrepareProvider),
+    onAccountDeletionCancelled: ref.watch(accountDeletionCancelProvider),
     onAccountDeleted: ref.watch(accountDeletionLocalCleanupProvider),
   );
 });

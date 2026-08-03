@@ -58,6 +58,11 @@ void main() {
         isEmpty,
       );
       expect(await store.pendingCount(), 0);
+      expect(
+        await database.select(database.reminderScheduleSnapshots).get(),
+        isEmpty,
+      );
+      expect(await database.select(database.inboxNotifications).get(), isEmpty);
       final account = await store.account();
       expect(account.boundUserId, isNull);
       expect(account.enabled, isFalse);
@@ -148,6 +153,31 @@ Future<void> _seedBoundAccountData(
     boundUserId: userId,
     migrationState: 'active',
   );
+  final scheduledAt = DateTime.utc(2026, 8, 3, 12);
+  await database
+      .into(database.reminderScheduleSnapshots)
+      .insert(
+        ReminderScheduleSnapshotsCompanion.insert(
+          identity: 'task:private-plan',
+          notificationId: 10001,
+          planRevision: '1',
+          scheduledAt: scheduledAt,
+          timezone: 'UTC',
+          localComponents: '2026-08-03T12:00:00',
+          scheduleMode: 'exactAllowWhileIdle',
+          contentVersion: 'test',
+        ),
+      );
+  await database
+      .into(database.inboxNotifications)
+      .insert(
+        InboxNotificationsCompanion.insert(
+          id: 'private-inbox-notification',
+          title: 'Due',
+          body: 'Private reminder',
+          kind: 'maintenance',
+        ),
+      );
 }
 
 Future<void> _writePrivateFile(Directory root, String relativePath) async {

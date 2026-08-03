@@ -33,6 +33,48 @@ void main() {
     expect(accounts.map((account) => account.deviceId).toSet(), hasLength(1));
   });
 
+  test(
+    'account watcher emits null for zero rows and survives reinsertion',
+    () async {
+      final emissions = <SyncAccountData?>[];
+      final errors = <Object>[];
+      final subscription = store.watchAccount().listen(
+        emissions.add,
+        onError: errors.add,
+      );
+      addTearDown(subscription.cancel);
+
+      await _waitForSyncStoreTest(() => emissions.isNotEmpty);
+      expect(emissions.removeAt(0), isA<SyncAccountData>());
+
+      await db.delete(db.syncAccount).go();
+
+      await _waitForSyncStoreTest(() => emissions.isNotEmpty);
+      expect(emissions.removeAt(0), isNull);
+
+      final now = DateTime.utc(2026, 8, 3, 12);
+      await db
+          .into(db.syncAccount)
+          .insert(
+            SyncAccountData(
+              id: 1,
+              deviceId: 'replacement-device',
+              enabled: false,
+              migrationState: 'localOnly',
+              restorePending: false,
+              hydrationCompletedUnits: 0,
+              hydrationTotalUnits: 0,
+              updatedAt: now,
+            ),
+          );
+
+      await _waitForSyncStoreTest(() => emissions.isNotEmpty);
+      final replacement = emissions.removeAt(0);
+      expect(replacement?.deviceId, 'replacement-device');
+      expect(errors, isEmpty);
+    },
+  );
+
   test('outbox suppression is restored after a failed remote apply', () async {
     await expectLater(
       store.withOutboxSuppressed<void>(() async {
@@ -1083,6 +1125,15 @@ void main() {
         .toList();
     expect(tombstones, hasLength(2));
   });
+}
+
+Future<void> _waitForSyncStoreTest(bool Function() condition) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (DateTime.now().isBefore(deadline)) {
+    if (condition()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('Timed out waiting for sync store test condition.');
 }
 
 Future<void> _seedTestAreas(AppDatabase db, LocalSyncStore store) async {

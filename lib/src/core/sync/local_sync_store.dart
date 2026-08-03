@@ -43,11 +43,17 @@ class LocalSyncStore {
     )..where((account) => account.id.equals(1))).getSingle();
   }
 
-  Stream<SyncAccountData> watchAccount() async* {
+  Future<SyncAccountData?> existingAccount() {
+    return (db.select(
+      db.syncAccount,
+    )..where((row) => row.id.equals(1))).getSingleOrNull();
+  }
+
+  Stream<SyncAccountData?> watchAccount() async* {
     await account();
     yield* (db.select(
       db.syncAccount,
-    )..where((row) => row.id.equals(1))).watchSingle();
+    )..where((row) => row.id.equals(1))).watchSingleOrNull();
   }
 
   Future<InitialHydrationProgress?> hydrationProgress() async {
@@ -649,7 +655,6 @@ ORDER BY created_at DESC, id DESC
         ),
       );
     });
-    await account();
   }
 
   Future<void> _seedPristineDefaults() async {

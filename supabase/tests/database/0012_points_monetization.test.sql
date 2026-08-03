@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set search_path = public, extensions, pg_catalog;
 
-select extensions.plan(60);
+select extensions.plan(65);
 
 select extensions.has_table('public', 'point_wallets', 'point wallet table exists');
 select extensions.has_table('public', 'point_transactions', 'point ledger table exists');
@@ -22,6 +22,97 @@ select extensions.ok(
      'public.monetization_events'::regclass
    )),
   'every monetization table has RLS enabled'
+);
+select extensions.is(
+  (
+    select count(*)::integer
+    from (
+      values
+        ('ad_reward_claims'),
+        ('creation_point_operations'),
+        ('monetization_events')
+    ) as advisor_tables(table_name)
+    where not exists (
+      select 1
+      from pg_policy policies
+      join pg_class tables on tables.oid = policies.polrelid
+      join pg_namespace schemas on schemas.oid = tables.relnamespace
+      where schemas.nspname = 'public'
+        and tables.relname = advisor_tables.table_name
+    )
+  ),
+  0,
+  'internal monetization tables have explicit RLS policies'
+);
+select extensions.ok(
+  not has_table_privilege('authenticated', 'public.ad_reward_claims', 'SELECT')
+  and not has_table_privilege(
+    'authenticated',
+    'public.creation_point_operations',
+    'SELECT'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.monetization_events',
+    'SELECT'
+  ),
+  'advisor RLS policies do not grant client table reads'
+);
+select extensions.is(
+  (
+    select count(*)::integer
+    from pg_proc functions
+    join pg_namespace schemas on schemas.oid = functions.pronamespace
+    where schemas.nspname = 'public'
+      and functions.proname in (
+        'create_asset_with_point_debit',
+        'create_reward_claim_request',
+        'create_task_with_point_debit',
+        'is_authorized_point_creation',
+        'record_monetization_event'
+      )
+      and functions.prosecdef
+      and has_function_privilege('authenticated', functions.oid, 'EXECUTE')
+  ),
+  0,
+  'authenticated point RPCs are not security definer functions in public'
+);
+select extensions.is(
+  (
+    select count(*)::integer
+    from pg_proc functions
+    join pg_namespace schemas on schemas.oid = functions.pronamespace
+    where schemas.nspname = 'homepilot_monetization_private'
+      and functions.proname in (
+        'create_asset_with_point_debit_impl',
+        'create_reward_claim_request_impl',
+        'create_task_with_point_debit_impl',
+        'is_authorized_point_creation_impl',
+        'record_monetization_event_impl'
+      )
+      and functions.prosecdef
+  ),
+  5,
+  'privileged point implementations live in the private schema'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraints
+    join pg_class tables on tables.oid = constraints.conrelid
+    join pg_namespace schemas on schemas.oid = tables.relnamespace
+    join pg_index indexes on indexes.indrelid = constraints.conrelid
+    where schemas.nspname = 'public'
+      and tables.relname = 'ad_reward_claims'
+      and constraints.conname = 'ad_reward_claims_user_id_fkey'
+      and constraints.contype = 'f'
+      and indexes.indisvalid
+      and indexes.indisready
+      and (
+        string_to_array(indexes.indkey::text, ' ')::smallint[]
+      )[1] = constraints.conkey[1]
+  ),
+  'ad reward Auth foreign key has a covering index'
 );
 select extensions.ok(
   has_table_privilege('authenticated', 'public.point_wallets', 'SELECT'),

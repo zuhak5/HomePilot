@@ -112,17 +112,22 @@ Deno.test("deletes only the user derived from the verified JWT", async () => {
   );
 
   assertEquals(response.status, 200);
-  assertEquals(await response.json(), { deleted: true });
+  assertEquals(await response.json(), {
+    deleted: true,
+    status: "deleted",
+    user_id: userId,
+  });
   assertEquals(services.events, [
     "get_user",
     `recent_session:${userId}:${sessionId}`,
     `list:${userId}`,
     `begin:${userId}:1`,
-    "sign_out_global",
     `list:${userId}`,
     "remove:1",
     `list:${userId}`,
+    "sign_out_global",
     `delete_user:${userId}`,
+    "complete_cleanup",
   ]);
 });
 
@@ -146,13 +151,14 @@ Deno.test("does not delete Auth when Storage cleanup fails", async () => {
     services.events.some((event) => event.startsWith("delete_user:")),
     false,
   );
+  assertEquals(services.events.includes("sign_out_global"), false);
   assertEquals(
     services.events.includes("record_error:remove_storage_failed"),
     true,
   );
 });
 
-Deno.test("does not start cleanup when global sign-out fails", async () => {
+Deno.test("does not delete Auth when global sign-out fails", async () => {
   const services = new FakeAccountDeletionServices();
   services.objectListings.push([]);
   services.signOutError = new Error("forced sign-out failure");
@@ -218,6 +224,11 @@ class FakeAccountDeletionServices implements AccountDeletionServices {
 
   deleteUser(user: string): Promise<void> {
     this.events.push(`delete_user:${user}`);
+    return Promise.resolve();
+  }
+
+  completeCleanup(_jobId: string): Promise<void> {
+    this.events.push("complete_cleanup");
     return Promise.resolve();
   }
 

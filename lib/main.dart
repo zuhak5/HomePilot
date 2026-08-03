@@ -201,6 +201,29 @@ class _HomePilotBootstrapState extends State<HomePilotBootstrap> {
                       .refreshSchedules();
                 },
               ),
+              accountDeletionPrepareProvider.overrideWith(
+                (ref) => (userId) async {
+                  await ref
+                      .read(syncCoordinatorProvider)
+                      ?.prepareForAccountDeletion(userId);
+                  await ref
+                      .read(notificationSchedulerProvider)
+                      .clearAllScheduledReminders();
+                  await ref.read(notificationInboxRepositoryProvider).clear();
+                  await cancelAccountScopedBackgroundWork();
+                  ref.read(initialHomeSnapshotProvider).value = null;
+                },
+              ),
+              accountDeletionCancelProvider.overrideWith(
+                (ref) => (userId) async {
+                  await ref
+                      .read(syncCoordinatorProvider)
+                      ?.cancelAccountDeletion(userId);
+                  await ref
+                      .read(notificationSchedulerProvider)
+                      .refreshSchedules();
+                },
+              ),
               accountDeletionLocalCleanupProvider.overrideWithValue(
                 (userId) => LocalAccountDataCleaner(
                   LocalSyncStore(database),

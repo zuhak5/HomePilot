@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import '../supabase/supabase_failure.dart';
 import '../utils/redacting_logger.dart';
+import '../database/app_database.dart';
 import '../../features/auth/domain/auth_repository.dart';
 import 'local_sync_store.dart';
 import 'supabase_sync_gateway.dart';
@@ -29,10 +30,22 @@ class SyncCoordinator implements CloudSyncRepository {
            reconcileMaintenanceCompletionReminders,
        _automaticSyncEnabled = connectivity != null || _realtime != null {
     _accountSubscription = _localStore.watchAccount().listen(
-      (account) => _handleAccountChanged(account.enabled),
+      (account) => _runListener(
+        'sync_account_watch_callback_failed',
+        () => _handleAccountChanged(account),
+      ),
+      onError: (Object error, StackTrace stackTrace) {
+        _runListener(
+          'sync_account_watch_failed',
+          () => _handleAccountWatchError(error),
+        );
+      },
     );
     _pendingSubscription = _localStore.watchPendingCount().listen(
-      _handlePendingChanged,
+      (pending) => _runListener(
+        'sync_pending_watch_callback_failed',
+        () => _handlePendingChanged(pending),
+      ),
     );
     if (listenToAuthChanges) {
       _authSubscription = _authRepository.watchAuthState().listen(
@@ -45,7 +58,10 @@ class SyncCoordinator implements CloudSyncRepository {
       );
     }
     _connectivitySubscription = _connectivity.watchOnline().listen(
-      _handleConnectivityChanged,
+      (online) => _runListener(
+        'sync_connectivity_callback_failed',
+        () => _handleConnectivityChanged(online),
+      ),
     );
     _initializationTimer = Timer(const Duration(milliseconds: 500), () {
       _isInitializing = false;
@@ -77,6 +93,7 @@ class SyncCoordinator implements CloudSyncRepository {
   Timer? _automaticSyncTimer;
   Timer? _retryTimer;
   Timer? _realtimeReconnectTimer;
+  Timer? _realtimeDeleteFollowUpTimer;
   Timer? _initializationTimer;
   bool _isInitializing = true;
   final Set<String> _pendingTargetTables = {};
@@ -87,18 +104,39 @@ class SyncCoordinator implements CloudSyncRepository {
   bool _online = true;
   bool _mergeConfirmationRequired = false;
   Future<void> _authInitialization = Future<void>.value();
+  Future<void> _accountTransition = Future<void>.value();
   Future<void> _realtimeOperation = Future<void>.value();
   String? _realtimeIdentity;
   SyncRealtimeConnection _realtimeConnection = SyncRealtimeConnection.disabled;
   SyncPhase? _phaseOverride;
   String? _messageOverride;
   int _clockSkewConflicts = 0;
+  var _accountEpoch = 0;
   var _syncAttemptSerial = 0;
   Future<void>? _postReadyWork;
   final Map<String, SyncRecord> _deferredRemoteMedia = {};
   bool? _lastCloudAccountWasExisting;
+  bool _accountDeletionInProgress = false;
+  String? _deletingUserId;
+  String? _lastAccountScopeKey;
 
   bool? get lastCloudAccountWasExisting => _lastCloudAccountWasExisting;
+
+  void _runListener(String eventName, Future<void> Function() operation) {
+    unawaited(
+      operation().catchError((Object error, StackTrace stackTrace) {
+        AppLogger.warning(eventName, error: error);
+      }),
+    );
+  }
+
+  Future<void> _serializeAccountTransition(Future<void> Function() operation) {
+    final next = _accountTransition
+        .catchError((Object _) {})
+        .then((_) => operation());
+    _accountTransition = next.catchError((Object _) {});
+    return next;
+  }
 
   @override
   Stream<SyncStatus> watchStatus() async* {
@@ -108,12 +146,24 @@ class SyncCoordinator implements CloudSyncRepository {
 
   @override
   Future<SyncStatus> status() async {
-    final account = await _localStore.account();
+    final account = await _localStore.existingAccount();
     final pending = await _localStore.pendingCount();
     final pendingMedia = await _localStore.pendingMediaCleanupCount();
     final nextRetryAt = await _localStore.nextRetryAt();
-    final hydration = await _localStore.hydrationProgress();
     final session = _authRepository.currentSession;
+    if (account == null) {
+      return SyncStatus(
+        phase: _phaseOverride ?? SyncPhase.signedOut,
+        pendingChanges: pending,
+        pendingMediaCleanup: pendingMedia,
+        message: _messageOverride,
+        realtime: SyncRealtimeConnection.disabled,
+        nextRetryAt: nextRetryAt,
+        mergeConfirmationRequired: false,
+        clockSkewConflicts: _clockSkewConflicts,
+      );
+    }
+    final hydration = await _localStore.hydrationProgress();
     final phase =
         _phaseOverride ??
         (!account.enabled
@@ -146,7 +196,7 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   @override
-  Future<void> enable() async {
+  Future<void> enable() => _serializeAccountTransition(() async {
     final session = _authRepository.currentSession;
     if (session == null) {
       throw const SupabaseFailure(
@@ -163,6 +213,8 @@ class SyncCoordinator implements CloudSyncRepository {
             'Sign back into that account or explicitly reset local data.',
       );
     }
+    _accountDeletionInProgress = false;
+    _deletingUserId = null;
     _mergeConfirmationRequired = false;
     final pristineCloudBootstrap = await _localStore
         .isPristineForCloudBootstrap();
@@ -171,25 +223,25 @@ class SyncCoordinator implements CloudSyncRepository {
       await _localStore.enqueueInitialSnapshot();
     }
     await _startSync(mode: SyncMode.initialHydration);
-  }
+  });
 
   @override
-  Future<void> disable() async {
+  Future<void> disable() => _serializeAccountTransition(() async {
     await _localStore.setEnabled(enabled: false);
     await _stopRealtime();
     _phaseOverride = null;
     _messageOverride = null;
     await _emit();
-  }
+  });
 
   @override
-  Future<void> unlink() async {
+  Future<void> unlink() => _serializeAccountTransition(() async {
     await _localStore.clearBinding();
     await _stopRealtime();
     _phaseOverride = null;
     _messageOverride = null;
     await _emit();
-  }
+  });
 
   @override
   Future<void> syncNow() => _startSync(mode: SyncMode.manualRefresh);
@@ -202,7 +254,77 @@ class SyncCoordinator implements CloudSyncRepository {
 
   Future<void> syncIncremental() => _startSync(mode: SyncMode.incrementalPull);
 
+  Future<void> prepareForAccountDeletion(String userId) {
+    return _serializeAccountTransition(() async {
+      final account = await _localStore.existingAccount();
+      if (account != null &&
+          account.boundUserId != null &&
+          account.boundUserId != userId) {
+        throw StateError('Local data belongs to a different cloud identity.');
+      }
+      _accountDeletionInProgress = true;
+      _deletingUserId = userId;
+      _advanceAccountEpoch('account_deletion_prepare');
+      _cancelScheduledSyncWork();
+      _deferredRemoteMedia.clear();
+      _mergeConfirmationRequired = false;
+      _phaseOverride = SyncPhase.signedOut;
+      _messageOverride = 'Account deletion is in progress.';
+      try {
+        await configureBackgroundSync?.call(false);
+      } on Object catch (error) {
+        AppLogger.warning(
+          'sync_account_deletion_background_cancel_failed',
+          error: error,
+        );
+      }
+      await _stopRealtime();
+      final active = _activeSync;
+      if (active != null) {
+        try {
+          await active.timeout(_localCleanupTimeout);
+        } on TimeoutException catch (error) {
+          AppLogger.warning(
+            'sync_account_deletion_active_sync_detached',
+            error: error,
+            fields: {'attempt': _syncAttemptSerial},
+          );
+        } on Object {
+          // The active operation already recorded its actionable failure.
+        }
+      }
+      await _emit();
+    });
+  }
+
+  Future<void> cancelAccountDeletion(String userId) {
+    return _serializeAccountTransition(() async {
+      if (_deletingUserId != null && _deletingUserId != userId) return;
+      _accountDeletionInProgress = false;
+      _deletingUserId = null;
+      _advanceAccountEpoch('account_deletion_cancelled');
+      final account = await _localStore.existingAccount();
+      try {
+        await configureBackgroundSync?.call(account?.enabled ?? false);
+      } on Object catch (error) {
+        AppLogger.warning(
+          'sync_account_deletion_background_resume_failed',
+          error: error,
+        );
+      }
+      _phaseOverride = null;
+      _messageOverride = null;
+      await _ensureRealtime();
+      _scheduleAutomaticSync(delay: Duration.zero);
+      await _emit();
+    });
+  }
+
   Future<void> _startSync({required SyncMode mode}) {
+    if (_accountDeletionInProgress) {
+      AppLogger.info('sync_skipped_account_deletion_in_progress');
+      return Future<void>.value();
+    }
     if (_activeSync != null) {
       final activeWork = _activeWork;
       final activeCoversRequestedPull =
@@ -245,6 +367,13 @@ class SyncCoordinator implements CloudSyncRepository {
     return _activeSync = _runSync(work, attempt: attempt).whenComplete(() {
       _activeSync = null;
       _activeWork = null;
+      if (_accountDeletionInProgress) {
+        _syncRequestedWhileActive = false;
+        _fullSyncRequestedWhileActive = false;
+        _pendingTargetTables.clear();
+        _pushOnlyRequested = false;
+        return;
+      }
       if (_syncRequestedWhileActive) {
         _syncRequestedWhileActive = false;
         final nextFullSync = _fullSyncRequestedWhileActive;
@@ -299,8 +428,11 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   Future<void> _runSync(SyncWork requestedWork, {required int attempt}) async {
+    _ActiveAccountScope? activeScope;
+    if (_accountDeletionInProgress) return;
     final session = _authRepository.currentSession;
-    final account = await _localStore.account();
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (!account.enabled) return;
     if (session == null) {
       _phaseOverride = SyncPhase.signedOut;
@@ -308,6 +440,11 @@ class SyncCoordinator implements CloudSyncRepository {
       await _emit();
       return;
     }
+    activeScope = _ActiveAccountScope(
+      epoch: _accountEpoch,
+      userId: session.userId,
+      deviceId: account.deviceId,
+    );
     if (account.boundUserId != session.userId) {
       _phaseOverride = SyncPhase.blocked;
       _messageOverride = 'Cloud account does not match this device data.';
@@ -315,6 +452,7 @@ class SyncCoordinator implements CloudSyncRepository {
       await _emit();
       return;
     }
+    await _ensureActiveAccountScope(activeScope);
     final leaseOwner =
         '$leaseScope:${account.deviceId}:'
         '${DateTime.now().microsecondsSinceEpoch}';
@@ -328,6 +466,7 @@ class SyncCoordinator implements CloudSyncRepository {
       return;
     }
 
+    await _ensureActiveAccountScope(activeScope);
     _phaseOverride = SyncPhase.syncing;
     _messageOverride = null;
     final firstSync = account.lastSyncedAt == null;
@@ -353,19 +492,23 @@ class SyncCoordinator implements CloudSyncRepository {
             ? await _pullAll(
                 session.userId,
                 account.deviceId,
+                scope: activeScope,
                 firstSync: firstSync,
                 buildHydrationPlan: firstSync,
                 targetTables: work.pullTables,
               )
             : const _PullOutcome();
         if (firstSync) {
-          _lastCloudAccountWasExisting = pullOutcome.remoteRecordCount > 0;
+          _lastCloudAccountWasExisting =
+              pullOutcome.meaningfulRemoteRecordCount > 0;
           AppLogger.info(
             'sync_cloud_account_classified',
             fields: {
               'attempt': attempt,
               'existing': _lastCloudAccountWasExisting!,
               'remote_records': pullOutcome.remoteRecordCount,
+              'meaningful_remote_records':
+                  pullOutcome.meaningfulRemoteRecordCount,
             },
           );
         }
@@ -379,8 +522,13 @@ class SyncCoordinator implements CloudSyncRepository {
             (work.mode == SyncMode.fullReconcile ||
                 await _localStore.shouldRunIntegrityCheck());
         if (integrityDue) {
-          await _reconcileMissedRemoteDeletes(session.userId, account.deviceId);
+          await _reconcileMissedRemoteDeletes(
+            session.userId,
+            account.deviceId,
+            scope: activeScope,
+          );
         }
+        await _ensureActiveAccountScope(activeScope);
         if (work.enqueueReconciliation) {
           await _localStore.enqueueReconciliationSnapshot();
         }
@@ -395,9 +543,14 @@ class SyncCoordinator implements CloudSyncRepository {
         final pushedSomething = await _pushPending(
           session.userId,
           account.deviceId,
+          scope: activeScope,
           trackHydration: firstSync,
         );
-        await _processMediaCleanup(session.userId, trackHydration: firstSync);
+        await _processMediaCleanup(
+          session.userId,
+          scope: activeScope,
+          trackHydration: firstSync,
+        );
         await _setInitialHydrationStage(
           firstSync,
           InitialHydrationStage.checkingLatestUpdates,
@@ -428,11 +581,13 @@ class SyncCoordinator implements CloudSyncRepository {
           );
         }
       }
+      await _ensureActiveAccountScope(activeScope);
       await _setInitialHydrationStage(
         firstSync,
         InitialHydrationStage.finalizing,
       );
       if (firstSync) {
+        await _ensureActiveAccountScope(activeScope);
         await _finalizationStep<void>(
           attempt: attempt,
           operation: 'advance_progress',
@@ -446,6 +601,7 @@ class SyncCoordinator implements CloudSyncRepository {
       }
       final completedAt = DateTime.now();
       if (firstSync) {
+        await _ensureActiveAccountScope(activeScope);
         await _finalizationStep<void>(
           attempt: attempt,
           operation: 'commit_local_home_snapshot',
@@ -455,12 +611,27 @@ class SyncCoordinator implements CloudSyncRepository {
           ),
         );
       } else {
+        await _ensureActiveAccountScope(activeScope);
         await _localStore.recordSyncSuccess(completedAt);
       }
       if (attempt != _syncAttemptSerial) return;
+      await _ensureActiveAccountScope(activeScope);
       _phaseOverride = SyncPhase.ready;
       _messageOverride = null;
+    } on _AccountScopeInactive {
+      AppLogger.info(
+        'sync_account_scope_discarded',
+        fields: {'attempt': attempt},
+      );
+      return;
     } on Object catch (error) {
+      if (!_isActiveAccountScope(activeScope)) {
+        AppLogger.info(
+          'sync_account_scope_failure_discarded',
+          fields: {'attempt': attempt},
+        );
+        return;
+      }
       final failure = SupabaseFailure.from(error);
       if (failure.kind == SupabaseFailureKind.authentication) {
         try {
@@ -526,6 +697,7 @@ class SyncCoordinator implements CloudSyncRepository {
   Future<_PullOutcome> _pullAll(
     String userId,
     String deviceId, {
+    required _ActiveAccountScope scope,
     required bool firstSync,
     required bool buildHydrationPlan,
     Set<String>? targetTables,
@@ -582,6 +754,7 @@ class SyncCoordinator implements CloudSyncRepository {
       );
     }
 
+    await _ensureActiveAccountScope(scope);
     if (firstSync && buildHydrationPlan) {
       final remoteRecords = seeds.fold<int>(
         0,
@@ -616,6 +789,7 @@ class SyncCoordinator implements CloudSyncRepository {
       var recordKey = seed.recordKey;
       var records = seed.firstPage;
       while (true) {
+        await _ensureActiveAccountScope(scope);
         if (firstSync) await _localStore.addHydrationUnits(1);
         if (records.isEmpty) break;
         for (final record in records) {
@@ -671,6 +845,7 @@ class SyncCoordinator implements CloudSyncRepository {
             'elapsed_ms': stopwatch.elapsedMilliseconds,
           },
         );
+        await _ensureActiveAccountScope(scope);
       }
       cursorUpdates[spec.entity] = (cursor, recordKey);
     }
@@ -707,6 +882,7 @@ class SyncCoordinator implements CloudSyncRepository {
               userId,
             ),
         ]);
+        await _ensureActiveAccountScope(scope);
         for (var offset = 0; offset < materialized.length; offset++) {
           remoteWinners[photoIndexes[index + offset]] = materialized[offset];
         }
@@ -719,6 +895,7 @@ class SyncCoordinator implements CloudSyncRepository {
     final deletions = remoteWinners
         .where((record) => record.isDeleted)
         .toList(growable: false);
+    await _ensureActiveAccountScope(scope);
     await _localStore.applyRemoteRecords(deletions);
     if (firstSync) await _localStore.addHydrationUnits(deletions.length);
     for (final seed in seeds) {
@@ -729,6 +906,7 @@ class SyncCoordinator implements CloudSyncRepository {
                 record.spec.entity == seed.spec.entity && !record.isDeleted,
           )
           .toList(growable: false);
+      await _ensureActiveAccountScope(scope);
       await _localStore.applyRemoteRecordsAndCheckpoint(
         records: upserts,
         entity: seed.spec.entity,
@@ -743,13 +921,20 @@ class SyncCoordinator implements CloudSyncRepository {
         0,
         (total, seed) => total + seed.exactCount,
       ),
+      meaningfulRemoteRecordCount: seeds.fold<int>(
+        0,
+        (total, seed) =>
+            total +
+            (_isBootstrapClassificationRecord(seed) ? seed.exactCount : 0),
+      ),
     );
   }
 
   Future<void> _reconcileMissedRemoteDeletes(
     String userId,
-    String deviceId,
-  ) async {
+    String deviceId, {
+    required _ActiveAccountScope scope,
+  }) async {
     final remoteKeys = <String, Set<String>>{};
     const parallelism = 4;
     for (var index = 0; index < syncEntitySpecs.length; index += parallelism) {
@@ -763,6 +948,7 @@ class SyncCoordinator implements CloudSyncRepository {
             deviceId: deviceId,
           ),
       ]);
+      await _ensureActiveAccountScope(scope);
       for (var offset = 0; offset < batch.length; offset++) {
         remoteKeys[batch[offset].entity] = results[offset];
       }
@@ -770,6 +956,7 @@ class SyncCoordinator implements CloudSyncRepository {
 
     var removed = 0;
     for (final spec in syncEntitySpecs.reversed) {
+      await _ensureActiveAccountScope(scope);
       final stopwatch = Stopwatch()..start();
       final tableRemoved = await _localStore.reconcileAuthoritativeRecordKeys(
         spec: spec,
@@ -865,10 +1052,12 @@ class SyncCoordinator implements CloudSyncRepository {
   Future<bool> _pushPending(
     String userId,
     String deviceId, {
+    required _ActiveAccountScope scope,
     bool trackHydration = false,
   }) async {
     bool pushedSomething = false;
     while (true) {
+      await _ensureActiveAccountScope(scope);
       final mutations = await _localStore.pendingMutations();
       if (mutations.isEmpty) return pushedSomething;
       pushedSomething = true;
@@ -897,10 +1086,13 @@ class SyncCoordinator implements CloudSyncRepository {
               payloadJson: payloadJson,
               userId: userId,
               deviceId: deviceId,
+              scope: scope,
             );
             if (trackHydration) {
               await _localStore.addHydrationUnits(1);
             }
+          } on _AccountScopeInactive {
+            rethrow;
           } on Object catch (error) {
             final failure = SupabaseFailure.from(error);
             if (!await _localStore.isMutationFailedVisible(mutation)) {
@@ -952,6 +1144,9 @@ class SyncCoordinator implements CloudSyncRepository {
                   userId: userId,
                   deviceId: deviceId,
                 );
+                await _ensureActiveAccountScope(scope);
+              } on _AccountScopeInactive {
+                rethrow;
               } on Object catch (error) {
                 final failure = SupabaseFailure.from(error);
                 for (final item in batchMutations) {
@@ -981,10 +1176,13 @@ class SyncCoordinator implements CloudSyncRepository {
                     deviceId,
                     batchMutations[offset],
                     batchRecords[offset],
+                    scope: scope,
                   );
                   if (trackHydration) {
                     await _localStore.addHydrationUnits(1);
                   }
+                } on _AccountScopeInactive {
+                  rethrow;
                 } on Object catch (error) {
                   final failure = SupabaseFailure.from(error);
                   await _recordMutationFailure(batchMutations[offset], failure);
@@ -1006,8 +1204,11 @@ class SyncCoordinator implements CloudSyncRepository {
           continue;
         }
         try {
-          await _pushOne(userId, deviceId, mutation, record);
+          await _pushOne(userId, deviceId, mutation, record, scope: scope);
+          await _ensureActiveAccountScope(scope);
           if (trackHydration) await _localStore.addHydrationUnits(1);
+        } on _AccountScopeInactive {
+          rethrow;
         } on Object catch (error) {
           final failure = SupabaseFailure.from(error);
           await _recordMutationFailure(mutation, failure);
@@ -1024,6 +1225,7 @@ class SyncCoordinator implements CloudSyncRepository {
     required String payloadJson,
     required String userId,
     required String deviceId,
+    required _ActiveAccountScope scope,
   }) async {
     await _localStore.markMutationInFlight(mutation, userId: userId);
     AppLogger.info(
@@ -1041,6 +1243,9 @@ class SyncCoordinator implements CloudSyncRepository {
         userId: userId,
         deviceId: deviceId,
       );
+      await _ensureActiveAccountScope(scope);
+    } on _AccountScopeInactive {
+      rethrow;
     } on Object catch (error) {
       final failure = SupabaseFailure.from(error);
       if (failure.kind != SupabaseFailureKind.conflict) rethrow;
@@ -1050,6 +1255,7 @@ class SyncCoordinator implements CloudSyncRepository {
         userId: userId,
         deviceId: deviceId,
       );
+      await _ensureActiveAccountScope(scope);
     }
 
     if (result.acknowledged) {
@@ -1096,6 +1302,7 @@ class SyncCoordinator implements CloudSyncRepository {
         userId: userId,
         deviceId: deviceId,
       );
+      await _ensureActiveAccountScope(scope);
       if (retried.acknowledged) {
         await _acknowledgeMaintenanceCompletion(mutation, retried);
         return;
@@ -1290,8 +1497,9 @@ class SyncCoordinator implements CloudSyncRepository {
     String userId,
     String deviceId,
     LocalSyncMutation mutation,
-    SyncRecord local,
-  ) async {
+    SyncRecord local, {
+    required _ActiveAccountScope scope,
+  }) async {
     final shadow = await _localStore.shadow(
       mutation.entity,
       mutation.recordKey,
@@ -1302,6 +1510,7 @@ class SyncCoordinator implements CloudSyncRepository {
       deviceId: deviceId,
       expectedRevision: shadow?.remoteRevision,
     );
+    await _ensureActiveAccountScope(scope);
     if (!result.conflict) {
       await _completeMutation(userId, mutation, result);
       return;
@@ -1313,6 +1522,7 @@ class SyncCoordinator implements CloudSyncRepository {
     if (remote != null &&
         ((shadow == null && await _localStore.isUntouchedSeed(local)) ||
             _sameRecordData(local, remote))) {
+      await _ensureActiveAccountScope(scope);
       await _localStore.applyRemoteRecords([remote]);
       await _localStore.markMutationSucceeded(mutation, remote);
       return;
@@ -1323,6 +1533,7 @@ class SyncCoordinator implements CloudSyncRepository {
         deviceId: deviceId,
         expectedRevision: null,
       );
+      await _ensureActiveAccountScope(scope);
     } else if (local.clientModifiedAt.isAfter(remote.clientModifiedAt) ||
         (local.clientModifiedAt.isAtSameMomentAs(remote.clientModifiedAt) &&
             local.originDeviceId.compareTo(remote.originDeviceId) > 0)) {
@@ -1332,7 +1543,9 @@ class SyncCoordinator implements CloudSyncRepository {
         deviceId: deviceId,
         expectedRevision: remote.revision,
       );
+      await _ensureActiveAccountScope(scope);
     } else {
+      await _ensureActiveAccountScope(scope);
       await _localStore.applyRemoteRecords([remote]);
       await _localStore.markMutationSucceeded(mutation, remote);
       return;
@@ -1347,6 +1560,7 @@ class SyncCoordinator implements CloudSyncRepository {
         retryable: true,
       );
     }
+    await _ensureActiveAccountScope(scope);
     await _completeMutation(userId, mutation, result);
   }
 
@@ -1382,15 +1596,20 @@ class SyncCoordinator implements CloudSyncRepository {
 
   Future<void> _processMediaCleanup(
     String userId, {
+    required _ActiveAccountScope scope,
     bool trackHydration = false,
   }) async {
     final cleanups = await _localStore.pendingMediaCleanup();
     for (final cleanup in cleanups) {
+      await _ensureActiveAccountScope(scope);
       if (cleanup.userId != userId) continue;
       try {
         await _remoteGateway.removeMediaObject(cleanup.objectPath, userId);
+        await _ensureActiveAccountScope(scope);
         await _localStore.markMediaCleanupSucceeded(cleanup.objectPath);
         if (trackHydration) await _localStore.addHydrationUnits(1);
+      } on _AccountScopeInactive {
+        rethrow;
       } on Object catch (error) {
         final failure = SupabaseFailure.from(error);
         if (failure.kind == SupabaseFailureKind.permissionDenied ||
@@ -1408,6 +1627,7 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   void startPostReadyWork() {
+    if (_accountDeletionInProgress) return;
     if (_postReadyWork != null) return;
     final work = _runPostReadyWork();
     _postReadyWork = work;
@@ -1421,8 +1641,20 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   Future<void> _runPostReadyWork() async {
+    if (_accountDeletionInProgress) return;
     final session = _authRepository.currentSession;
     if (session == null) return;
+    final account = await _localStore.existingAccount();
+    if (account == null ||
+        !account.enabled ||
+        account.boundUserId != session.userId) {
+      return;
+    }
+    final scope = _ActiveAccountScope(
+      epoch: _accountEpoch,
+      userId: session.userId,
+      deviceId: account.deviceId,
+    );
     final stopwatch = Stopwatch()..start();
     AppLogger.info('sync_post_ready_start');
     try {
@@ -1435,7 +1667,7 @@ class SyncCoordinator implements CloudSyncRepository {
       );
     }
     try {
-      await _materializePostReadyPhotos(session);
+      await _materializePostReadyPhotos(session, scope: scope);
     } on Object catch (error) {
       AppLogger.warning(
         'sync_post_ready_media_deferred',
@@ -1449,8 +1681,12 @@ class SyncCoordinator implements CloudSyncRepository {
     );
   }
 
-  Future<void> _materializePostReadyPhotos(AuthSession session) async {
-    final account = await _localStore.account();
+  Future<void> _materializePostReadyPhotos(
+    AuthSession session, {
+    required _ActiveAccountScope scope,
+  }) async {
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (account.boundUserId != session.userId) return;
     final queued = _deferredRemoteMedia.values.toList(growable: false);
     if (queued.isNotEmpty) {
@@ -1465,6 +1701,7 @@ class SyncCoordinator implements CloudSyncRepository {
         ]);
         final completed = results.whereType<SyncRecord>().toList();
         if (completed.isNotEmpty) {
+          await _ensureActiveAccountScope(scope);
           await _localStore.applyRemoteRecords(completed);
           for (final record in completed) {
             _deferredRemoteMedia.remove(record.recordKey);
@@ -1488,6 +1725,7 @@ class SyncCoordinator implements CloudSyncRepository {
       ]);
       final completed = records.whereType<SyncRecord>().toList();
       if (completed.isNotEmpty) {
+        await _ensureActiveAccountScope(scope);
         await _localStore.applyRemoteRecords(completed);
       }
     }
@@ -1537,7 +1775,9 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   Future<void> onAppResumed() async {
-    final account = await _localStore.account();
+    if (_accountDeletionInProgress) return;
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (account.enabled && _authRepository.currentSession != null) {
       await _ensureRealtime();
       final lastSyncedAt = account.lastSyncedAt;
@@ -1557,17 +1797,57 @@ class SyncCoordinator implements CloudSyncRepository {
 
   Future<void> onAppPaused() async {}
 
-  Future<void> _handleAccountChanged(bool enabled) async {
+  Future<void> _handleAccountChanged(SyncAccountData? account) async {
+    final previousScopeKey = _lastAccountScopeKey;
+    final scopeKey = _accountScopeKey(account);
+    if (scopeKey != previousScopeKey) {
+      _lastAccountScopeKey = scopeKey;
+      if (account == null && previousScopeKey != null) {
+        _advanceAccountEpoch('account_absent');
+      }
+    }
+    if (account == null) {
+      _cancelScheduledSyncWork();
+      _mergeConfirmationRequired = false;
+      _phaseOverride = SyncPhase.signedOut;
+      _messageOverride = null;
+      try {
+        await configureBackgroundSync?.call(false);
+      } on Object {
+        // Foreground sync remains available if the OS scheduler rejects work.
+      }
+      await _stopRealtime();
+      await _emit();
+      return;
+    }
+    if (_accountDeletionInProgress &&
+        (_deletingUserId == null || account.boundUserId != _deletingUserId)) {
+      _accountDeletionInProgress = false;
+      _deletingUserId = null;
+    }
     try {
-      await configureBackgroundSync?.call(enabled);
+      await configureBackgroundSync?.call(
+        account.enabled && !_accountDeletionInProgress,
+      );
     } on Object {
       // Foreground sync remains available if the OS scheduler rejects work.
     }
     await _emit();
-    await _ensureRealtime();
+    if (!_accountDeletionInProgress) {
+      await _ensureRealtime();
+    }
+  }
+
+  Future<void> _handleAccountWatchError(Object error) async {
+    _phaseOverride = SyncPhase.error;
+    _messageOverride = SupabaseFailure.from(error).message;
+    _cancelScheduledSyncWork();
+    await _stopRealtime();
+    await _emit();
   }
 
   Future<void> _handlePendingChanged(int pending) async {
+    if (_accountDeletionInProgress) return;
     await _emit();
     if (pending > 0 && await _localStore.hasReadyMutations()) {
       _scheduleAutomaticSync(pushOnly: true);
@@ -1591,6 +1871,16 @@ class SyncCoordinator implements CloudSyncRepository {
     if (session == null) {
       _mergeConfirmationRequired = false;
       await _stopRealtime();
+      await _emit();
+      return;
+    }
+
+    if (_accountDeletionInProgress && session.userId != _deletingUserId) {
+      _accountDeletionInProgress = false;
+      _deletingUserId = null;
+      _advanceAccountEpoch('new_auth_scope_after_deletion');
+    }
+    if (_accountDeletionInProgress) {
       await _emit();
       return;
     }
@@ -1633,6 +1923,10 @@ class SyncCoordinator implements CloudSyncRepository {
       _phaseOverride = null;
       _messageOverride = null;
     }
+    if (_accountDeletionInProgress) {
+      await _emit();
+      return;
+    }
     await _ensureRealtime();
     if (restored) {
       _scheduleAutomaticSync(delay: Duration.zero, forceAfterActive: true);
@@ -1646,6 +1940,7 @@ class SyncCoordinator implements CloudSyncRepository {
     bool pushOnly = false,
     bool forceAfterActive = false,
   }) {
+    if (_accountDeletionInProgress) return;
     if (targetTables != null) {
       _pendingTargetTables.addAll(targetTables);
     }
@@ -1679,7 +1974,9 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   Future<void> _runAutomaticSync() async {
-    final account = await _localStore.account();
+    if (_accountDeletionInProgress) return;
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (!account.enabled ||
         account.blockedReason != null ||
         !_online ||
@@ -1696,7 +1993,9 @@ class SyncCoordinator implements CloudSyncRepository {
   Future<void> _scheduleRetry() async {
     if (!_automaticSyncEnabled) return;
     _retryTimer?.cancel();
-    final account = await _localStore.account();
+    if (_accountDeletionInProgress) return;
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (account.blockedReason != null) return;
     final retryAt = await _localStore.nextRetryAt();
     if (retryAt == null) return;
@@ -1707,13 +2006,62 @@ class SyncCoordinator implements CloudSyncRepository {
     );
   }
 
+  String? _accountScopeKey(SyncAccountData? account) {
+    if (account == null) return null;
+    return [
+      account.enabled,
+      account.boundUserId ?? '',
+      account.deviceId,
+    ].join('|');
+  }
+
+  void _advanceAccountEpoch(String reason) {
+    _accountEpoch++;
+    AppLogger.info(
+      'sync_account_epoch_advanced',
+      fields: {'epoch': _accountEpoch, 'reason': reason},
+    );
+  }
+
+  void _cancelScheduledSyncWork() {
+    _automaticSyncTimer?.cancel();
+    _retryTimer?.cancel();
+    _realtimeReconnectTimer?.cancel();
+    _realtimeDeleteFollowUpTimer?.cancel();
+    _pendingTargetTables.clear();
+    _pushOnlyRequested = false;
+    _syncRequestedWhileActive = false;
+    _fullSyncRequestedWhileActive = false;
+  }
+
+  bool _isActiveAccountScope(_ActiveAccountScope scope) {
+    if (_accountDeletionInProgress) return false;
+    if (scope.epoch != _accountEpoch) return false;
+    return _authRepository.currentSession?.userId == scope.userId;
+  }
+
+  Future<void> _ensureActiveAccountScope(_ActiveAccountScope scope) async {
+    if (!_isActiveAccountScope(scope)) {
+      throw const _AccountScopeInactive();
+    }
+    final account = await _localStore.existingAccount();
+    if (account == null ||
+        !account.enabled ||
+        account.boundUserId != scope.userId ||
+        account.deviceId != scope.deviceId ||
+        !_isActiveAccountScope(scope)) {
+      throw const _AccountScopeInactive();
+    }
+  }
+
   Future<void> _ensureRealtime() =>
       _serializeRealtimeOperation(_ensureRealtimeSerial);
 
   Future<void> _ensureRealtimeSerial() async {
     final realtime = _realtime;
-    if (realtime == null || !_online) return;
-    final account = await _localStore.account();
+    if (realtime == null || !_online || _accountDeletionInProgress) return;
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     final session = _authRepository.currentSession;
     if (!account.enabled ||
         session == null ||
@@ -1722,6 +2070,11 @@ class SyncCoordinator implements CloudSyncRepository {
       return;
     }
     final identity = '${session.userId}:${account.deviceId}';
+    final scope = _ActiveAccountScope(
+      epoch: _accountEpoch,
+      userId: session.userId,
+      deviceId: account.deviceId,
+    );
     if (_realtimeIdentity == identity) return;
     _realtimeConnection = _realtimeReconnectAttempts == 0
         ? SyncRealtimeConnection.connecting
@@ -1732,7 +2085,7 @@ class SyncCoordinator implements CloudSyncRepository {
         userId: session.userId,
         deviceId: account.deviceId,
         onChange: (event) {
-          unawaited(_handleRealtimeChange(event));
+          unawaited(_handleRealtimeChange(event, scope: scope));
         },
         onDelete: (spec, oldRecord) {
           unawaited(
@@ -1741,10 +2094,12 @@ class SyncCoordinator implements CloudSyncRepository {
               oldRecord: oldRecord,
               userId: session.userId,
               deviceId: account.deviceId,
+              scope: scope,
             ),
           );
         },
         onStatus: (status, _) {
+          if (!_isActiveAccountScope(scope)) return;
           switch (status) {
             case SyncRealtimeStatus.subscribed:
               _realtimeReconnectAttempts = 0;
@@ -1767,8 +2122,13 @@ class SyncCoordinator implements CloudSyncRepository {
     }
   }
 
-  Future<void> _handleRealtimeChange(RealtimeSyncEvent event) async {
-    final account = await _localStore.account();
+  Future<void> _handleRealtimeChange(
+    RealtimeSyncEvent event, {
+    required _ActiveAccountScope scope,
+  }) async {
+    if (!_isActiveAccountScope(scope)) return;
+    final account = await _localStore.existingAccount();
+    if (account == null) return;
     if (event.originDeviceId != null &&
         event.originDeviceId == account.deviceId) {
       AppLogger.info(
@@ -1793,7 +2153,7 @@ class SyncCoordinator implements CloudSyncRepository {
   }
 
   void _scheduleRealtimeReconnect() {
-    if (!_online || _realtime == null) return;
+    if (!_online || _realtime == null || _accountDeletionInProgress) return;
     _realtimeReconnectTimer?.cancel();
     _realtimeReconnectAttempts++;
     final seconds = math.min(
@@ -1810,24 +2170,42 @@ class SyncCoordinator implements CloudSyncRepository {
     required Map<String, dynamic> oldRecord,
     required String userId,
     required String deviceId,
+    required _ActiveAccountScope scope,
   }) async {
     try {
+      await _ensureActiveAccountScope(scope);
       await _localStore.applyRemoteHardDelete(
         spec: spec,
         oldRecord: oldRecord,
         userId: userId,
         deviceId: deviceId,
       );
+    } on _AccountScopeInactive {
+      return;
     } on Object catch (error) {
       final failure = SupabaseFailure.from(error);
       _phaseOverride = SyncPhase.error;
       _messageOverride = failure.message;
       await _localStore.recordSyncFailure(failure.message);
     } finally {
-      _scheduleAutomaticSync(
-        delay: Duration.zero,
-        targetTables: {spec.remoteTable},
-      );
+      if (_isActiveAccountScope(scope)) {
+        _scheduleAutomaticSync(
+          delay: Duration.zero,
+          targetTables: {spec.remoteTable},
+        );
+        _realtimeDeleteFollowUpTimer?.cancel();
+        _realtimeDeleteFollowUpTimer = Timer(
+          const Duration(milliseconds: 250),
+          () {
+            _realtimeDeleteFollowUpTimer = null;
+            _scheduleAutomaticSync(
+              delay: Duration.zero,
+              targetTables: {spec.remoteTable},
+              forceAfterActive: true,
+            );
+          },
+        );
+      }
       await _emit();
     }
   }
@@ -1864,6 +2242,7 @@ class SyncCoordinator implements CloudSyncRepository {
     _automaticSyncTimer?.cancel();
     _retryTimer?.cancel();
     _realtimeReconnectTimer?.cancel();
+    _realtimeDeleteFollowUpTimer?.cancel();
     await _accountSubscription?.cancel();
     await _pendingSubscription?.cancel();
     await _authSubscription?.cancel();
@@ -1871,6 +2250,22 @@ class SyncCoordinator implements CloudSyncRepository {
     await _stopRealtime();
     await _statusController.close();
   }
+}
+
+class _ActiveAccountScope {
+  const _ActiveAccountScope({
+    required this.epoch,
+    required this.userId,
+    required this.deviceId,
+  });
+
+  final int epoch;
+  final String userId;
+  final String deviceId;
+}
+
+class _AccountScopeInactive implements Exception {
+  const _AccountScopeInactive();
 }
 
 class _PullSeed {
@@ -1893,10 +2288,16 @@ class _PullOutcome {
   const _PullOutcome({
     this.maintenanceChanged = false,
     this.remoteRecordCount = 0,
+    this.meaningfulRemoteRecordCount = 0,
   });
 
   final bool maintenanceChanged;
   final int remoteRecordCount;
+  final int meaningfulRemoteRecordCount;
+}
+
+bool _isBootstrapClassificationRecord(_PullSeed seed) {
+  return seed.spec.entity != 'category';
 }
 
 bool _sameRecordData(SyncRecord local, SyncRecord remote) {

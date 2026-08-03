@@ -59,6 +59,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -73,6 +75,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -96,6 +100,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -132,6 +138,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -166,6 +174,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -212,16 +222,22 @@ void main() {
       when(
         () => auth.signOut(scope: SignOutScope.local),
       ).thenAnswer((_) async {});
+      String? preparedUserId;
+      String? cancelledUserId;
       String? cleanedUserId;
       final repository = SupabaseAuthRepository(
         client,
         googleSignIn,
+        onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
+        onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
         onAccountDeleted: (userId) async => cleanedUserId = userId,
       );
 
       await repository.deleteAccount();
 
       expect(googleSignIn.signInCalls, 1);
+      expect(preparedUserId, 'user-1');
+      expect(cancelledUserId, isNull);
       expect(cleanedUserId, 'user-1');
       verify(
         () => functions.invoke(
@@ -262,6 +278,8 @@ void main() {
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
     );
 
@@ -285,7 +303,7 @@ void main() {
     verify(() => auth.signOut(scope: SignOutScope.local)).called(1);
   });
 
-  test('storage cleanup failure clears the revoked local session', () async {
+  test('storage cleanup failure rolls back deletion preparation', () async {
     final client = _MockSupabaseClient();
     final auth = _MockGoTrueClient();
     final functions = _MockFunctionsClient();
@@ -317,10 +335,15 @@ void main() {
     when(
       () => auth.signOut(scope: SignOutScope.local),
     ).thenAnswer((_) async {});
+    String? preparedUserId;
+    String? cancelledUserId;
+    String? cleanedUserId;
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
-      onAccountDeleted: (_) async {},
+      onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
+      onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
+      onAccountDeleted: (userId) async => cleanedUserId = userId,
     );
 
     await expectLater(
@@ -336,7 +359,10 @@ void main() {
       ),
     );
 
-    verify(() => auth.signOut(scope: SignOutScope.local)).called(1);
-    expect(googleSignIn.signOutCalls, 1);
+    expect(preparedUserId, 'user-1');
+    expect(cancelledUserId, 'user-1');
+    expect(cleanedUserId, isNull);
+    verifyNever(() => auth.signOut(scope: SignOutScope.local));
+    expect(googleSignIn.signOutCalls, 0);
   });
 }

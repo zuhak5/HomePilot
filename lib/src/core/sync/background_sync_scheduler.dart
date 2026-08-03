@@ -14,6 +14,14 @@ Future<void> configureCloudSyncBackgroundTask(bool _) async {
   await wm.Workmanager().cancelByUniqueName(cloudSyncBackgroundTask);
 }
 
+Future<void> cancelAccountScopedBackgroundWork() async {
+  if (!Platform.isAndroid) return;
+  final workManager = wm.Workmanager();
+  await workManager.cancelByUniqueName(cloudSyncBackgroundTask);
+  await workManager.cancelByUniqueName(restoreRecoveryTask);
+  await workManager.cancelByUniqueName(dailyRefreshTask);
+}
+
 Future<void> enqueueRestoreRecovery() async {
   if (!Platform.isAndroid) return;
   await wm.Workmanager().registerOneOffTask(
