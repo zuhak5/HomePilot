@@ -9,6 +9,9 @@ import 'package:homepilot/l10n/app_localizations.dart';
 import '../data/repositories.dart';
 import '../database/app_database.dart';
 import '../domain/models.dart';
+import '../observability/sentry_bootstrap.dart';
+import '../observability/sentry_logger_bridge.dart';
+import '../observability/sentry_tracing.dart';
 import '../services/notification_service.dart';
 import 'background_sync_scheduler.dart';
 import 'local_sync_store.dart';
@@ -81,6 +84,7 @@ void homePilotRestoreForegroundCallback() {
 
 class _RestoreTaskHandler extends TaskHandler {
   bool _running = false;
+  Future<bool>? _sentryInitialization;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) => _run();
@@ -90,32 +94,113 @@ class _RestoreTaskHandler extends TaskHandler {
     unawaited(_run());
   }
 
+  Future<bool> _ensureSentry() {
+    return _sentryInitialization ??= initializeBackgroundSentry();
+  }
+
   Future<void> _run() async {
     if (_running) return;
     _running = true;
+    InitialHydrationStage? activeStage;
     try {
-      var progress = await _readProgress();
-      if (progress == null || !progress.isActive) {
-        await FlutterForegroundTask.stopService();
-        return;
-      }
-      final l10n = await _backgroundRestoreLocalizations();
-      await FlutterForegroundTask.updateService(
-        notificationTitle: l10n.restoringHomePilot,
-        notificationText: _notificationText(l10n, progress),
+      await _ensureSentry();
+      await traceHomePilotOperation<void>(
+        'restore.foreground_cycle',
+        () async {
+          var progress = await traceHomePilotOperation<InitialHydrationProgress?>(
+            'restore.read_progress',
+            _readProgress,
+            attributes: const {'execution': 'foreground_service'},
+          );
+          if (progress == null || !progress.isActive) {
+            await FlutterForegroundTask.stopService();
+            return;
+          }
+          activeStage = progress.stage;
+          final l10n = await _backgroundRestoreLocalizations();
+          await traceHomePilotOperation<void>(
+            'restore.update_notification',
+            () async {
+              await FlutterForegroundTask.updateService(
+                notificationTitle: l10n.restoringHomePilot,
+                notificationText: _notificationText(l10n, progress!),
+              );
+            },
+            attributes: {
+              'execution': 'foreground_service',
+              'restore_stage': progress.stage.name,
+              'percentage': progress.percentage,
+            },
+          );
+          if (progress.state != RestoreRunState.completed) {
+            await traceHomePilotOperation<void>(
+              'restore.cloud_sync',
+              () async {
+                await runCloudSyncInBackground(
+                  leaseScope: 'restore-service',
+                );
+              },
+              attributes: {
+                'execution': 'foreground_service',
+                'restore_stage': progress.stage.name,
+                'lease_scope': 'restore-service',
+                'percentage': progress.percentage,
+              },
+            );
+          }
+          progress = await traceHomePilotOperation<InitialHydrationProgress?>(
+            'restore.read_progress',
+            _readProgress,
+            attributes: const {'execution': 'foreground_service'},
+          );
+          if (progress == null || !progress.isActive) {
+            await traceHomePilotOperation<void>(
+              'restore.finalize',
+              FlutterForegroundTask.stopService,
+              attributes: const {'execution': 'foreground_service'},
+            );
+          } else {
+            activeStage = progress.stage;
+            await traceHomePilotOperation<void>(
+              'restore.update_notification',
+              () async {
+                await FlutterForegroundTask.updateService(
+                  notificationTitle: l10n.restoringHomePilot,
+                  notificationText: _notificationText(l10n, progress!),
+                );
+              },
+              attributes: {
+                'execution': 'foreground_service',
+                'restore_stage': progress.stage.name,
+                'percentage': progress.percentage,
+              },
+            );
+          }
+        },
+        attributes: const {'execution': 'foreground_service'},
       );
-      if (progress.state != RestoreRunState.completed) {
-        await runCloudSyncInBackground(leaseScope: 'restore-service');
-      }
-      progress = await _readProgress();
-      if (progress == null || !progress.isActive) {
-        await FlutterForegroundTask.stopService();
-      } else {
-        await FlutterForegroundTask.updateService(
-          notificationTitle: l10n.restoringHomePilot,
-          notificationText: _notificationText(l10n, progress),
+    } on Object catch (error, stackTrace) {
+      reportOperationFailure(
+        operation: 'restore_foreground_cycle_failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: {
+          'execution': 'foreground_service',
+          if (activeStage != null) 'restore_stage': activeStage.name,
+        },
+      );
+      try {
+        await enqueueRestoreRecovery();
+      } on Object catch (recoveryError, recoveryStackTrace) {
+        reportOperationFailure(
+          operation: 'restore_recovery_enqueue_failed',
+          error: recoveryError,
+          stackTrace: recoveryStackTrace,
+          fields: const {'execution': 'foreground_service'},
         );
       }
+      // Keep the foreground worker alive for its next scheduled retry rather
+      // than rethrowing into a plugin-managed crash loop.
     } finally {
       _running = false;
     }
