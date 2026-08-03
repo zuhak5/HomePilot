@@ -39,6 +39,14 @@ The Supabase account stores a points wallet, immutable points transaction histor
 
 HomePilot records a limited set of account-scoped monetization events in Supabase: native-ad impression or click, interstitial display, rewarded-ad completion pending server verification, points shortage, and successful points debit. Event properties are restricted to operational fields such as screen placement, ad unit, reward amount, entity type, cooldown state, and resulting balance. These events do not contain maintenance notes, item names, room names, or ad-server signatures.
 
+## Crash And Performance Diagnostics
+
+HomePilot uses Sentry in its European Union data region to receive crash reports and sampled performance diagnostics. These diagnostics are used to identify application defects, failed background or restore operations, startup regressions, and unusually slow application operations.
+
+Sentry events may include the HomePilot version and build, application environment, operating-system and device model information, anonymous application-run identifier, normalized screen or operation name, error type, stack trace, timing measurements, retry state, and coarse operational counts. The application does not attach a Sentry user identity or send the Supabase user ID, email address, Google identity, authentication tokens, request or response bodies, maintenance notes, room or asset names, precise location, local file paths, notification payloads, screenshots, view hierarchy, session replay, profiling data, or exported diagnostic ZIP files.
+
+HomePilot applies an allowlist and redaction pass before Sentry events, transactions, and breadcrumbs are submitted. Expected conditions such as cancellation, offline state, authentication expiry, permission denial, and synchronization conflicts are normally suppressed rather than reported as defects. Sentry-side data scrubbing and prevention of IP-address storage are also enabled. Diagnostic transmission is isolated from application behavior: failure to initialize or contact Sentry does not block HomePilot startup, authentication, local data access, synchronization recovery, or account deletion.
+
 ## Backups And Photos
 
 HomePilot can create local backup ZIP files when the user enables or requests backups. Backup files remain in app-private storage unless the user explicitly shares one, and app-private copies are removed during account deletion. Copies previously shared or exported outside HomePilot are outside the app's control and must be deleted by the user. Restores happen only from a user-selected backup file and require an authenticated account import path. Asset photos and profile images are selected by the user from the device and uploaded to private Supabase Storage when attached to cloud records.
@@ -53,4 +61,4 @@ Weather is optional. Searching for a place sends the search text to Open-Meteo's
 
 ## Network Access
 
-The app uses network access for Google authentication, Supabase data access, Realtime refreshes, private media upload/download, Google Mobile Ads and consent messaging, weather, and location labels. During temporary network loss, authenticated edits are cached locally and synchronized after reconnect. Point-gated item and task creation requires an online atomic server transaction; the editor remains open as a draft when that transaction cannot be completed.
+The app uses network access for Google authentication, Supabase data access, Realtime refreshes, private media upload/download, Google Mobile Ads and consent messaging, Sentry crash and performance diagnostics, weather, and location labels. During temporary network loss, authenticated edits are cached locally and synchronized after reconnect. Point-gated item and task creation requires an online atomic server transaction; the editor remains open as a draft when that transaction cannot be completed.
