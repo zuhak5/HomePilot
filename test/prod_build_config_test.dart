@@ -16,6 +16,10 @@ void main() {
       expect(config.supabaseUrl.host, isNotEmpty);
       expect(config.supabasePublishableKey, startsWith('sb_publishable_'));
       expect(config.googleWebClientId, endsWith('.apps.googleusercontent.com'));
+      expect(config.sentryEnabled, isTrue);
+      expect(config.sentryDsn, isNotEmpty);
+      expect(config.sentryTracesSampleRate, inInclusiveRange(0, 1));
+      expect(config.redactedDescription, isNot(contains(config.sentryDsn)));
     },
     tags: 'production-config',
     skip: verifyProductionConfig

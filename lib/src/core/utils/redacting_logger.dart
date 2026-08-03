@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+typedef AppDiagnosticEventSink = void Function(AppDiagnosticEvent event);
+
 class AppDiagnosticEvent {
   const AppDiagnosticEvent({
     required this.timestamp,
@@ -13,6 +15,8 @@ class AppDiagnosticEvent {
     required this.runId,
     required this.fields,
     this.errorType,
+    this.error,
+    this.stackTrace,
   });
 
   final DateTime timestamp;
@@ -21,6 +25,8 @@ class AppDiagnosticEvent {
   final String runId;
   final Map<String, Object?> fields;
   final String? errorType;
+  final Object? error;
+  final StackTrace? stackTrace;
 
   Map<String, Object?> toJson() => {
     'timestamp': timestamp.toUtc().toIso8601String(),
@@ -37,7 +43,8 @@ abstract final class AppLogger {
   static final String runId =
       'run-${DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(36)}';
   static final List<AppDiagnosticEvent> _events = [];
-  static void Function(AppDiagnosticEvent event)? _eventSink;
+  static final Set<AppDiagnosticEventSink> _eventSinks = {};
+  static AppDiagnosticEventSink? _legacyEventSink;
 
   static void info(String event, {Map<String, Object?> fields = const {}}) {
     _write('INFO', event, fields: fields);
@@ -46,9 +53,25 @@ abstract final class AppLogger {
   static void warning(
     String event, {
     Object? error,
+    StackTrace? stackTrace,
     Map<String, Object?> fields = const {},
   }) {
-    _write('WARN', event, error: error, fields: fields);
+    _write('WARN', event, error: error, stackTrace: stackTrace, fields: fields);
+  }
+
+  static void error(
+    String event, {
+    required Object error,
+    StackTrace? stackTrace,
+    Map<String, Object?> fields = const {},
+  }) {
+    _write(
+      'ERROR',
+      event,
+      error: error,
+      stackTrace: stackTrace,
+      fields: fields,
+    );
   }
 
   static List<AppDiagnosticEvent> snapshot({bool errorsOnly = false}) {
@@ -61,19 +84,36 @@ abstract final class AppLogger {
     );
   }
 
-  static void installEventSink(
-    void Function(AppDiagnosticEvent event)? eventSink,
-  ) {
-    _eventSink = eventSink;
+  static void addEventSink(AppDiagnosticEventSink eventSink) {
+    _eventSinks.add(eventSink);
+  }
+
+  static void removeEventSink(AppDiagnosticEventSink eventSink) {
+    _eventSinks.remove(eventSink);
+  }
+
+  @Deprecated('Use addEventSink and removeEventSink for independent sinks.')
+  static void installEventSink(AppDiagnosticEventSink? eventSink) {
+    final previous = _legacyEventSink;
+    if (previous != null) _eventSinks.remove(previous);
+    _legacyEventSink = eventSink;
+    if (eventSink != null) _eventSinks.add(eventSink);
   }
 
   @visibleForTesting
   static void clearForTesting() => _events.clear();
 
+  @visibleForTesting
+  static void clearEventSinksForTesting() {
+    _eventSinks.clear();
+    _legacyEventSink = null;
+  }
+
   static void _write(
     String level,
     String event, {
     Object? error,
+    StackTrace? stackTrace,
     required Map<String, Object?> fields,
   }) {
     final safeEvent = _safeToken(event);
@@ -91,12 +131,21 @@ abstract final class AppLogger {
       runId: runId,
       fields: safeFields,
       errorType: error?.runtimeType.toString(),
+      error: error,
+      stackTrace: stackTrace,
     );
     _events.add(diagnostic);
     if (_events.length > maximumRetainedEvents) {
       _events.removeRange(0, _events.length - maximumRetainedEvents);
     }
-    _eventSink?.call(diagnostic);
+    for (final eventSink in _eventSinks.toList(growable: false)) {
+      try {
+        eventSink(diagnostic);
+      } on Object {
+        // Diagnostics must never interfere with application behavior or with
+        // other independently registered sinks.
+      }
+    }
 
     final printableFields = safeFields.entries
         .where((entry) => entry.value is num || entry.value is bool)
@@ -177,15 +226,28 @@ class AppDiagnosticFileStore {
   final int maximumFileBytes;
   final int maximumFiles;
   Future<void> _writes = Future.value();
+  AppDiagnosticEventSink? _eventSink;
 
   Future<void> initialize() async {
     await directory.create(recursive: true);
-    AppLogger.installEventSink((event) {
+    final previous = _eventSink;
+    if (previous != null) AppLogger.removeEventSink(previous);
+    void sink(AppDiagnosticEvent event) {
       _writes = _writes.then((_) => _append(event)).catchError((Object _) {});
-    });
+    }
+
+    _eventSink = sink;
+    AppLogger.addEventSink(sink);
   }
 
   Future<void> flush() => _writes;
+
+  Future<void> dispose() async {
+    final sink = _eventSink;
+    _eventSink = null;
+    if (sink != null) AppLogger.removeEventSink(sink);
+    await flush();
+  }
 
   Future<List<File>> files() async {
     await flush();

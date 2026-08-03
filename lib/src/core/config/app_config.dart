@@ -32,6 +32,9 @@ class AppConfig {
     required this.supabaseUrl,
     required this.supabasePublishableKey,
     required this.googleWebClientId,
+    required this.sentryDsn,
+    required this.sentryEnabled,
+    required this.sentryTracesSampleRate,
   });
 
   factory AppConfig.fromEnvironment() {
@@ -44,12 +47,24 @@ class AppConfig {
     const googleWebClientIdValue = String.fromEnvironment(
       'GOOGLE_WEB_CLIENT_ID',
     );
+    const sentryDsnValue = String.fromEnvironment('SENTRY_DSN');
+    const sentryEnabledValue = bool.fromEnvironment(
+      'SENTRY_ENABLED',
+      defaultValue: true,
+    );
+    const sentryTracesSampleRateValue = String.fromEnvironment(
+      'SENTRY_TRACES_SAMPLE_RATE',
+      defaultValue: '',
+    );
     final environment = AppEnvironment.parse(environmentValue);
     return AppConfig.configured(
       environment: environment,
       supabaseUrl: urlValue,
       supabasePublishableKey: keyValue,
       googleWebClientId: googleWebClientIdValue,
+      sentryDsn: sentryDsnValue,
+      sentryEnabled: sentryEnabledValue,
+      sentryTracesSampleRate: sentryTracesSampleRateValue,
     );
   }
 
@@ -59,6 +74,9 @@ class AppConfig {
       supabaseUrl: Uri.parse('http://127.0.0.1:54321'),
       supabasePublishableKey: 'sb_publishable_test',
       googleWebClientId: '123-example.apps.googleusercontent.com',
+      sentryDsn: '',
+      sentryEnabled: false,
+      sentryTracesSampleRate: 1,
     );
   }
 
@@ -67,6 +85,9 @@ class AppConfig {
     required String supabaseUrl,
     required String supabasePublishableKey,
     required String googleWebClientId,
+    String sentryDsn = '',
+    bool sentryEnabled = true,
+    String? sentryTracesSampleRate,
   }) {
     final url = Uri.tryParse(supabaseUrl.trim());
     if (url == null || !url.hasScheme || url.host.isEmpty) {
@@ -101,11 +122,57 @@ class AppConfig {
         'GOOGLE_WEB_CLIENT_ID must be a Google Web OAuth client ID.',
       );
     }
+
+    final dsn = sentryDsn.trim();
+    if (environment != AppEnvironment.dev && !sentryEnabled) {
+      throw const AppConfigException(
+        'SENTRY_ENABLED must be true outside development.',
+      );
+    }
+    if (environment != AppEnvironment.dev && dsn.isEmpty) {
+      throw const AppConfigException(
+        'SENTRY_DSN must not be empty outside development.',
+      );
+    }
+    if (dsn.isNotEmpty) {
+      final sentryUri = Uri.tryParse(dsn);
+      final isSentryIngestHost =
+          sentryUri != null &&
+          RegExp(
+            r'(^|\.)ingest(?:\.[a-z0-9-]+)?\.sentry\.io$',
+            caseSensitive: false,
+          ).hasMatch(sentryUri.host);
+      if (sentryUri == null ||
+          sentryUri.scheme != 'https' ||
+          sentryUri.userInfo.isEmpty ||
+          !isSentryIngestHost) {
+        throw const AppConfigException(
+          'SENTRY_DSN must be an HTTPS Sentry ingest URL.',
+        );
+      }
+    }
+
+    final defaultTraceRate = switch (environment) {
+      AppEnvironment.dev || AppEnvironment.staging => 1.0,
+      AppEnvironment.prod => 0.05,
+    };
+    final traceRateValue = sentryTracesSampleRate?.trim() ?? '';
+    final traceRate = traceRateValue.isEmpty
+        ? defaultTraceRate
+        : double.tryParse(traceRateValue);
+    if (traceRate == null || traceRate < 0 || traceRate > 1) {
+      throw const AppConfigException(
+        'SENTRY_TRACES_SAMPLE_RATE must be between 0.0 and 1.0.',
+      );
+    }
     return AppConfig._(
       environment: environment,
       supabaseUrl: url,
       supabasePublishableKey: key,
       googleWebClientId: webClientId,
+      sentryDsn: dsn,
+      sentryEnabled: sentryEnabled && dsn.isNotEmpty,
+      sentryTracesSampleRate: traceRate,
     );
   }
 
@@ -113,6 +180,9 @@ class AppConfig {
   final Uri supabaseUrl;
   final String supabasePublishableKey;
   final String googleWebClientId;
+  final String sentryDsn;
+  final bool sentryEnabled;
+  final double sentryTracesSampleRate;
 
   String get storageNamespace {
     final projectHost = supabaseUrl.host;
@@ -121,7 +191,8 @@ class AppConfig {
 
   String get redactedDescription =>
       'environment=${environment.name}, '
-      'host=${supabaseUrl.host}';
+      'host=${supabaseUrl.host}, '
+      'sentry=${sentryEnabled ? 'enabled' : 'disabled'}';
 }
 
 String? _jwtRole(String token) {

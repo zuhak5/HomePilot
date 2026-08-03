@@ -6,8 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const asset =
-      'assets/illustrations/homepilot-onboarding-hero-target.png';
+  const asset = 'assets/illustrations/homepilot-onboarding-hero-target.png';
 
   test(
     '$asset has feathered transparent perimeter and opaque subject',
@@ -37,8 +36,7 @@ void main() {
         }
       }
       final centerAlpha =
-          bytes[((image.height ~/ 2) * image.width + image.width ~/ 2) * 4 +
-              3];
+          bytes[((image.height ~/ 2) * image.width + image.width ~/ 2) * 4 + 3];
       expect(edgeAlpha / edgePixels, lessThan(55));
       expect(centerAlpha, greaterThan(245));
       image.dispose();

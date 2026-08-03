@@ -12,13 +12,14 @@ void main() {
 
   setUp(() async {
     AppLogger.clearForTesting();
+    AppLogger.clearEventSinksForTesting();
     temporary = await Directory.systemTemp.createTemp(
       'homepilot-diagnostics-test-',
     );
   });
 
   tearDown(() async {
-    AppLogger.installEventSink(null);
+    AppLogger.clearEventSinksForTesting();
     if (await temporary.exists()) {
       await temporary.delete(recursive: true);
     }

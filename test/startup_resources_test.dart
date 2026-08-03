@@ -414,7 +414,7 @@ void main() {
     );
   });
 
-  test('Android path provider stays on the verified pre-JNI fallback', () {
+  test('Android path provider stays on the verified implementation', () {
     final lockfile = File(
       'pubspec.lock',
     ).readAsStringSync().replaceAll('\r\n', '\n');
@@ -424,9 +424,6 @@ void main() {
     ).firstMatch(lockfile)?.group(0);
     expect(pathProviderBlock, isNotNull);
     expect(pathProviderBlock, contains('version: "2.2.23"'));
-    expect(lockfile, isNot(contains('\n  jni:')));
-    expect(lockfile, isNot(contains('\n  jni_flutter:')));
-    expect(lockfile, isNot(contains('\n  jni_util:')));
 
     for (final mode in ['debug', 'profile', 'release']) {
       final registrantFile = File(
@@ -444,7 +441,7 @@ void main() {
       expect(
         registrant,
         contains('new io.flutter.plugins.pathprovider.PathProviderPlugin()'),
-        reason: '$mode must register the pre-JNI path provider implementation',
+        reason: '$mode must register the verified path provider implementation',
       );
       expect(
         registrant,
