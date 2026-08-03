@@ -8,19 +8,38 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: homepilot-production-release
+  cancel-in-progress: false
+
 jobs:
   build-production-apk:
     name: Build signed production APK
+    if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     timeout-minutes: 60
     environment: production
 
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify release commit belongs to main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Production releases must be built from a commit contained in origin/main."
+          }
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -71,14 +90,8 @@ jobs:
             GOOGLE_WEB_CLIENT_ID     = $env:GOOGLE_WEB_CLIENT_ID
           } | ConvertTo-Json
 
-          New-Item `
-            -ItemType Directory `
-            -Path "config" `
-            -Force |
-            Out-Null
-
+          New-Item -ItemType Directory -Path "config" -Force | Out-Null
           $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD "config\prod.json"),
             $Config,
@@ -108,15 +121,10 @@ jobs:
             }
           }
 
-          $KeystorePath = Join-Path `
-            $PWD `
-            "android\app\homepilot-release.jks"
-
+          $KeystorePath = Join-Path $PWD "android\app\homepilot-release.jks"
           [System.IO.File]::WriteAllBytes(
             $KeystorePath,
-            [Convert]::FromBase64String(
-              $env:ANDROID_KEYSTORE_BASE64
-            )
+            [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
           )
 
           $KeyProperties = @(
@@ -127,7 +135,6 @@ jobs:
           )
 
           $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
           [System.IO.File]::WriteAllLines(
             (Join-Path $PWD "android\key.properties"),
             $KeyProperties,
@@ -143,21 +150,12 @@ jobs:
       - name: Verify APK exists
         shell: pwsh
         run: |
-          $Apk = Join-Path `
-            $PWD `
-            "build\app\outputs\flutter-apk\app-release.apk"
-
+          $Apk = Join-Path $PWD "build\app\outputs\flutter-apk\app-release.apk"
           if (-not (Test-Path -LiteralPath $Apk -PathType Leaf)) {
             throw "Production APK was not created: $Apk"
           }
-
-          Get-Item $Apk |
-            Select-Object FullName, Length
-
-          Get-FileHash `
-            -LiteralPath $Apk `
-            -Algorithm SHA256 |
-            Format-List
+          Get-Item $Apk | Select-Object FullName, Length
+          Get-FileHash -LiteralPath $Apk -Algorithm SHA256 | Format-List
 
       - name: Prepare release files
         id: release
@@ -168,16 +166,12 @@ jobs:
           $VersionLine = Get-Content "pubspec.yaml" |
             Where-Object { $_ -match '^version:\s*' } |
             Select-Object -First 1
-
           if (-not $VersionLine) {
             throw "Version was not found in pubspec.yaml."
           }
 
-          $VersionValue = (
-            $VersionLine -replace '^version:\s*', ''
-          ).Trim()
-
-          if ($VersionValue -notmatch '^(.+)\+(\d+)$') {
+          $VersionValue = ($VersionLine -replace '^version:\s*', '').Trim()
+          if ($VersionValue -notmatch '^(\d+\.\d+\.\d+)\+(\d+)$') {
             throw "Expected version format x.y.z+build, got: $VersionValue"
           }
 
@@ -186,40 +180,15 @@ jobs:
           $Tag = "v$VersionName-build.$BuildNumber"
           $ReleaseName = "HomePilot $VersionName (Build $BuildNumber)"
           $ApkName = "HomePilot-$VersionName-build-$BuildNumber.apk"
-
-          $SourceApk = Join-Path `
-            $PWD `
-            "build\app\outputs\flutter-apk\app-release.apk"
-
+          $SourceApk = Join-Path $PWD "build\app\outputs\flutter-apk\app-release.apk"
           $ReleaseDirectory = Join-Path $PWD "release"
+          New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 
-          New-Item `
-            -ItemType Directory `
-            -Path $ReleaseDirectory `
-            -Force |
-            Out-Null
-
-          $ReleaseApk = Join-Path `
-            $ReleaseDirectory `
-            $ApkName
-
-          Copy-Item `
-            -LiteralPath $SourceApk `
-            -Destination $ReleaseApk `
-            -Force
-
-          $Hash = (
-            Get-FileHash `
-              -LiteralPath $ReleaseApk `
-              -Algorithm SHA256
-          ).Hash.ToLowerInvariant()
-
+          $ReleaseApk = Join-Path $ReleaseDirectory $ApkName
+          Copy-Item -LiteralPath $SourceApk -Destination $ReleaseApk -Force
+          $Hash = (Get-FileHash -LiteralPath $ReleaseApk -Algorithm SHA256).Hash.ToLowerInvariant()
           $ChecksumFile = "$ReleaseApk.sha256"
-
-          "$Hash  $ApkName" |
-            Set-Content `
-              -LiteralPath $ChecksumFile `
-              -Encoding utf8NoBOM
+          "$Hash  $ApkName" | Set-Content -LiteralPath $ChecksumFile -Encoding utf8NoBOM
 
           "version_name=$VersionName" >> $env:GITHUB_OUTPUT
           "build_number=$BuildNumber" >> $env:GITHUB_OUTPUT
@@ -230,16 +199,97 @@ jobs:
           "checksum_path=$ChecksumFile" >> $env:GITHUB_OUTPUT
           "sha256=$Hash" >> $env:GITHUB_OUTPUT
 
-          Get-Item $ReleaseApk, $ChecksumFile |
-            Select-Object FullName, Length
+          Get-Item $ReleaseApk, $ChecksumFile | Select-Object FullName, Length
+
+      - name: Verify package, version, checksum, and signer
+        shell: pwsh
+        env:
+          APK_PATH: ${{ steps.release.outputs.apk_path }}
+          APK_NAME: ${{ steps.release.outputs.apk_name }}
+          CHECKSUM_PATH: ${{ steps.release.outputs.checksum_path }}
+          EXPECTED_SHA256: ${{ steps.release.outputs.sha256 }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version_name }}
+          EXPECTED_BUILD: ${{ steps.release.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ExpectedPackage = "com.homepilot.app"
+          $ExpectedSigner = "3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51"
+          $ExpectedSignerNormalized = ($ExpectedSigner -replace '[^0-9A-Fa-f]', '').ToLowerInvariant()
+
+          $BuildTools = Get-ChildItem (Join-Path $env:ANDROID_HOME "build-tools") -Directory |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $BuildTools) {
+            throw "Android build tools were not found."
+          }
+
+          $ApkSigner = Join-Path $BuildTools.FullName "apksigner.bat"
+          $Aapt2 = Join-Path $BuildTools.FullName "aapt2.exe"
+          if (-not (Test-Path $ApkSigner) -or -not (Test-Path $Aapt2)) {
+            throw "apksigner or aapt2 was not found in $($BuildTools.FullName)."
+          }
+
+          $SignatureOutput = (& $ApkSigner verify --verbose --print-certs $env:APK_PATH 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            throw "APK signature verification failed.`n$SignatureOutput"
+          }
+          if ($SignatureOutput -notmatch 'Signer #1 certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)') {
+            throw "The APK signer SHA-256 could not be extracted.`n$SignatureOutput"
+          }
+          $ActualSigner = ($Matches[1] -replace '[^0-9A-Fa-f]', '').ToLowerInvariant()
+          if ($ActualSigner -ne $ExpectedSignerNormalized) {
+            throw "Unexpected production signer. Expected $ExpectedSigner, got $($Matches[1])."
+          }
+
+          $Badging = (& $Aapt2 dump badging $env:APK_PATH 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            throw "APK metadata inspection failed.`n$Badging"
+          }
+          if ($Badging -notmatch "package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'") {
+            throw "Package metadata could not be parsed.`n$Badging"
+          }
+          $ActualPackage = $Matches[1]
+          $ActualBuild = $Matches[2]
+          $ActualVersion = $Matches[3]
+          if ($ActualPackage -ne $ExpectedPackage) {
+            throw "Unexpected package name: $ActualPackage"
+          }
+          if ($ActualVersion -ne $env:EXPECTED_VERSION) {
+            throw "Unexpected version name: $ActualVersion"
+          }
+          if ($ActualBuild -ne $env:EXPECTED_BUILD) {
+            throw "Unexpected version code: $ActualBuild"
+          }
+          if ($Badging -match '(?m)^application-debuggable') {
+            throw "Production APK is marked debuggable."
+          }
+
+          $ActualHash = (Get-FileHash -LiteralPath $env:APK_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne $env:EXPECTED_SHA256) {
+            throw "APK hash changed after release preparation."
+          }
+          $ChecksumLine = (Get-Content -LiteralPath $env:CHECKSUM_PATH -Raw).Trim()
+          $ExpectedLine = "$($env:EXPECTED_SHA256)  $($env:APK_NAME)"
+          if ($ChecksumLine -ne $ExpectedLine) {
+            throw "Checksum file contents do not match the release APK."
+          }
+
+          Write-Host "Verified package $ActualPackage $ActualVersion ($ActualBuild)."
+          Write-Host "Verified signer SHA-256 $ExpectedSigner."
+          Write-Host "Verified APK SHA-256 $ActualHash."
 
       - name: Upload production APK
         uses: actions/upload-artifact@v7
         with:
           name: HomePilot-production-apk-${{ github.run_number }}
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ steps.release.outputs.apk_path }}
           if-no-files-found: error
           retention-days: 30
+
+      - name: Attest production APK provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.release.outputs.apk_path }}
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -256,23 +306,16 @@ jobs:
           APK_SHA256: ${{ steps.release.outputs.sha256 }}
         run: |
           $ErrorActionPreference = "Stop"
-
           if ([string]::IsNullOrWhiteSpace($env:CHANGELOG)) {
             throw "The release changelog cannot be empty."
           }
 
-          & gh release view `
-            $env:RELEASE_TAG `
-            --repo $env:GITHUB_REPOSITORY *> $null
-
+          & gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             throw "Release already exists: $env:RELEASE_TAG"
           }
 
-          $NotesPath = Join-Path `
-            $PWD `
-            "release\release-notes.md"
-
+          $NotesPath = Join-Path $PWD "release\release-notes.md"
           $Notes = @"
           ## What's changed
 
@@ -282,18 +325,20 @@ jobs:
 
           - Version: $env:VERSION_NAME
           - Build: $env:BUILD_NUMBER
+          - Package: com.homepilot.app
           - File: $env:APK_NAME
           - SHA-256: ``$env:APK_SHA256``
+          - Signer certificate SHA-256: ``3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51``
+
+          Verify build provenance with:
+
+          ``````bash
+          gh attestation verify $env:APK_NAME --repo $env:GITHUB_REPOSITORY
+          ``````
           "@
 
-          $Utf8NoBom = New-Object `
-            System.Text.UTF8Encoding($false)
-
-          [System.IO.File]::WriteAllText(
-            $NotesPath,
-            $Notes,
-            $Utf8NoBom
-          )
+          $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($NotesPath, $Notes, $Utf8NoBom)
 
           & gh release create `
             $env:RELEASE_TAG `
@@ -314,14 +359,11 @@ jobs:
         shell: pwsh
         run: |
           Push-Location "android"
-
           try {
             & ".\gradlew.bat" --stop
-
             if ($LASTEXITCODE -ne 0) {
               Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
             }
-
             Start-Sleep -Seconds 2
           }
           finally {
@@ -332,17 +374,6 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Remove-Item `
-            -LiteralPath "android\app\homepilot-release.jks" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Remove-Item `
-            -LiteralPath "android\key.properties" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Remove-Item `
-            -LiteralPath "config\prod.json" `
-            -Force `
-            -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "android\app\homepilot-release.jks" -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "android\key.properties" -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "config\prod.json" -Force -ErrorAction SilentlyContinue

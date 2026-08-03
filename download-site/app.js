@@ -93,6 +93,14 @@ function validateManifest(manifest) {
     errors.push("Manifest generation time is invalid.");
   }
   if (!Array.isArray(manifest.releases)) errors.push("Release list is missing.");
+  if (manifest.productionSigner?.packageName !== "com.homepilot.app") {
+    errors.push("Unexpected production package identity.");
+  }
+  if (!/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/i.test(
+    manifest.productionSigner?.certificateSha256 || "",
+  )) {
+    errors.push("Production signer fingerprint is invalid.");
+  }
 
   const ids = new Set();
   for (const release of manifest.releases || []) {
@@ -110,7 +118,11 @@ function validateManifest(manifest) {
     if (!Number.isFinite(Date.parse(release.publishedAt))) {
       errors.push(`Release ${release.id} has an invalid publication time.`);
     }
-    if (!safeUrl(release.apk?.url) || !safeUrl(release.releaseUrl, new Set(["github.com"]))) {
+    if (
+      !safeUrl(release.apk?.url) ||
+      !safeUrl(release.checksum?.url) ||
+      !safeUrl(release.releaseUrl, new Set(["github.com"]))
+    ) {
       errors.push(`Release ${release.id} has an invalid URL.`);
     }
     if (!validateSha256(release.apk?.sha256)) {
@@ -208,8 +220,12 @@ function renderVerificationPanel(container, release, signer) {
     `Get-FileHash .\\${release.apk.name} -Algorithm SHA256`,
     `sha256sum ${release.apk.name}`,
     `shasum -a 256 ${release.apk.name}`,
-    `gh attestation verify ${release.apk.name} --repo ${release.attestation?.verificationRepository || EXPECTED_REPOSITORY}`,
   ];
+  if (release.attestation?.available) {
+    commandList.push(
+      `gh attestation verify ${release.apk.name} --repo ${release.attestation.verificationRepository || EXPECTED_REPOSITORY}`,
+    );
+  }
   for (const command of commandList) {
     const pre = document.createElement("pre");
     pre.textContent = command;
