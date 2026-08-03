@@ -25,12 +25,6 @@ jobs:
       id-token: write
       attestations: write
 
-    env:
-      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-      SENTRY_DSN: ${{ vars.SENTRY_DSN }}
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -102,8 +96,6 @@ jobs:
           "apk_name=$ApkName" >> $env:GITHUB_OUTPUT
           "sentry_release=$SentryRelease" >> $env:GITHUB_OUTPUT
           "sentry_dist=$BuildNumber" >> $env:GITHUB_OUTPUT
-          "SENTRY_RELEASE=$SentryRelease" >> $env:GITHUB_ENV
-          "SENTRY_DIST=$BuildNumber" >> $env:GITHUB_ENV
 
           Write-Host "Prepared HomePilot $VersionName ($BuildNumber)."
           Write-Host "Prepared Sentry release $SentryRelease."
@@ -114,6 +106,9 @@ jobs:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -130,9 +125,6 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($Item.Value)) {
               throw "Missing production variable: $($Item.Key)"
             }
-          }
-          if ([string]::IsNullOrWhiteSpace($env:SENTRY_AUTH_TOKEN)) {
-            throw "Missing production secret: SENTRY_AUTH_TOKEN"
           }
           if ($env:SENTRY_ORG -ne "homepilot-qt") {
             throw "SENTRY_ORG must be homepilot-qt."
@@ -154,12 +146,12 @@ jobs:
           }
 
           $Config = [ordered]@{
-            APP_ENV                  = "prod"
-            SUPABASE_URL             = $env:SUPABASE_URL
-            SUPABASE_PUBLISHABLE_KEY = $env:SUPABASE_PUBLISHABLE_KEY
-            GOOGLE_WEB_CLIENT_ID     = $env:GOOGLE_WEB_CLIENT_ID
-            SENTRY_ENABLED           = $true
-            SENTRY_DSN               = $env:SENTRY_DSN
+            APP_ENV                   = "prod"
+            SUPABASE_URL              = $env:SUPABASE_URL
+            SUPABASE_PUBLISHABLE_KEY  = $env:SUPABASE_PUBLISHABLE_KEY
+            GOOGLE_WEB_CLIENT_ID      = $env:GOOGLE_WEB_CLIENT_ID
+            SENTRY_ENABLED            = $true
+            SENTRY_DSN                = $env:SENTRY_DSN
             SENTRY_TRACES_SAMPLE_RATE = "0.05"
           } | ConvertTo-Json
 
@@ -343,6 +335,9 @@ jobs:
       - name: Publish and verify Sentry release
         shell: pwsh
         env:
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_RELEASE: ${{ steps.metadata.outputs.sentry_release }}
           SENTRY_DIST: ${{ steps.metadata.outputs.sentry_dist }}
         run: |
