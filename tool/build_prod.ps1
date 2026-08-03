@@ -7,7 +7,7 @@ $workspace = Split-Path -Parent $PSScriptRoot
 $configPath = Join-Path $workspace 'config\prod.json'
 
 if (-not (Test-Path -LiteralPath $configPath)) {
-    throw 'Missing config\prod.json. Copy config\prod.example.json and configure the production Supabase project.'
+    throw 'Missing config\prod.json. The production GitHub Actions workflow must create it from protected environment variables.'
 }
 
 $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
@@ -19,6 +19,38 @@ if ([string]::IsNullOrWhiteSpace($config.SUPABASE_URL) -or
     [string]::IsNullOrWhiteSpace($config.GOOGLE_WEB_CLIENT_ID)) {
     throw 'config\prod.json must contain Supabase settings and GOOGLE_WEB_CLIENT_ID.'
 }
+if ($config.SENTRY_ENABLED -ne $true) {
+    throw 'config\prod.json must set SENTRY_ENABLED=true for production.'
+}
+if ([string]::IsNullOrWhiteSpace([string]$config.SENTRY_DSN)) {
+    throw 'config\prod.json must contain SENTRY_DSN for production.'
+}
+
+try {
+    $sentryUri = [System.Uri]([string]$config.SENTRY_DSN)
+}
+catch {
+    throw 'SENTRY_DSN must be a valid absolute URL.'
+}
+if ($sentryUri.Scheme -ne 'https' -or
+    [string]::IsNullOrWhiteSpace($sentryUri.UserInfo) -or
+    $sentryUri.Host -notmatch '(?i)(^|\.)ingest(?:\.[a-z0-9-]+)?\.sentry\.io$') {
+    throw 'SENTRY_DSN must be an HTTPS Sentry ingest URL with a public key.'
+}
+
+try {
+    $traceSampleRate = [double]::Parse(
+        [string]$config.SENTRY_TRACES_SAMPLE_RATE,
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+catch {
+    throw 'SENTRY_TRACES_SAMPLE_RATE must be a number between 0.0 and 1.0.'
+}
+if ($traceSampleRate -lt 0.0 -or $traceSampleRate -gt 1.0) {
+    throw 'SENTRY_TRACES_SAMPLE_RATE must be between 0.0 and 1.0.'
+}
+
 $productionDefines = @(
     "--dart-define-from-file=$configPath"
 )
