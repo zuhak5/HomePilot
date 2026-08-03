@@ -215,7 +215,7 @@ export async function normalizeRelease(release, { readChecksumAsset } = {}) {
         url: checksumAsset.browser_download_url,
       },
       attestation: {
-        available: true,
+        available: /gh\s+attestation\s+verify/i.test(String(release.body || "")),
         verificationRepository: process.env.GITHUB_REPOSITORY || "zuhak5/HomePilot",
       },
     },
