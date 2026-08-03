@@ -25,6 +25,12 @@ jobs:
       id-token: write
       attestations: write
 
+    env:
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -61,6 +67,46 @@ jobs:
           flutter --version
           dart --version
           java -version
+          node --version
+          npm --version
+
+      - name: Prepare release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $VersionLine = Get-Content "pubspec.yaml" |
+            Where-Object { $_ -match '^version:\s*' } |
+            Select-Object -First 1
+          if (-not $VersionLine) {
+            throw "Version was not found in pubspec.yaml."
+          }
+
+          $VersionValue = ($VersionLine -replace '^version:\s*', '').Trim()
+          if ($VersionValue -notmatch '^(\d+\.\d+\.\d+)\+(\d+)$') {
+            throw "Expected version format x.y.z+build, got: $VersionValue"
+          }
+
+          $VersionName = $Matches[1]
+          $BuildNumber = $Matches[2]
+          $Tag = "v$VersionName-build.$BuildNumber"
+          $ReleaseName = "HomePilot $VersionName (Build $BuildNumber)"
+          $ApkName = "HomePilot-$VersionName-build-$BuildNumber.apk"
+          $SentryRelease = "com.homepilot.app@$VersionName+$BuildNumber"
+
+          "version_name=$VersionName" >> $env:GITHUB_OUTPUT
+          "build_number=$BuildNumber" >> $env:GITHUB_OUTPUT
+          "tag=$Tag" >> $env:GITHUB_OUTPUT
+          "release_name=$ReleaseName" >> $env:GITHUB_OUTPUT
+          "apk_name=$ApkName" >> $env:GITHUB_OUTPUT
+          "sentry_release=$SentryRelease" >> $env:GITHUB_OUTPUT
+          "sentry_dist=$BuildNumber" >> $env:GITHUB_OUTPUT
+          "SENTRY_RELEASE=$SentryRelease" >> $env:GITHUB_ENV
+          "SENTRY_DIST=$BuildNumber" >> $env:GITHUB_ENV
+
+          Write-Host "Prepared HomePilot $VersionName ($BuildNumber)."
+          Write-Host "Prepared Sentry release $SentryRelease."
 
       - name: Create production configuration
         shell: pwsh
@@ -71,16 +117,40 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $Required = @{
+          $RequiredVariables = @{
             SUPABASE_URL             = $env:SUPABASE_URL
             SUPABASE_PUBLISHABLE_KEY = $env:SUPABASE_PUBLISHABLE_KEY
             GOOGLE_WEB_CLIENT_ID     = $env:GOOGLE_WEB_CLIENT_ID
+            SENTRY_ORG               = $env:SENTRY_ORG
+            SENTRY_PROJECT           = $env:SENTRY_PROJECT
+            SENTRY_DSN               = $env:SENTRY_DSN
           }
 
-          foreach ($Item in $Required.GetEnumerator()) {
+          foreach ($Item in $RequiredVariables.GetEnumerator()) {
             if ([string]::IsNullOrWhiteSpace($Item.Value)) {
               throw "Missing production variable: $($Item.Key)"
             }
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SENTRY_AUTH_TOKEN)) {
+            throw "Missing production secret: SENTRY_AUTH_TOKEN"
+          }
+          if ($env:SENTRY_ORG -ne "homepilot-qt") {
+            throw "SENTRY_ORG must be homepilot-qt."
+          }
+          if ($env:SENTRY_PROJECT -ne "homepilot") {
+            throw "SENTRY_PROJECT must be homepilot."
+          }
+
+          try {
+            $SentryUri = [System.Uri]$env:SENTRY_DSN
+          }
+          catch {
+            throw "SENTRY_DSN must be a valid absolute URL."
+          }
+          if ($SentryUri.Scheme -ne "https" -or
+              [string]::IsNullOrWhiteSpace($SentryUri.UserInfo) -or
+              $SentryUri.Host -notmatch '(?i)(^|\.)ingest(?:\.[a-z0-9-]+)?\.sentry\.io$') {
+            throw "SENTRY_DSN must be an HTTPS Sentry ingest URL."
           }
 
           $Config = [ordered]@{
@@ -88,6 +158,9 @@ jobs:
             SUPABASE_URL             = $env:SUPABASE_URL
             SUPABASE_PUBLISHABLE_KEY = $env:SUPABASE_PUBLISHABLE_KEY
             GOOGLE_WEB_CLIENT_ID     = $env:GOOGLE_WEB_CLIENT_ID
+            SENTRY_ENABLED           = $true
+            SENTRY_DSN               = $env:SENTRY_DSN
+            SENTRY_TRACES_SAMPLE_RATE = "0.05"
           } | ConvertTo-Json
 
           New-Item -ItemType Directory -Path "config" -Force | Out-Null
@@ -160,41 +233,30 @@ jobs:
       - name: Prepare release files
         id: release
         shell: pwsh
+        env:
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          RELEASE_NAME: ${{ steps.metadata.outputs.release_name }}
+          APK_NAME: ${{ steps.metadata.outputs.apk_name }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $VersionLine = Get-Content "pubspec.yaml" |
-            Where-Object { $_ -match '^version:\s*' } |
-            Select-Object -First 1
-          if (-not $VersionLine) {
-            throw "Version was not found in pubspec.yaml."
-          }
-
-          $VersionValue = ($VersionLine -replace '^version:\s*', '').Trim()
-          if ($VersionValue -notmatch '^(\d+\.\d+\.\d+)\+(\d+)$') {
-            throw "Expected version format x.y.z+build, got: $VersionValue"
-          }
-
-          $VersionName = $Matches[1]
-          $BuildNumber = $Matches[2]
-          $Tag = "v$VersionName-build.$BuildNumber"
-          $ReleaseName = "HomePilot $VersionName (Build $BuildNumber)"
-          $ApkName = "HomePilot-$VersionName-build-$BuildNumber.apk"
           $SourceApk = Join-Path $PWD "build\app\outputs\flutter-apk\app-release.apk"
           $ReleaseDirectory = Join-Path $PWD "release"
           New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 
-          $ReleaseApk = Join-Path $ReleaseDirectory $ApkName
+          $ReleaseApk = Join-Path $ReleaseDirectory $env:APK_NAME
           Copy-Item -LiteralPath $SourceApk -Destination $ReleaseApk -Force
           $Hash = (Get-FileHash -LiteralPath $ReleaseApk -Algorithm SHA256).Hash.ToLowerInvariant()
           $ChecksumFile = "$ReleaseApk.sha256"
-          "$Hash  $ApkName" | Set-Content -LiteralPath $ChecksumFile -Encoding utf8NoBOM
+          "$Hash  $env:APK_NAME" | Set-Content -LiteralPath $ChecksumFile -Encoding utf8NoBOM
 
-          "version_name=$VersionName" >> $env:GITHUB_OUTPUT
-          "build_number=$BuildNumber" >> $env:GITHUB_OUTPUT
-          "tag=$Tag" >> $env:GITHUB_OUTPUT
-          "release_name=$ReleaseName" >> $env:GITHUB_OUTPUT
-          "apk_name=$ApkName" >> $env:GITHUB_OUTPUT
+          "version_name=$env:VERSION_NAME" >> $env:GITHUB_OUTPUT
+          "build_number=$env:BUILD_NUMBER" >> $env:GITHUB_OUTPUT
+          "tag=$env:RELEASE_TAG" >> $env:GITHUB_OUTPUT
+          "release_name=$env:RELEASE_NAME" >> $env:GITHUB_OUTPUT
+          "apk_name=$env:APK_NAME" >> $env:GITHUB_OUTPUT
           "apk_path=$ReleaseApk" >> $env:GITHUB_OUTPUT
           "checksum_path=$ChecksumFile" >> $env:GITHUB_OUTPUT
           "sha256=$Hash" >> $env:GITHUB_OUTPUT
@@ -278,6 +340,18 @@ jobs:
           Write-Host "Verified signer SHA-256 $ExpectedSigner."
           Write-Host "Verified APK SHA-256 $ActualHash."
 
+      - name: Publish and verify Sentry release
+        shell: pwsh
+        env:
+          SENTRY_RELEASE: ${{ steps.metadata.outputs.sentry_release }}
+          SENTRY_DIST: ${{ steps.metadata.outputs.sentry_dist }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & ".\tool\publish_sentry_release.ps1" `
+            -Release $env:SENTRY_RELEASE `
+            -Dist $env:SENTRY_DIST `
+            -Environment "prod"
+
       - name: Upload production APK
         uses: actions/upload-artifact@v7
         with:
@@ -304,6 +378,7 @@ jobs:
           APK_PATH: ${{ steps.release.outputs.apk_path }}
           CHECKSUM_PATH: ${{ steps.release.outputs.checksum_path }}
           APK_SHA256: ${{ steps.release.outputs.sha256 }}
+          SENTRY_RELEASE: ${{ steps.metadata.outputs.sentry_release }}
         run: |
           $ErrorActionPreference = "Stop"
           if ([string]::IsNullOrWhiteSpace($env:CHANGELOG)) {
@@ -329,6 +404,7 @@ jobs:
           - File: $env:APK_NAME
           - SHA-256: ``$env:APK_SHA256``
           - Signer certificate SHA-256: ``3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51``
+          - Sentry release: ``$env:SENTRY_RELEASE``
 
           Verify build provenance with:
 
