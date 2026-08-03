@@ -8,6 +8,8 @@ import '../config/app_config.dart';
 import '../utils/redacting_logger.dart';
 import 'observability_config.dart';
 import 'sentry_event_scrubber.dart';
+import 'sentry_logger_bridge.dart';
+import 'sentry_scope.dart';
 import 'sentry_tracing.dart';
 
 typedef HomePilotSentryInitializer =
@@ -25,6 +27,8 @@ Future<void> initializeHomePilotSentry({
   Future<void> guardedAppRunner() async {
     if (appStarted) return;
     appStarted = true;
+    SentryLoggerBridge.install();
+    unawaited(configureHomePilotSentryScope(config));
     await appRunner();
   }
 
@@ -102,6 +106,8 @@ Future<bool> initializeBackgroundSentry() async {
     await SentryFlutter.init(
       (options) => configureHomePilotSentryOptions(options, observability),
     );
+    SentryLoggerBridge.install();
+    await configureHomePilotSentryScope(observability);
     return true;
   } on Object catch (error, stackTrace) {
     AppLogger.warning(
