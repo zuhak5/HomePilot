@@ -77,6 +77,8 @@ function Invoke-WithRetry {
     }
 }
 
+# Match the sentry-cli version embedded by sentry_dart_plugin 3.4.0 so release
+# management and debug-file upload use the same protocol implementation.
 $sentryCli = @('--yes', '@sentry/cli@2.58.6')
 
 # A previous failed workflow attempt may already have created the release.
@@ -95,8 +97,7 @@ Invoke-WithRetry -Label 'Sentry commit association' -Operation {
             'releases',
             'set-commits',
             $Release,
-            '--auto',
-            '--ignore-missing'
+            '--auto'
         )
     )
 }
@@ -118,7 +119,13 @@ $deployName = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ID)) {
     "manual-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
 }
 else {
-    "github-actions-$env:GITHUB_RUN_ID"
+    $runAttempt = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ATTEMPT)) {
+        '1'
+    }
+    else {
+        $env:GITHUB_RUN_ATTEMPT
+    }
+    "github-actions-$env:GITHUB_RUN_ID-attempt-$runAttempt"
 }
 Invoke-WithRetry -Label 'Sentry deploy marker' -Operation {
     Invoke-NativeCommand -FilePath 'npx' -Arguments (
