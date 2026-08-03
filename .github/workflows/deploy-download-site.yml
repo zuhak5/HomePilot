@@ -6,7 +6,18 @@ on:
       - main
     paths:
       - "download-site/**"
+      - "tool/generate_versiondeck_manifest.mjs"
+      - "tool/versiondeck.test.mjs"
+      - "tool/validate_versiondeck.mjs"
+      - "docs/versiondeck-release-runbook.md"
       - ".github/workflows/deploy-download-site.yml"
+  release:
+    types:
+      - published
+      - edited
+      - deleted
+      - prereleased
+      - released
   workflow_dispatch:
 
 permissions:
@@ -20,7 +31,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Publish VersionDeck
+    name: Validate and publish VersionDeck
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -29,6 +40,42 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check download-site/app.js
+          node --check download-site/relative-time.js
+          node --check download-site/sw.js
+          node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/validate_versiondeck.mjs
+          node --check tool/versiondeck.test.mjs
+
+      - name: Run VersionDeck tests
+        run: node --test tool/versiondeck.test.mjs
+
+      - name: Generate verified release manifest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tool/generate_versiondeck_manifest.mjs
+
+      - name: Validate generated site
+        run: node tool/validate_versiondeck.mjs
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: versiondeck-validation-${{ github.run_id }}
+          path: |
+            download-site/releases.json
+            download-site/release-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
