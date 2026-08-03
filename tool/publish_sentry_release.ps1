@@ -20,6 +20,9 @@ foreach ($name in $requiredEnvironment) {
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw "Missing required Sentry environment value: $name"
     }
+
+    # Normalize accidental surrounding whitespace from copied secrets and variables.
+    [System.Environment]::SetEnvironmentVariable($name, $value.Trim())
 }
 if ($env:SENTRY_ORG -ne 'homepilot-qt') {
     throw 'SENTRY_ORG must be homepilot-qt.'
@@ -47,9 +50,20 @@ function Invoke-NativeCommand {
         [string[]]$Arguments
     )
 
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE."
+    $output = (& $FilePath @Arguments 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    if (-not [string]::IsNullOrWhiteSpace($output)) {
+        Write-Host $output.TrimEnd()
+    }
+
+    if ($exitCode -ne 0) {
+        if ($output -match '(?i)(Invalid token|http status:\s*401|Unauthorized)') {
+            throw [System.UnauthorizedAccessException]::new(
+                'Sentry authentication failed. Replace the GitHub production environment secret SENTRY_AUTH_TOKEN with a valid token for organization homepilot-qt and project homepilot. The token must support sentry-cli release management and include org:read plus project:releases (or org:ci).'
+            )
+        }
+
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $exitCode."
     }
 }
 
@@ -67,6 +81,10 @@ function Invoke-WithRetry {
             & $Operation
             return
         }
+        catch [System.UnauthorizedAccessException] {
+            # Authentication failures are permanent until the protected secret is rotated.
+            throw
+        }
         catch {
             if ($attempt -eq 2) {
                 throw
@@ -80,6 +98,9 @@ function Invoke-WithRetry {
 # Match the sentry-cli version embedded by sentry_dart_plugin 3.4.0 so release
 # management and debug-file upload use the same protocol implementation.
 $sentryCli = @('--yes', '@sentry/cli@2.58.6')
+
+# Authenticate before mutating release state so invalid credentials fail clearly.
+Invoke-NativeCommand -FilePath 'npx' -Arguments ($sentryCli + @('info'))
 
 # A previous failed workflow attempt may already have created the release.
 & npx @sentryCli releases info $Release *> $null
