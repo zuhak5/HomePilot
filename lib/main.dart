@@ -65,6 +65,7 @@ import 'src/ui/app_theme.dart';
 import 'src/ui/components.dart' as hk_ui;
 import 'src/ui/full_bleed_illustration_background.dart';
 import 'src/ui/full_canvas_system_ui.dart';
+import 'src/ui/permission_education.dart';
 import 'package:homepilot/l10n/app_localizations.dart';
 import 'package:homepilot/l10n/app_localizations_ext.dart';
 
@@ -592,9 +593,13 @@ final settingsRepositoryProvider = Provider<SettingsRepository>(
   (ref) => DriftSettingsRepository(ref.watch(databaseProvider)),
 );
 
-final permissionCoordinatorProvider = Provider<AppPermissionCoordinator>(
+final permissionCoordinatorProvider = Provider<AppPermissionGateway>(
   (ref) => AppPermissionCoordinator(ref.watch(databaseProvider)),
 );
+
+final permissionEducationSeenProvider = StreamProvider<bool>((ref) {
+  return ref.watch(settingsRepositoryProvider).watchPermissionEducationSeen();
+});
 
 class ThemeStartupSettings {
   const ThemeStartupSettings({
@@ -2216,7 +2221,7 @@ class _StartupRestorationScreenState
       _restoreServiceRequested = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          unawaited(_startStartupRestoreService(context, ref));
+          unawaited(_startStartupRestoreService(context));
         }
       });
     }
@@ -2236,42 +2241,9 @@ class _StartupRestorationScreenState
   }
 }
 
-Future<void> _startStartupRestoreService(
-  BuildContext context,
-  WidgetRef ref,
-) async {
+Future<void> _startStartupRestoreService(BuildContext context) async {
   if (!context.mounted || !Platform.isAndroid) return;
   final localeCode = Localizations.localeOf(context).languageCode;
-  final permissions = ref.read(permissionCoordinatorProvider);
-  final state = await permissions.check(AppPermissionKind.notifications);
-  if (state == AppPermissionState.denied &&
-      !await permissions.wasPrompted(AppPermissionKind.notifications) &&
-      context.mounted) {
-    final explain =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: Text(context.l10n.keepRestorationVisible),
-            content: Text(context.l10n.restoreProgressNotificationPermission),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: Text(context.l10n.notNow),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: Text(context.l10n.continueLabel),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (explain) {
-      await permissions.request(AppPermissionKind.notifications);
-    } else {
-      await permissions.markPrompted(AppPermissionKind.notifications);
-    }
-  }
   await startRestoreForegroundService(localeCode: localeCode);
 }
 
@@ -3829,23 +3801,68 @@ class DashboardScreen extends ConsumerStatefulWidget {
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+class _DashboardScreenState extends ConsumerState<DashboardScreen>
+    with WidgetsBindingObserver {
   static const _homeDataSettleDuration = Duration(milliseconds: 180);
 
   late _HomeRenderData _homeData;
   Timer? _homeDataTimer;
+  final LayerLink _weatherEducationLink = LayerLink();
+  final LayerLink _notificationEducationLink = LayerLink();
+  PermissionEducationStep? _permissionEducationStep;
+  AppPermissionState _locationPermissionState = AppPermissionState.unavailable;
+  AppPermissionState _notificationPermissionState =
+      AppPermissionState.unavailable;
+  bool _permissionEducationBusy = false;
+  bool _permissionEducationLoadInFlight = false;
+  bool _forcePermissionEducationHandled = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _homeData = _readHomeData();
     ref.listenManual(tasksProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(assetsProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(roomsProvider, (_, _) => _scheduleHomeDataCommit());
+    ref.listenManual(permissionEducationSeenProvider, (previous, next) {
+      if (next.value == false) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(_maybeStartPermissionEducation());
+        });
+      }
+    }, fireImmediately: true);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final force =
+        GoRouter.maybeOf(context)
+            ?.routeInformationProvider
+            .value
+            .uri
+            .queryParameters['permissionSetup'] ==
+        '1';
+    if (force && !_forcePermissionEducationHandled) {
+      _forcePermissionEducationHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_maybeStartPermissionEducation(force: true));
+      });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _permissionEducationStep != null) {
+      unawaited(_refreshPermissionEducationAfterSettings());
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _homeDataTimer?.cancel();
     super.dispose();
   }
@@ -3884,6 +3901,195 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     });
   }
 
+  Future<void> _maybeStartPermissionEducation({bool force = false}) async {
+    if (_permissionEducationLoadInFlight || !mounted) return;
+    final session = ref.read(authSessionProvider).value;
+    if (session == null) return;
+    _permissionEducationLoadInFlight = true;
+    try {
+      final settings = ref.read(settingsRepositoryProvider);
+      final seen = await settings.permissionEducationSeen();
+      if (seen && !force) return;
+      final permissions = ref.read(permissionCoordinatorProvider);
+      final states = await Future.wait([
+        permissions.check(AppPermissionKind.location),
+        permissions.check(AppPermissionKind.notifications),
+      ]);
+      if (!mounted) return;
+      _locationPermissionState = states[0];
+      _notificationPermissionState = states[1];
+      final locationResolved = _isPermissionStepSkipped(states[0]);
+      final notificationsResolved = _isPermissionStepSkipped(states[1]);
+      if (locationResolved && notificationsResolved) {
+        if (!seen) await settings.setPermissionEducationSeen(true);
+        if (force &&
+            mounted &&
+            states.every((state) => state == AppPermissionState.granted)) {
+          hk_ui.showToast(
+            context,
+            content: Text(context.l10n.permissionsAlreadyEnabled),
+          );
+          _clearPermissionSetupQuery();
+        }
+        return;
+      }
+      setState(() {
+        _permissionEducationStep = locationResolved
+            ? PermissionEducationStep.notifications
+            : PermissionEducationStep.location;
+      });
+    } catch (error) {
+      AppLogger.warning('permission_education_load', error: error);
+    } finally {
+      _permissionEducationLoadInFlight = false;
+    }
+  }
+
+  bool _isPermissionStepSkipped(AppPermissionState state) =>
+      state == AppPermissionState.granted ||
+      state == AppPermissionState.unavailable;
+
+  Future<void> _handlePermissionContinue() async {
+    final step = _permissionEducationStep;
+    if (step == null || _permissionEducationBusy) return;
+    setState(() => _permissionEducationBusy = true);
+    final permissions = ref.read(permissionCoordinatorProvider);
+    final kind = step == PermissionEducationStep.location
+        ? AppPermissionKind.location
+        : AppPermissionKind.notifications;
+    try {
+      var state = await permissions.check(kind);
+      if (state == AppPermissionState.serviceDisabled) {
+        await permissions.openLocationServiceSettings();
+      } else if (state == AppPermissionState.permanentlyDenied ||
+          state == AppPermissionState.restricted) {
+        await permissions.openAppPermissionSettings();
+      } else if (state == AppPermissionState.denied) {
+        state = await permissions.request(kind);
+      }
+      if (!mounted) return;
+      _setPermissionState(step, state);
+      if (state == AppPermissionState.granted) {
+        await _applyGrantedPermission(step);
+        if (mounted) await _advancePermissionEducation();
+      } else if (state == AppPermissionState.denied ||
+          state == AppPermissionState.unavailable) {
+        await _advancePermissionEducation();
+      }
+    } catch (error) {
+      AppLogger.warning('permission_education_continue', error: error);
+    } finally {
+      if (mounted) setState(() => _permissionEducationBusy = false);
+    }
+  }
+
+  void _setPermissionState(
+    PermissionEducationStep step,
+    AppPermissionState state,
+  ) {
+    if (step == PermissionEducationStep.location) {
+      _locationPermissionState = state;
+    } else {
+      _notificationPermissionState = state;
+    }
+  }
+
+  Future<void> _applyGrantedPermission(PermissionEducationStep step) async {
+    if (step == PermissionEducationStep.location) {
+      final location = await ref
+          .read(weatherRepositoryProvider)
+          .useDeviceLocation();
+      if (location != null) {
+        await ref.read(weatherRepositoryProvider).refreshWeather();
+        await refreshNotificationSchedules(ref);
+        ref.invalidate(homeLocationProvider);
+        ref.invalidate(weatherProvider);
+      }
+      return;
+    }
+    final scheduler = ref.read(notificationSchedulerProvider);
+    await scheduler.initialize();
+    await scheduler.refreshSchedules();
+    ref.invalidate(notificationPermissionStateProvider);
+  }
+
+  Future<void> _advancePermissionEducation() async {
+    final step = _permissionEducationStep;
+    if (step == PermissionEducationStep.location &&
+        !_isPermissionStepSkipped(_notificationPermissionState)) {
+      if (mounted) {
+        setState(() {
+          _permissionEducationStep = PermissionEducationStep.notifications;
+        });
+      }
+      return;
+    }
+    await _completePermissionEducation();
+  }
+
+  Future<void> _completePermissionEducation() async {
+    try {
+      await ref
+          .read(settingsRepositoryProvider)
+          .setPermissionEducationSeen(true);
+      ref.invalidate(permissionEducationSeenProvider);
+    } catch (error) {
+      AppLogger.warning('permission_education_persist', error: error);
+    }
+    if (!mounted) return;
+    setState(() => _permissionEducationStep = null);
+    _clearPermissionSetupQuery();
+  }
+
+  void _clearPermissionSetupQuery() {
+    if (!mounted) return;
+    final router = GoRouter.maybeOf(context);
+    final uri = router?.routeInformationProvider.value.uri;
+    if (uri == null) return;
+    if (uri.queryParameters.containsKey('permissionSetup')) {
+      router!.replace<void>('/');
+    }
+  }
+
+  Future<void> _refreshPermissionEducationAfterSettings() async {
+    final step = _permissionEducationStep;
+    if (step == null || _permissionEducationBusy) return;
+    final kind = step == PermissionEducationStep.location
+        ? AppPermissionKind.location
+        : AppPermissionKind.notifications;
+    final state = await ref.read(permissionCoordinatorProvider).check(kind);
+    if (!mounted || _permissionEducationStep != step) return;
+    setState(() => _setPermissionState(step, state));
+    if (state == AppPermissionState.granted) {
+      await _applyGrantedPermission(step);
+      if (mounted) await _advancePermissionEducation();
+    }
+  }
+
+  void _showPreviousPermissionStep() {
+    if (_permissionEducationStep != PermissionEducationStep.notifications ||
+        _isPermissionStepSkipped(_locationPermissionState)) {
+      return;
+    }
+    setState(() {
+      _permissionEducationStep = PermissionEducationStep.location;
+    });
+  }
+
+  String _permissionPrimaryLabel(BuildContext context) {
+    final state = _permissionEducationStep == PermissionEducationStep.location
+        ? _locationPermissionState
+        : _notificationPermissionState;
+    if (state == AppPermissionState.serviceDisabled ||
+        state == AppPermissionState.permanentlyDenied ||
+        state == AppPermissionState.restricted) {
+      return context.l10n.openSettings;
+    }
+    return _permissionEducationStep == PermissionEducationStep.location
+        ? context.l10n.enableLocation
+        : context.l10n.enableNotificationsOnboarding;
+  }
+
   @override
   Widget build(BuildContext context) {
     final tasks = _homeData.tasks;
@@ -3894,6 +4100,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final assets = _homeData.assets;
     final rooms = _homeData.rooms;
     final topPadding = MediaQuery.paddingOf(context).top;
+    final headerExtent = _dashboardHeaderExtent(context, topPadding);
+    final permissionStep = _permissionEducationStep;
     final hasThings = assets.isNotEmpty;
     final canAddThing = rooms.isNotEmpty;
     return Scaffold(
@@ -3908,146 +4116,194 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             )
           : null,
-      body: RepaintBoundary(
-        key: const ValueKey('home-stability-boundary'),
-        child: RefreshIndicator(
-          onRefresh: () =>
-              ref.read(streakServiceProvider).refresh(DateTime.now()),
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _DashboardHeaderDelegate(topPadding: topPadding),
-              ),
-              SliverToBoxAdapter(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        HkSpacing.gutter,
-                        HkSpacing.sm,
-                        HkSpacing.gutter,
-                        HkSpacing.bottomAction + HkSpacing.bottomNav,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const RepaintBoundary(child: _DashboardWeatherCard()),
-                          const SizedBox(height: HkSpacing.sm),
-                          RepaintBoundary(
-                            child: _DashboardReadinessCard(
-                              rooms: rooms,
-                              assets: assets,
-                              tasks: tasks,
-                              taskBuckets: taskBuckets,
-                            ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          RepaintBoundary(
+            key: const ValueKey('home-stability-boundary'),
+            child: RefreshIndicator(
+              onRefresh: () =>
+                  ref.read(streakServiceProvider).refresh(DateTime.now()),
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _DashboardHeaderDelegate(
+                      topPadding: topPadding,
+                      extent: headerExtent,
+                      notificationEducationLink: _notificationEducationLink,
+                      onNotificationEducationTap:
+                          permissionStep ==
+                              PermissionEducationStep.notifications
+                          ? () => unawaited(_handlePermissionContinue())
+                          : null,
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 640),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            HkSpacing.gutter,
+                            HkSpacing.sm,
+                            HkSpacing.gutter,
+                            HkSpacing.bottomAction + HkSpacing.bottomNav,
                           ),
-                          const SizedBox(height: HkSpacing.sm),
-                          const HkNativeAdCard(placement: 'home'),
-                          const SizedBox(height: HkSpacing.sm),
-                          if (homeTaskSections.isEmpty)
-                            hk_ui.PremiumEmptyState(
-                              icon: hasThings
-                                  ? Symbols.task_alt_rounded
-                                  : Symbols.inventory_2_rounded,
-                              title: hasThings
-                                  ? context.l10n.noMaintenancePlansYet
-                                  : canAddThing
-                                  ? context.l10n.createYourFirstItem
-                                  : context.l10n.createYourFirstRoom,
-                              body: hasThings
-                                  ? context
-                                        .l10n
-                                        .scheduleRecurringCareForAnItemToStartTracking
-                                  : canAddThing
-                                  ? context.l10n.addAHomeItemFirst
-                                  : context
-                                        .l10n
-                                        .addARoomOrZoneBeforeAddingItems,
-                              action: FilledButton.icon(
-                                onPressed: () => hasThings
-                                    ? showPlanEditorSheet(context)
-                                    : startThingSetupFlow(context, ref),
-                                icon: Icon(
-                                  hasThings
-                                      ? Symbols.add_task_rounded
-                                      : canAddThing
-                                      ? Symbols.add_home_work_rounded
-                                      : Symbols.meeting_room_rounded,
-                                ),
-                                label: Text(
-                                  hasThings
-                                      ? context.l10n.addTask
-                                      : canAddThing
-                                      ? context.l10n.createFirstItem
-                                      : context.l10n.createFirstRoom,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              RepaintBoundary(
+                                child: _DashboardWeatherCard(
+                                  educationLink: _weatherEducationLink,
+                                  onEducationTap:
+                                      permissionStep ==
+                                          PermissionEducationStep.location
+                                      ? () => unawaited(
+                                          _handlePermissionContinue(),
+                                        )
+                                      : null,
                                 ),
                               ),
-                            )
-                          else
-                            Column(
-                              children: [
-                                for (final section in homeTaskSections) ...[
-                                  hk_ui.SectionHeader(
-                                    title: section.title,
-                                    actionLabel: context.l10n.seeAll,
-                                    onAction: () =>
-                                        context.push('/maintenance'),
-                                  ),
-                                  for (final task in section.tasks.take(
-                                    homeTaskLimit,
-                                  ))
-                                    hk_ui.SwipeDelete(
-                                      margin: const EdgeInsets.only(
-                                        bottom: HkSpacing.sm,
-                                      ),
-                                      dismissKey: ValueKey(
-                                        'home-task-delete-${task.plan.id}',
-                                      ),
-                                      action: hk_ui.SwipeAction.moveToTrash(
-                                        onAction: () =>
-                                            deleteTaskWithConfirmation(
-                                              context,
-                                              ref,
-                                              task,
-                                            ),
-                                      ),
-                                      child: hk_ui.TaskCard(
-                                        task: task,
-                                        margin: EdgeInsets.zero,
-                                        onTap: () => context.push(
-                                          '/maintenance/${task.plan.id}',
-                                        ),
-                                        onComplete: () =>
-                                            _completeTask(context, ref, task),
-                                        onSnooze: () => snoozeTaskWithFeedback(
-                                          context,
-                                          ref,
-                                          task,
-                                        ),
-                                        onSetEnabled: (enabled) =>
-                                            setTaskEnabledWithFeedback(
-                                              context,
-                                              ref,
-                                              task,
-                                              enabled,
-                                            ),
-                                      ),
+                              const SizedBox(height: HkSpacing.sm),
+                              RepaintBoundary(
+                                child: _DashboardReadinessCard(
+                                  rooms: rooms,
+                                  assets: assets,
+                                  tasks: tasks,
+                                  taskBuckets: taskBuckets,
+                                ),
+                              ),
+                              const SizedBox(height: HkSpacing.sm),
+                              const HkNativeAdCard(placement: 'home'),
+                              const SizedBox(height: HkSpacing.sm),
+                              if (homeTaskSections.isEmpty)
+                                hk_ui.PremiumEmptyState(
+                                  icon: hasThings
+                                      ? Symbols.task_alt_rounded
+                                      : Symbols.inventory_2_rounded,
+                                  title: hasThings
+                                      ? context.l10n.noMaintenancePlansYet
+                                      : canAddThing
+                                      ? context.l10n.createYourFirstItem
+                                      : context.l10n.createYourFirstRoom,
+                                  body: hasThings
+                                      ? context
+                                            .l10n
+                                            .scheduleRecurringCareForAnItemToStartTracking
+                                      : canAddThing
+                                      ? context.l10n.addAHomeItemFirst
+                                      : context
+                                            .l10n
+                                            .addARoomOrZoneBeforeAddingItems,
+                                  action: FilledButton.icon(
+                                    onPressed: () => hasThings
+                                        ? showPlanEditorSheet(context)
+                                        : startThingSetupFlow(context, ref),
+                                    icon: Icon(
+                                      hasThings
+                                          ? Symbols.add_task_rounded
+                                          : canAddThing
+                                          ? Symbols.add_home_work_rounded
+                                          : Symbols.meeting_room_rounded,
                                     ),
-                                ],
-                              ],
-                            ),
-                        ],
+                                    label: Text(
+                                      hasThings
+                                          ? context.l10n.addTask
+                                          : canAddThing
+                                          ? context.l10n.createFirstItem
+                                          : context.l10n.createFirstRoom,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Column(
+                                  children: [
+                                    for (final section in homeTaskSections) ...[
+                                      hk_ui.SectionHeader(
+                                        title: section.title,
+                                        actionLabel: context.l10n.seeAll,
+                                        onAction: () =>
+                                            context.push('/maintenance'),
+                                      ),
+                                      for (final task in section.tasks.take(
+                                        homeTaskLimit,
+                                      ))
+                                        hk_ui.SwipeDelete(
+                                          margin: const EdgeInsets.only(
+                                            bottom: HkSpacing.sm,
+                                          ),
+                                          dismissKey: ValueKey(
+                                            'home-task-delete-${task.plan.id}',
+                                          ),
+                                          action: hk_ui.SwipeAction.moveToTrash(
+                                            onAction: () =>
+                                                deleteTaskWithConfirmation(
+                                                  context,
+                                                  ref,
+                                                  task,
+                                                ),
+                                          ),
+                                          child: hk_ui.TaskCard(
+                                            task: task,
+                                            margin: EdgeInsets.zero,
+                                            onTap: () => context.push(
+                                              '/maintenance/${task.plan.id}',
+                                            ),
+                                            onComplete: () => _completeTask(
+                                              context,
+                                              ref,
+                                              task,
+                                            ),
+                                            onSnooze: () =>
+                                                snoozeTaskWithFeedback(
+                                                  context,
+                                                  ref,
+                                                  task,
+                                                ),
+                                            onSetEnabled: (enabled) =>
+                                                setTaskEnabledWithFeedback(
+                                                  context,
+                                                  ref,
+                                                  task,
+                                                  enabled,
+                                                ),
+                                          ),
+                                        ),
+                                    ],
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+          if (permissionStep != null)
+            Positioned.fill(
+              child: PermissionEducationOverlay(
+                step: permissionStep,
+                targetLink: permissionStep == PermissionEducationStep.location
+                    ? _weatherEducationLink
+                    : _notificationEducationLink,
+                primaryLabel: _permissionPrimaryLabel(context),
+                busy: _permissionEducationBusy,
+                onContinue: () => unawaited(_handlePermissionContinue()),
+                onNotNow: () => unawaited(_advancePermissionEducation()),
+                onClose: () => unawaited(_completePermissionEducation()),
+                onBack:
+                    permissionStep == PermissionEducationStep.notifications &&
+                        !_isPermissionStepSkipped(_locationPermissionState)
+                    ? _showPreviousPermissionStep
+                    : null,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -4115,7 +4371,13 @@ class _HomeRenderData {
 }
 
 class _DashboardWeatherCard extends ConsumerWidget {
-  const _DashboardWeatherCard();
+  const _DashboardWeatherCard({
+    required this.educationLink,
+    this.onEducationTap,
+  });
+
+  final LayerLink educationLink;
+  final VoidCallback? onEducationTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -4125,12 +4387,23 @@ class _DashboardWeatherCard extends ConsumerWidget {
     final brightness = Theme.of(context).brightness;
     final location =
         ref.watch(homeLocationProvider).value ?? snapshot?.homeLocation;
-    return _WeatherCard(
-      weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
-      location: location,
-      localNow: themeNow,
-      isDark: brightness == Brightness.dark,
-      onToggleTheme: () => _toggleWeatherTheme(context, ref, brightness),
+    return CompositedTransformTarget(
+      link: educationLink,
+      child: Semantics(
+        button: onEducationTap != null,
+        label: onEducationTap == null ? null : context.l10n.enableLocation,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: onEducationTap,
+          child: _WeatherCard(
+            weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
+            location: location,
+            localNow: themeNow,
+            isDark: brightness == Brightness.dark,
+            onToggleTheme: () => _toggleWeatherTheme(context, ref, brightness),
+          ),
+        ),
+      ),
     );
   }
 
@@ -4174,6 +4447,25 @@ class _DashboardReadinessCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final setup = feature_selectors.homeSetupProgress(
+      rooms: rooms,
+      assets: assets,
+      tasks: tasks,
+    );
+    final reduceMotion = _prefersReducedMotion(context);
+    if (!setup.isEligible) {
+      return AnimatedSwitcher(
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 260),
+        child: _HomeSetupProgressCard(
+          key: const ValueKey('home-setup-progress-card'),
+          progress: setup,
+          nextLabel: _setupNextLabel(context, setup.nextStep),
+          onNext: () => unawaited(_openSetupStep(context, ref, setup.nextStep)),
+        ),
+      );
+    }
     final snapshot = ref.watch(initialHomeSnapshotProvider).value;
     final readiness = feature_selectors.homeReadiness(
       rooms: rooms,
@@ -4185,31 +4477,83 @@ class _DashboardReadinessCard extends ConsumerWidget {
           const BackupState(),
       now: DateTime.now(),
     );
-    return _HomeReadinessSummaryCard(
-      score: readiness.score,
-      overdueCount: taskBuckets.overdueCount,
-      todayCount: taskBuckets.todayCount,
-      nextAction: _localizedFeatureMessage(context, readiness.nextBestAction),
-      today: taskBuckets.todayCount,
-      nextSeven: taskBuckets.next7DaysCount,
-      overdue: taskBuckets.overdueCount,
-      onToday: () => context.push('/maintenance?filter=today'),
-      onNextSeven: () => context.push('/maintenance?filter=next7'),
-      onOverdue: () => context.push('/maintenance?filter=overdue'),
+    return AnimatedSwitcher(
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 260),
+      child: _HomeReadinessSummaryCard(
+        key: const ValueKey('home-readiness-card'),
+        score: readiness!.score,
+        overdueCount: taskBuckets.overdueCount,
+        todayCount: taskBuckets.todayCount,
+        nextAction: _localizedFeatureMessage(context, readiness.nextBestAction),
+        today: taskBuckets.todayCount,
+        nextSeven: taskBuckets.next7DaysCount,
+        overdue: taskBuckets.overdueCount,
+        onToday: () => context.push('/maintenance?filter=today'),
+        onNextSeven: () => context.push('/maintenance?filter=next7'),
+        onOverdue: () => context.push('/maintenance?filter=overdue'),
+      ),
     );
+  }
+
+  String _setupNextLabel(BuildContext context, features.HomeSetupStep? step) =>
+      switch (step) {
+        features.HomeSetupStep.room => context.l10n.nextCreateFirstRoom,
+        features.HomeSetupStep.maintainedItem =>
+          context.l10n.nextAddMaintainedItem,
+        features.HomeSetupStep.scheduledTask =>
+          context.l10n.nextScheduleMaintenanceTask,
+        null => '',
+      };
+
+  Future<void> _openSetupStep(
+    BuildContext context,
+    WidgetRef ref,
+    features.HomeSetupStep? step,
+  ) async {
+    switch (step) {
+      case features.HomeSetupStep.room:
+        await startThingSetupFlow(context, ref);
+        return;
+      case features.HomeSetupStep.maintainedItem:
+        await showAssetEditorSheet(context, roomId: rooms.first.id);
+        return;
+      case features.HomeSetupStep.scheduledTask:
+        await showPlanEditorSheet(context, assetId: assets.first.id);
+        return;
+      case null:
+        return;
+    }
   }
 }
 
+double _dashboardHeaderExtent(BuildContext context, double topPadding) {
+  final width = MediaQuery.sizeOf(context).width;
+  final scaledUnit = MediaQuery.textScalerOf(context).scale(16);
+  final scaleAdjustment = ((scaledUnit / 16) - 1).clamp(0.0, 1.0) * 28;
+  final contentExtent = width < 600 ? 190.0 : 144.0;
+  return topPadding + contentExtent + scaleAdjustment;
+}
+
 class _DashboardHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _DashboardHeaderDelegate({required this.topPadding});
+  const _DashboardHeaderDelegate({
+    required this.topPadding,
+    required this.extent,
+    required this.notificationEducationLink,
+    this.onNotificationEducationTap,
+  });
 
   final double topPadding;
+  final double extent;
+  final LayerLink notificationEducationLink;
+  final VoidCallback? onNotificationEducationTap;
 
   @override
-  double get minExtent => topPadding + 64;
+  double get minExtent => extent;
 
   @override
-  double get maxExtent => topPadding + 64;
+  double get maxExtent => extent;
 
   @override
   Widget build(
@@ -4217,19 +4561,32 @@ class _DashboardHeaderDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    return _DashboardHeader(overlapsContent: overlapsContent);
+    return _DashboardHeader(
+      overlapsContent: overlapsContent,
+      notificationEducationLink: notificationEducationLink,
+      onNotificationEducationTap: onNotificationEducationTap,
+    );
   }
 
   @override
   bool shouldRebuild(_DashboardHeaderDelegate oldDelegate) {
-    return topPadding != oldDelegate.topPadding;
+    return topPadding != oldDelegate.topPadding ||
+        extent != oldDelegate.extent ||
+        notificationEducationLink != oldDelegate.notificationEducationLink ||
+        onNotificationEducationTap != oldDelegate.onNotificationEducationTap;
   }
 }
 
 class _DashboardHeader extends ConsumerWidget {
-  const _DashboardHeader({required this.overlapsContent});
+  const _DashboardHeader({
+    required this.overlapsContent,
+    required this.notificationEducationLink,
+    this.onNotificationEducationTap,
+  });
 
   final bool overlapsContent;
+  final LayerLink notificationEducationLink;
+  final VoidCallback? onNotificationEducationTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -4245,99 +4602,524 @@ class _DashboardHeader extends ConsumerWidget {
         const AppProfile();
     final session = ref.watch(authSessionProvider).value ?? snapshot?.session;
     final greetingName = _greetingName(context, profile, session);
-    final greeting = _personalGreeting(context, DateTime.now(), greetingName);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(
-              alpha: overlapsContent ? 0.28 : 0,
+    return RepaintBoundary(
+      key: const ValueKey('dashboard-header-card'),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(
+            bottom: BorderSide(
+              color: scheme.outlineVariant.withValues(
+                alpha: overlapsContent ? 0.28 : 0,
+              ),
+            ),
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1180),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final mobile = constraints.maxWidth < 600;
+                  final compact = constraints.maxWidth < 768;
+                  final actionSize = mobile
+                      ? 48.0
+                      : compact
+                      ? 50.0
+                      : 56.0;
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      mobile ? HkSpacing.xs : HkSpacing.md,
+                      HkSpacing.xs,
+                      mobile ? HkSpacing.xs : HkSpacing.md,
+                      HkSpacing.xs,
+                    ),
+                    child: Container(
+                      padding: EdgeInsets.all(
+                        mobile
+                            ? HkSpacing.sm
+                            : compact
+                            ? HkSpacing.md
+                            : 20,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerLowest,
+                        borderRadius: BorderRadius.circular(
+                          mobile ? HkRadii.xxl : 40,
+                        ),
+                        border: Border.all(
+                          color: scheme.outlineVariant.withValues(alpha: 0.46),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: HkColors.appTextPrimary.withValues(
+                              alpha: overlapsContent ? 0.10 : 0.075,
+                            ),
+                            blurRadius: 34,
+                            offset: const Offset(0, 14),
+                          ),
+                          BoxShadow(
+                            color: HkColors.appTextPrimary.withValues(
+                              alpha: 0.03,
+                            ),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: mobile
+                          ? Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _DashboardIdentityGroup(
+                                  avatarUrl: session?.avatarUrl,
+                                  avatarProvider: snapshot?.avatarProvider,
+                                  fallbackName: greetingName,
+                                  mobile: true,
+                                ),
+                                const SizedBox(height: HkSpacing.xs),
+                                Divider(
+                                  height: 1,
+                                  color: scheme.outlineVariant.withValues(
+                                    alpha: 0.70,
+                                  ),
+                                ),
+                                const SizedBox(height: HkSpacing.xs),
+                                _DashboardHeaderActions(
+                                  actionSize: actionSize,
+                                  compact: true,
+                                  mobile: true,
+                                  unreadCount: unreadCount,
+                                  notificationEducationLink:
+                                      notificationEducationLink,
+                                  onSearch: () => context.push('/search'),
+                                  onPoints: () =>
+                                      showPointsWalletSheet(context, ref),
+                                  onNotifications:
+                                      onNotificationEducationTap ??
+                                      () => context.push('/notifications'),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              children: [
+                                Expanded(
+                                  child: _DashboardIdentityGroup(
+                                    avatarUrl: session?.avatarUrl,
+                                    avatarProvider: snapshot?.avatarProvider,
+                                    fallbackName: greetingName,
+                                    mobile: false,
+                                    compact: compact,
+                                  ),
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: compact ? 62 : 74,
+                                  margin: EdgeInsets.symmetric(
+                                    horizontal: compact
+                                        ? HkSpacing.sm
+                                        : HkSpacing.space24,
+                                  ),
+                                  color: scheme.outlineVariant.withValues(
+                                    alpha: 0.82,
+                                  ),
+                                ),
+                                _DashboardHeaderActions(
+                                  actionSize: actionSize,
+                                  compact: compact,
+                                  mobile: false,
+                                  unreadCount: unreadCount,
+                                  notificationEducationLink:
+                                      notificationEducationLink,
+                                  onSearch: () => context.push('/search'),
+                                  onPoints: () =>
+                                      showPointsWalletSheet(context, ref),
+                                  onNotifications:
+                                      onNotificationEducationTap ??
+                                      () => context.push('/notifications'),
+                                ),
+                              ],
+                            ),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ),
       ),
-      child: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 390;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: HkSpacing.gutter,
-                    vertical: HkSpacing.xs,
-                  ),
-                  child: SizedBox(
-                    height: hk_ui.kHomePilotHeaderActionHeight,
-                    child: Row(
-                      children: [
-                        Semantics(
-                          button: true,
-                          label: context.l10n.openAccount,
-                          excludeSemantics: true,
-                          child: Tooltip(
-                            message: context.l10n.openAccount,
-                            child: SizedBox.square(
-                              dimension: hk_ui.kHomePilotHeaderActionHeight,
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onTap: () => context.push('/account'),
-                                child: Center(
-                                  child: hk_ui.ProfileAvatar(
-                                    avatarUrl: session?.avatarUrl,
-                                    imageProvider: snapshot?.avatarProvider,
-                                    fallbackName: greetingName,
-                                    radius: 18,
-                                  ),
-                                ),
-                              ),
-                            ),
+    );
+  }
+}
+
+class _DashboardIdentityGroup extends StatelessWidget {
+  const _DashboardIdentityGroup({
+    required this.avatarUrl,
+    required this.avatarProvider,
+    required this.fallbackName,
+    required this.mobile,
+    this.compact = false,
+  });
+
+  final String? avatarUrl;
+  final ImageProvider<Object>? avatarProvider;
+  final String fallbackName;
+  final bool mobile;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final avatarRadius = mobile
+        ? 28.0
+        : compact
+        ? 31.0
+        : 36.0;
+    return Row(
+      children: [
+        Semantics(
+          button: true,
+          label: context.l10n.openAccount,
+          excludeSemantics: true,
+          child: Tooltip(
+            message: context.l10n.openAccount,
+            child: Material(
+              color: Colors.transparent,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => context.push('/account'),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: scheme.outlineVariant.withValues(alpha: 0.74),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: HkColors.appTextPrimary.withValues(
+                            alpha: 0.10,
                           ),
-                        ),
-                        SizedBox(
-                          width: compact ? HkSpacing.space4 : HkSpacing.sm,
-                        ),
-                        Expanded(
-                          child: Text(
-                            greeting,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                (compact
-                                        ? Theme.of(
-                                            context,
-                                          ).textTheme.titleMedium
-                                        : Theme.of(
-                                            context,
-                                          ).textTheme.titleLarge)
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: context.l10n.searchHomePilot,
-                          onPressed: () => context.push('/search'),
-                          icon: const Icon(Symbols.search_rounded),
-                        ),
-                        const SizedBox(width: HkSpacing.space4),
-                        HkPointsPill(
-                          key: const ValueKey('home-points-control'),
-                          compact: compact,
-                          onTap: () => showPointsWalletSheet(context, ref),
-                        ),
-                        const SizedBox(width: HkSpacing.space6),
-                        _NotificationButton(
-                          key: const ValueKey('home-notifications-control'),
-                          unreadCount: unreadCount,
-                          onPressed: () => context.push('/notifications'),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
                         ),
                       ],
                     ),
+                    child: hk_ui.ProfileAvatar(
+                      avatarUrl: avatarUrl,
+                      imageProvider: avatarProvider,
+                      fallbackName: fallbackName,
+                      radius: avatarRadius,
+                    ),
                   ),
-                );
-              },
+                ),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: mobile ? HkSpacing.sm : HkSpacing.md),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.l10n.goodAfternoon,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: scheme.onSurface,
+                  fontSize: mobile
+                      ? 24
+                      : compact
+                      ? 27
+                      : 32,
+                  height: 1.05,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: HkSpacing.space6),
+              Text(
+                context.l10n.dashboardProductiveSubtitle,
+                maxLines: 2,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.76),
+                  fontSize: mobile
+                      ? 14
+                      : compact
+                      ? 15
+                      : 17,
+                  height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardHeaderActions extends StatelessWidget {
+  const _DashboardHeaderActions({
+    required this.actionSize,
+    required this.compact,
+    required this.mobile,
+    required this.unreadCount,
+    required this.notificationEducationLink,
+    required this.onSearch,
+    required this.onPoints,
+    required this.onNotifications,
+  });
+
+  final double actionSize;
+  final bool compact;
+  final bool mobile;
+  final int unreadCount;
+  final LayerLink notificationEducationLink;
+  final VoidCallback onSearch;
+  final VoidCallback onPoints;
+  final VoidCallback onNotifications;
+
+  @override
+  Widget build(BuildContext context) {
+    final search = _DashboardHeaderAction(
+      key: const ValueKey('home-search-control'),
+      size: actionSize,
+      semanticLabel: context.l10n.searchHomePilot,
+      tooltip: context.l10n.searchHomePilot,
+      onPressed: onSearch,
+      icon: Symbols.search_rounded,
+      iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    final points = _DashboardPointsCard(
+      key: const ValueKey('home-points-control'),
+      compact: compact,
+      height: actionSize,
+      onPressed: onPoints,
+    );
+    final notifications = CompositedTransformTarget(
+      link: notificationEducationLink,
+      child: _NotificationButton(
+        key: const ValueKey('home-notifications-control'),
+        size: actionSize,
+        unreadCount: unreadCount,
+        onPressed: onNotifications,
+      ),
+    );
+    if (mobile) {
+      return Row(
+        children: [
+          search,
+          const SizedBox(width: HkSpacing.xs),
+          Expanded(child: points),
+          const SizedBox(width: HkSpacing.xs),
+          notifications,
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        search,
+        SizedBox(width: compact ? HkSpacing.space6 : HkSpacing.sm),
+        SizedBox(width: compact ? 142 : 172, child: points),
+        SizedBox(width: compact ? HkSpacing.space6 : HkSpacing.sm),
+        notifications,
+      ],
+    );
+  }
+}
+
+class _DashboardHeaderAction extends StatelessWidget {
+  const _DashboardHeaderAction({
+    required this.size,
+    required this.semanticLabel,
+    required this.tooltip,
+    required this.onPressed,
+    required this.icon,
+    required this.iconColor,
+    super.key,
+  });
+
+  final double size;
+  final String semanticLabel;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final IconData icon;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(size < 52 ? HkRadii.lg : 19),
+      side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.72)),
+    );
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: semanticLabel,
+      child: Tooltip(
+        message: tooltip,
+        excludeFromSemantics: true,
+        child: SizedBox.square(
+          dimension: size,
+          child: Material(
+            color: scheme.surfaceContainerLowest,
+            shape: shape,
+            elevation: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(
+                  size < 52 ? HkRadii.lg : 19,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: HkColors.appTextPrimary.withValues(alpha: 0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: InkWell(
+                customBorder: shape,
+                onTap: onPressed,
+                child: Icon(icon, color: iconColor, size: size * 0.43),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardPointsCard extends ConsumerWidget {
+  const _DashboardPointsCard({
+    required this.compact,
+    required this.height,
+    required this.onPressed,
+    super.key,
+  });
+
+  final bool compact;
+  final double height;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final balance = ref.watch(pointWalletProvider).value?.balance;
+    final semanticLabel = balance == null
+        ? context.l10n.pointsUnavailable
+        : context.l10n.pointsCount(balance);
+    final radius = compact ? HkRadii.lg : HkRadii.xl;
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: semanticLabel,
+      child: Tooltip(
+        message: context.l10n.pointsWallet,
+        excludeFromSemantics: true,
+        child: SizedBox(
+          height: height,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  scheme.surfaceContainerLowest,
+                  scheme.primaryContainer.withValues(alpha: 0.64),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(color: scheme.primary.withValues(alpha: 0.34)),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: 0.10),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(radius),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onPressed,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: compact ? HkSpacing.xs : HkSpacing.sm,
+                    end: compact ? HkSpacing.space6 : HkSpacing.xs,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: compact ? 34 : 40,
+                        height: compact ? 34 : 40,
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerLowest,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: scheme.primary.withValues(alpha: 0.52),
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: scheme.primary.withValues(alpha: 0.18),
+                              blurRadius: 12,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Symbols.star_rounded,
+                          color: scheme.primary,
+                          size: compact ? 22 : 26,
+                        ),
+                      ),
+                      SizedBox(
+                        width: compact ? HkSpacing.space6 : HkSpacing.xs,
+                      ),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context.l10n.pointsLabel,
+                              maxLines: 1,
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: scheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                            Text(
+                              balance?.toString() ?? '—',
+                              maxLines: 1,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: scheme.onSurface,
+                                    height: 1,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Symbols.chevron_right_rounded,
+                        color: scheme.primary,
+                        size: compact ? 20 : 24,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -4348,11 +5130,13 @@ class _DashboardHeader extends ConsumerWidget {
 
 class _NotificationButton extends StatelessWidget {
   const _NotificationButton({
+    required this.size,
     required this.unreadCount,
     required this.onPressed,
     super.key,
   });
 
+  final double size;
   final int unreadCount;
   final VoidCallback onPressed;
 
@@ -4365,44 +5149,37 @@ class _NotificationButton extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        hk_ui.HeaderActionSurface(
-          width: hk_ui.kHomePilotHeaderActionHeight,
+        _DashboardHeaderAction(
+          size: size,
           semanticLabel: semanticLabel,
           tooltip: context.l10n.notifications,
           onPressed: onPressed,
-          child: Icon(
-            Symbols.notifications_rounded,
-            color: scheme.primary,
-            size: 21,
-          ),
+          icon: Symbols.notifications_rounded,
+          iconColor: scheme.primary,
         ),
         if (unreadCount > 0)
           PositionedDirectional(
-            end: HkSpacing.space4,
-            top: HkSpacing.space4,
+            end: -7,
+            top: -7,
             child: Container(
               key: const ValueKey('home-notification-unread-badge'),
-              width: unreadCount > 9 ? 18 : 10,
-              height: unreadCount > 9 ? 18 : 10,
-              alignment: Alignment.center,
+              width: 20,
+              height: 20,
               decoration: BoxDecoration(
-                color: HkColors.tertiary,
+                color: HkColors.appPrimary,
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: scheme.surfaceContainerLowest,
-                  width: 1.5,
+                  width: 4,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: HkColors.appPrimary.withValues(alpha: 0.24),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              child: unreadCount > 9
-                  ? Text(
-                      '9+',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    )
-                  : null,
             ),
           ),
       ],
@@ -4525,6 +5302,145 @@ String _profileInitials(String value) {
       .toUpperCase();
 }
 
+class _HomeSetupProgressCard extends StatelessWidget {
+  const _HomeSetupProgressCard({
+    required this.progress,
+    required this.nextLabel,
+    required this.onNext,
+    super.key,
+  });
+
+  final features.HomeSetupProgress progress;
+  final String nextLabel;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return hk_ui.PremiumCard(
+      padding: const EdgeInsets.all(HkSpacing.md),
+      borderColor: scheme.primary.withValues(alpha: 0.20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(HkRadii.lg),
+                ),
+                child: Icon(Symbols.home_rounded, color: scheme.primary),
+              ),
+              const SizedBox(width: HkSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.setUpYourHome,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: HkSpacing.space4),
+                    Text(
+                      context.l10n.setupHomeSubtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: HkSpacing.md),
+          Text(
+            context.l10n.setupProgress(progress.completedSteps),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: HkSpacing.xs),
+          Row(
+            children: [
+              for (
+                var index = 0;
+                index < features.HomeSetupProgress.totalSteps;
+                index++
+              ) ...[
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: _prefersReducedMotion(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 220),
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: index < progress.completedSteps
+                          ? scheme.primary
+                          : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(HkRadii.full),
+                    ),
+                  ),
+                ),
+                if (index < features.HomeSetupProgress.totalSteps - 1)
+                  const SizedBox(width: HkSpacing.space6),
+              ],
+            ],
+          ),
+          const SizedBox(height: HkSpacing.md),
+          Semantics(
+            button: true,
+            label: context.l10n.nextValue(nextLabel),
+            child: Material(
+              color: scheme.primaryContainer.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(HkRadii.lg),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(HkRadii.lg),
+                onTap: onNext,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: HkSpacing.sm,
+                      vertical: HkSpacing.xs,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            context.l10n.nextValue(nextLabel),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: scheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                        ),
+                        Icon(
+                          Symbols.arrow_forward_rounded,
+                          color: scheme.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HomeReadinessSummaryCard extends StatelessWidget {
   const _HomeReadinessSummaryCard({
     required this.score,
@@ -4537,6 +5453,7 @@ class _HomeReadinessSummaryCard extends StatelessWidget {
     required this.onToday,
     required this.onNextSeven,
     required this.onOverdue,
+    super.key,
   });
 
   final int score;
@@ -5236,21 +6153,6 @@ String _localizedWeatherSummary(BuildContext context, int code) {
   };
 }
 
-String _greetingFor(BuildContext context, DateTime now) {
-  if (now.hour < 12) {
-    return context.l10n.goodMorning;
-  }
-  if (now.hour < 17) {
-    return context.l10n.goodAfternoon;
-  }
-  return context.l10n.goodEvening;
-}
-
-String _displayNameOrThere(BuildContext context, String displayName) {
-  final trimmed = displayName.trim();
-  return trimmed.isEmpty ? context.l10n.there : trimmed;
-}
-
 String _greetingName(
   BuildContext context,
   AppProfile profile,
@@ -5281,17 +6183,6 @@ String? _emailUsername(String? email) {
     return trimmed;
   }
   return trimmed.substring(0, atIndex);
-}
-
-String _personalGreeting(
-  BuildContext context,
-  DateTime now,
-  String displayName,
-) {
-  return context.l10n.personalGreeting(
-    _greetingFor(context, now),
-    _displayNameOrThere(context, displayName),
-  );
 }
 
 String _taskGroupCountLabel(BuildContext context, int count) {
@@ -10637,6 +11528,16 @@ class SettingsScreen extends ConsumerWidget {
                   loading: () => const LinearProgressIndicator(),
                 ),
                 const SizedBox(height: HkSpacing.xs),
+                ListTile(
+                  key: const ValueKey('settings-permission-education'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Symbols.health_and_safety_rounded),
+                  title: Text(context.l10n.permissionSetup),
+                  subtitle: Text(context.l10n.permissionSetupSubtitle),
+                  trailing: const Icon(Symbols.chevron_right_rounded),
+                  onTap: () => _openPermissionSetup(context, ref),
+                ),
+                const SizedBox(height: HkSpacing.xs),
                 Text(
                   context.l10n.preferences,
                   style: Theme.of(context).textTheme.labelLarge,
@@ -11036,6 +11937,28 @@ class SettingsScreen extends ConsumerWidget {
         ),
         severity: hk_ui.HkToastSeverity.error,
       );
+    }
+  }
+
+  Future<void> _openPermissionSetup(BuildContext context, WidgetRef ref) async {
+    try {
+      final permissions = ref.read(permissionCoordinatorProvider);
+      final states = await Future.wait([
+        permissions.check(AppPermissionKind.location),
+        permissions.check(AppPermissionKind.notifications),
+      ]);
+      if (!context.mounted) return;
+      if (states.every((state) => state == AppPermissionState.granted)) {
+        hk_ui.showToast(
+          context,
+          content: Text(context.l10n.permissionsAlreadyEnabled),
+        );
+        return;
+      }
+      context.go('/?permissionSetup=1');
+    } catch (error) {
+      AppLogger.warning('permission_setup_open', error: error);
+      if (context.mounted) context.go('/?permissionSetup=1');
     }
   }
 

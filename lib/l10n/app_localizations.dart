@@ -5823,6 +5823,126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} points'**
   String pointsCount(int count);
+
+  /// No description provided for @dashboardProductiveSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Let\'\'s make today productive'**
+  String get dashboardProductiveSubtitle;
+
+  /// No description provided for @pointsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Points'**
+  String get pointsLabel;
+
+  /// No description provided for @setUpYourHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up your home'**
+  String get setUpYourHome;
+
+  /// No description provided for @setupHomeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Complete a few steps so we can build your maintenance plan.'**
+  String get setupHomeSubtitle;
+
+  /// No description provided for @setupProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'{completed} of 3 complete'**
+  String setupProgress(int completed);
+
+  /// No description provided for @nextCreateFirstRoom.
+  ///
+  /// In en, this message translates to:
+  /// **'Create your first room'**
+  String get nextCreateFirstRoom;
+
+  /// No description provided for @nextAddMaintainedItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Add an item you want to maintain'**
+  String get nextAddMaintainedItem;
+
+  /// No description provided for @nextScheduleMaintenanceTask.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule your first maintenance task'**
+  String get nextScheduleMaintenanceTask;
+
+  /// No description provided for @getLocalMaintenanceTips.
+  ///
+  /// In en, this message translates to:
+  /// **'Get local maintenance tips'**
+  String get getLocalMaintenanceTips;
+
+  /// No description provided for @locationEducationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Use your location to show local weather and recommend seasonal home tasks.'**
+  String get locationEducationBody;
+
+  /// No description provided for @locationEducationPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.'**
+  String get locationEducationPrivacy;
+
+  /// No description provided for @enableLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable location'**
+  String get enableLocation;
+
+  /// No description provided for @neverMissImportantMaintenance.
+  ///
+  /// In en, this message translates to:
+  /// **'Never miss important maintenance'**
+  String get neverMissImportantMaintenance;
+
+  /// No description provided for @notificationEducationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Get reminders before tasks are due and alerts when something becomes overdue.'**
+  String get notificationEducationBody;
+
+  /// No description provided for @notificationEducationReassurance.
+  ///
+  /// In en, this message translates to:
+  /// **'You can change notification preferences at any time.'**
+  String get notificationEducationReassurance;
+
+  /// No description provided for @enableNotificationsOnboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable notifications'**
+  String get enableNotificationsOnboarding;
+
+  /// No description provided for @permissionStep.
+  ///
+  /// In en, this message translates to:
+  /// **'Step {current} of {total}'**
+  String permissionStep(int current, int total);
+
+  /// No description provided for @permissionSetup.
+  ///
+  /// In en, this message translates to:
+  /// **'Location and notification setup'**
+  String get permissionSetup;
+
+  /// No description provided for @permissionSetupSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Review how HomePilot uses location and reminders.'**
+  String get permissionSetupSubtitle;
+
+  /// No description provided for @permissionsAlreadyEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Location and notifications are already enabled.'**
+  String get permissionsAlreadyEnabled;
 }
 
 class _AppLocalizationsDelegate

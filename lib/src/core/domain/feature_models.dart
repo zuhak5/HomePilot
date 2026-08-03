@@ -96,6 +96,22 @@ class EntityHealthScore {
   final String? nextBestAction;
 }
 
+enum HomeSetupStep { room, maintainedItem, scheduledTask }
+
+class HomeSetupProgress {
+  const HomeSetupProgress({
+    required this.completedSteps,
+    required this.nextStep,
+  });
+
+  static const totalSteps = 3;
+
+  final int completedSteps;
+  final HomeSetupStep? nextStep;
+
+  bool get isEligible => completedSteps == totalSteps;
+}
+
 class HomeReadiness {
   const HomeReadiness({
     required this.score,

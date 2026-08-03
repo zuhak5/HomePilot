@@ -106,20 +106,48 @@ EntityHealthScore roomHealthScore({
   );
 }
 
-HomeReadiness homeReadiness({
+HomeSetupProgress homeSetupProgress({
+  required List<Room> rooms,
+  required List<Asset> assets,
+  required List<TaskItem> tasks,
+}) {
+  final hasRoom = rooms.isNotEmpty;
+  final hasMaintainedItem = assets.isNotEmpty;
+  final hasScheduledTask = tasks.any(
+    (task) => task.plan.archivedAt == null && task.plan.isEnabled,
+  );
+  final completedSteps = [
+    hasRoom,
+    hasMaintainedItem,
+    hasScheduledTask,
+  ].where((complete) => complete).length;
+  final nextStep = !hasRoom
+      ? HomeSetupStep.room
+      : !hasMaintainedItem
+      ? HomeSetupStep.maintainedItem
+      : !hasScheduledTask
+      ? HomeSetupStep.scheduledTask
+      : null;
+  return HomeSetupProgress(completedSteps: completedSteps, nextStep: nextStep);
+}
+
+HomeReadiness? homeReadiness({
   required List<Room> rooms,
   required List<Asset> assets,
   required List<TaskItem> tasks,
   required BackupState backupState,
   required DateTime now,
 }) {
+  if (!homeSetupProgress(
+    rooms: rooms,
+    assets: assets,
+    tasks: tasks,
+  ).isEligible) {
+    return null;
+  }
   final buckets = getTaskBuckets(tasks, now);
   var score = 100;
   final reasons = <String>[];
-  if (rooms.isEmpty || assets.isEmpty) {
-    score -= 35;
-    reasons.add('Home setup is incomplete.');
-  }
   if (buckets.overdueCount > 0) {
     score -= (buckets.overdueCount * 12).clamp(0, 45).toInt();
     reasons.add('${buckets.overdueCount} overdue task(s).');

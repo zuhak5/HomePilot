@@ -2463,6 +2463,10 @@ const _seedValues = <String, Map<String, Map<String, Object?>>>{
     },
     'notifications_enabled': {'key': 'notifications_enabled', 'value': 'true'},
     'onboarding_completed': {'key': 'onboarding_completed', 'value': 'false'},
+    'permission_education_seen': {
+      'key': 'permission_education_seen',
+      'value': 'false',
+    },
   },
   'streak': {
     'default': {

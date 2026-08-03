@@ -173,6 +173,9 @@ abstract interface class SettingsRepository {
   Future<bool> onboardingCompleted();
   Future<void> setOnboardingCompleted(bool completed);
   Stream<bool> watchOnboardingCompleted();
+  Future<bool> permissionEducationSeen();
+  Future<void> setPermissionEducationSeen(bool seen);
+  Stream<bool> watchPermissionEducationSeen();
   Future<AppProfile> profile();
   Stream<AppProfile> watchProfile();
   Future<void> setProfile({String? nickname});

@@ -778,6 +778,42 @@ void main() {
     expect(inboxRows.single.id, inboxRows.single.dedupeKey);
   });
 
+  test('permission education setting defaults, watches, and syncs', () async {
+    final settings = DriftSettingsRepository(db);
+    final emissions = <bool>[];
+    final subscription = settings.watchPermissionEducationSeen().listen(
+      emissions.add,
+    );
+    addTearDown(subscription.cancel);
+
+    expect(await settings.permissionEducationSeen(), isFalse);
+    await _waitForSyncStoreTest(() => emissions.isNotEmpty);
+    expect(emissions.last, isFalse);
+
+    await db.delete(db.syncOutbox).go();
+    await settings.setPermissionEducationSeen(true);
+
+    await _waitForSyncStoreTest(() => emissions.lastOrNull == true);
+    expect(await settings.permissionEducationSeen(), isTrue);
+    expect(
+      await store.pendingMutations(),
+      contains(
+        isA<LocalSyncMutation>()
+            .having((item) => item.entity, 'entity', 'user_setting')
+            .having(
+              (item) => item.recordKey,
+              'record key',
+              'permission_education_seen',
+            )
+            .having((item) => item.operation, 'operation', 'upsert'),
+      ),
+    );
+    expect(
+      syncSpecByEntity['user_setting']!.localWhere,
+      contains("'permission_education_seen'"),
+    );
+  });
+
   test('remote payloads omit local installation identity', () {
     final spec = syncSpecByEntity['user_setting']!;
     final record = SyncRecord(

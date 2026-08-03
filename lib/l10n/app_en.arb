@@ -1427,5 +1427,34 @@
   "pointsCount": "{count} points",
   "@pointsCount": {
     "placeholders": {"count": {"type": "int", "format": "decimalPattern"}}
-  }
+  },
+  "dashboardProductiveSubtitle": "Let''s make today productive",
+  "pointsLabel": "Points",
+  "setUpYourHome": "Set up your home",
+  "setupHomeSubtitle": "Complete a few steps so we can build your maintenance plan.",
+  "setupProgress": "{completed} of 3 complete",
+  "@setupProgress": {
+    "placeholders": {"completed": {"type": "int", "format": "decimalPattern"}}
+  },
+  "nextCreateFirstRoom": "Create your first room",
+  "nextAddMaintainedItem": "Add an item you want to maintain",
+  "nextScheduleMaintenanceTask": "Schedule your first maintenance task",
+  "getLocalMaintenanceTips": "Get local maintenance tips",
+  "locationEducationBody": "Use your location to show local weather and recommend seasonal home tasks.",
+  "locationEducationPrivacy": "HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.",
+  "enableLocation": "Enable location",
+  "neverMissImportantMaintenance": "Never miss important maintenance",
+  "notificationEducationBody": "Get reminders before tasks are due and alerts when something becomes overdue.",
+  "notificationEducationReassurance": "You can change notification preferences at any time.",
+  "enableNotificationsOnboarding": "Enable notifications",
+  "permissionStep": "Step {current} of {total}",
+  "@permissionStep": {
+    "placeholders": {
+      "current": {"type": "int", "format": "decimalPattern"},
+      "total": {"type": "int", "format": "decimalPattern"}
+    }
+  },
+  "permissionSetup": "Location and notification setup",
+  "permissionSetupSubtitle": "Review how HomePilot uses location and reminders.",
+  "permissionsAlreadyEnabled": "Location and notifications are already enabled."
 }
