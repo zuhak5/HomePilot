@@ -22,10 +22,7 @@ class ObservedCloudSyncRepository implements CloudSyncRepository {
         operation: 'sync_status_stream_failed',
         error: error,
         stackTrace: stackTrace,
-        fields: const {
-          'sync_mode': 'automatic',
-          'execution': 'main',
-        },
+        fields: const {'sync_mode': 'automatic', 'execution': 'main'},
       );
       rethrow;
     }
@@ -89,20 +86,14 @@ class ObservedCloudSyncRepository implements CloudSyncRepository {
       return await traceHomePilotOperation<T>(
         operation,
         callback,
-        attributes: {
-          'sync_mode': syncMode,
-          'execution': 'main',
-        },
+        attributes: {'sync_mode': syncMode, 'execution': 'main'},
       );
     } on Object catch (error, stackTrace) {
       reportOperationFailure(
         operation: '${operation.replaceAll('.', '_')}_failed',
         error: error,
         stackTrace: stackTrace,
-        fields: {
-          'sync_mode': syncMode,
-          'execution': 'main',
-        },
+        fields: {'sync_mode': syncMode, 'execution': 'main'},
       );
       rethrow;
     }
