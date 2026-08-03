@@ -97,7 +97,8 @@ Invoke-WithRetry -Label 'Sentry commit association' -Operation {
             'releases',
             'set-commits',
             $Release,
-            '--auto'
+            '--auto',
+            '--ignore-missing'
         )
     )
 }
