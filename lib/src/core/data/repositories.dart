@@ -2590,6 +2590,24 @@ class DriftSettingsRepository implements SettingsRepository {
   }
 
   @override
+  Future<bool> permissionEducationSeen() async {
+    final row = await _setting('permission_education_seen');
+    return _boolSetting(row?.value);
+  }
+
+  @override
+  Future<void> setPermissionEducationSeen(bool seen) {
+    return _setSetting('permission_education_seen', seen.toString());
+  }
+
+  @override
+  Stream<bool> watchPermissionEducationSeen() {
+    final query = db.select(db.settings)
+      ..where((setting) => setting.key.equals('permission_education_seen'));
+    return query.watchSingleOrNull().map((row) => _boolSetting(row?.value));
+  }
+
+  @override
   Future<domain.AppProfile> profile() async {
     return _profileFromValue((await _setting('profile'))?.value);
   }

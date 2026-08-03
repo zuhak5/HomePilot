@@ -3503,4 +3503,85 @@ class AppLocalizationsAr extends AppLocalizations {
 
     return '$countString نقطة';
   }
+
+  @override
+  String get dashboardProductiveSubtitle => 'لنجعل اليوم أكثر إنتاجية';
+
+  @override
+  String get pointsLabel => 'النقاط';
+
+  @override
+  String get setUpYourHome => 'أعِدّ منزلك';
+
+  @override
+  String get setupHomeSubtitle =>
+      'أكمل بضع خطوات لنتمكن من إعداد خطة صيانة منزلك.';
+
+  @override
+  String setupProgress(int completed) {
+    final intl.NumberFormat completedNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String completedString = completedNumberFormat.format(completed);
+
+    return 'اكتمل $completedString من 3';
+  }
+
+  @override
+  String get nextCreateFirstRoom => 'أنشئ غرفتك الأولى';
+
+  @override
+  String get nextAddMaintainedItem => 'أضف عنصراً تريد صيانته';
+
+  @override
+  String get nextScheduleMaintenanceTask => 'جدول مهمة الصيانة الأولى';
+
+  @override
+  String get getLocalMaintenanceTips => 'احصل على نصائح صيانة محلية';
+
+  @override
+  String get locationEducationBody =>
+      'استخدم موقعك لعرض الطقس المحلي واقتراح مهام منزلية موسمية.';
+
+  @override
+  String get locationEducationPrivacy =>
+      'يرسل HomePilot إحداثيات تقريبية إلى Open-Meteo للطقس وإلى OpenStreetMap لعرض اسم المنطقة. لا يُجمع الموقع في الخلفية.';
+
+  @override
+  String get enableLocation => 'تفعيل الموقع';
+
+  @override
+  String get neverMissImportantMaintenance => 'لا تفوّت أعمال الصيانة المهمة';
+
+  @override
+  String get notificationEducationBody =>
+      'احصل على تذكيرات قبل موعد المهام وتنبيهات عند تأخرها.';
+
+  @override
+  String get notificationEducationReassurance =>
+      'يمكنك تغيير تفضيلات الإشعارات في أي وقت.';
+
+  @override
+  String get enableNotificationsOnboarding => 'تفعيل الإشعارات';
+
+  @override
+  String permissionStep(int current, int total) {
+    final intl.NumberFormat currentNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String currentString = currentNumberFormat.format(current);
+    final intl.NumberFormat totalNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String totalString = totalNumberFormat.format(total);
+
+    return 'الخطوة $currentString من $totalString';
+  }
+
+  @override
+  String get permissionSetup => 'إعداد الموقع والإشعارات';
+
+  @override
+  String get permissionSetupSubtitle =>
+      'راجع كيفية استخدام HomePilot للموقع والتذكيرات.';
+
+  @override
+  String get permissionsAlreadyEnabled => 'الموقع والإشعارات مفعّلان بالفعل.';
 }

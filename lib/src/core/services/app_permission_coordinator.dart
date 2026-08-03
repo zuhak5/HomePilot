@@ -18,11 +18,21 @@ enum AppPermissionState {
   unavailable,
 }
 
-class AppPermissionCoordinator {
+abstract interface class AppPermissionGateway {
+  Future<AppPermissionState> check(AppPermissionKind kind);
+  Future<AppPermissionState> request(AppPermissionKind kind);
+  Future<bool> wasPrompted(AppPermissionKind kind);
+  Future<void> markPrompted(AppPermissionKind kind);
+  Future<bool> openAppPermissionSettings();
+  Future<bool> openLocationServiceSettings();
+}
+
+class AppPermissionCoordinator implements AppPermissionGateway {
   AppPermissionCoordinator(this._database);
 
   final AppDatabase _database;
 
+  @override
   Future<AppPermissionState> check(AppPermissionKind kind) async {
     try {
       if (!Platform.isAndroid && kind == AppPermissionKind.exactAlarms) {
@@ -38,6 +48,7 @@ class AppPermissionCoordinator {
     }
   }
 
+  @override
   Future<AppPermissionState> request(AppPermissionKind kind) async {
     final current = await check(kind);
     if (current == AppPermissionState.granted ||
@@ -55,6 +66,7 @@ class AppPermissionCoordinator {
     }
   }
 
+  @override
   Future<bool> wasPrompted(AppPermissionKind kind) async {
     final row =
         await (_database.select(_database.settings)
@@ -63,6 +75,7 @@ class AppPermissionCoordinator {
     return row?.value == 'true';
   }
 
+  @override
   Future<void> markPrompted(AppPermissionKind kind) async {
     await _database
         .into(_database.settings)
@@ -75,8 +88,10 @@ class AppPermissionCoordinator {
         );
   }
 
+  @override
   Future<bool> openAppPermissionSettings() => openAppSettings();
 
+  @override
   Future<bool> openLocationServiceSettings() =>
       Geolocator.openLocationSettings();
 

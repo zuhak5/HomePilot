@@ -955,5 +955,34 @@
   "pointsCount": "{count} نقطة",
   "@pointsCount": {
     "placeholders": {"count": {"type": "int", "format": "decimalPattern"}}
-  }
+  },
+  "dashboardProductiveSubtitle": "لنجعل اليوم أكثر إنتاجية",
+  "pointsLabel": "النقاط",
+  "setUpYourHome": "أعِدّ منزلك",
+  "setupHomeSubtitle": "أكمل بضع خطوات لنتمكن من إعداد خطة صيانة منزلك.",
+  "setupProgress": "اكتمل {completed} من 3",
+  "@setupProgress": {
+    "placeholders": {"completed": {"type": "int", "format": "decimalPattern"}}
+  },
+  "nextCreateFirstRoom": "أنشئ غرفتك الأولى",
+  "nextAddMaintainedItem": "أضف عنصراً تريد صيانته",
+  "nextScheduleMaintenanceTask": "جدول مهمة الصيانة الأولى",
+  "getLocalMaintenanceTips": "احصل على نصائح صيانة محلية",
+  "locationEducationBody": "استخدم موقعك لعرض الطقس المحلي واقتراح مهام منزلية موسمية.",
+  "locationEducationPrivacy": "يرسل HomePilot إحداثيات تقريبية إلى Open-Meteo للطقس وإلى OpenStreetMap لعرض اسم المنطقة. لا يُجمع الموقع في الخلفية.",
+  "enableLocation": "تفعيل الموقع",
+  "neverMissImportantMaintenance": "لا تفوّت أعمال الصيانة المهمة",
+  "notificationEducationBody": "احصل على تذكيرات قبل موعد المهام وتنبيهات عند تأخرها.",
+  "notificationEducationReassurance": "يمكنك تغيير تفضيلات الإشعارات في أي وقت.",
+  "enableNotificationsOnboarding": "تفعيل الإشعارات",
+  "permissionStep": "الخطوة {current} من {total}",
+  "@permissionStep": {
+    "placeholders": {
+      "current": {"type": "int", "format": "decimalPattern"},
+      "total": {"type": "int", "format": "decimalPattern"}
+    }
+  },
+  "permissionSetup": "إعداد الموقع والإشعارات",
+  "permissionSetupSubtitle": "راجع كيفية استخدام HomePilot للموقع والتذكيرات.",
+  "permissionsAlreadyEnabled": "الموقع والإشعارات مفعّلان بالفعل."
 }

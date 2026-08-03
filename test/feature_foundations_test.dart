@@ -190,12 +190,13 @@ void main() {
         now: DateTime(2026, 6, 18),
       );
 
-      expect(readiness.score, lessThan(100));
+      expect(readiness, isNotNull);
+      expect(readiness!.score, lessThan(100));
       expect(readiness.reasons.join(' '), contains('overdue'));
       expect(readiness.reasons.join(' '), contains('backup'));
     });
 
-    test('disabled tasks do not lower readiness or smart priority', () {
+    test('disabled tasks do not make readiness eligible', () {
       final room = _room();
       final asset = _asset(id: 'asset', name: 'Water heater');
       final disabled = _task(
@@ -219,8 +220,60 @@ void main() {
         now: DateTime(2026, 6, 18),
       );
 
-      expect(readiness.reasons.join(' '), isNot(contains('overdue')));
+      expect(readiness, isNull);
       expect(smartPriorityTasks([disabled], DateTime(2026, 6, 18)), isEmpty);
+    });
+
+    test('home setup progress uses real source data', () {
+      final room = _room();
+      final asset = _asset(id: 'asset', name: 'Water heater');
+
+      final empty = homeSetupProgress(
+        rooms: const [],
+        assets: const [],
+        tasks: const [],
+      );
+      expect(empty.completedSteps, 0);
+      expect(empty.nextStep, HomeSetupStep.room);
+      expect(empty.isEligible, isFalse);
+
+      final roomOnly = homeSetupProgress(
+        rooms: [room],
+        assets: const [],
+        tasks: const [],
+      );
+      expect(roomOnly.completedSteps, 1);
+      expect(roomOnly.nextStep, HomeSetupStep.maintainedItem);
+
+      final itemAdded = homeSetupProgress(
+        rooms: [room],
+        assets: [asset],
+        tasks: const [],
+      );
+      expect(itemAdded.completedSteps, 2);
+      expect(itemAdded.nextStep, HomeSetupStep.scheduledTask);
+
+      final eligible = homeSetupProgress(
+        rooms: [room],
+        assets: [asset],
+        tasks: [_task('scheduled', DateTime(2026, 7, 1), asset: asset)],
+      );
+      expect(eligible.completedSteps, HomeSetupProgress.totalSteps);
+      expect(eligible.nextStep, isNull);
+      expect(eligible.isEligible, isTrue);
+    });
+
+    test('ineligible homes have no readiness score', () {
+      expect(
+        homeReadiness(
+          rooms: const [],
+          assets: const [],
+          tasks: const [],
+          backupState: const BackupState(),
+          now: DateTime(2026, 6, 18),
+        ),
+        isNull,
+      );
     });
 
     test('warranty alerts are derived locally', () {

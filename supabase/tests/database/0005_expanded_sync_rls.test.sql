@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(12);
+select plan(14);
 
 insert into auth.users (
   instance_id,
@@ -93,6 +93,36 @@ select lives_ok(
     )
   $$,
   'a user can insert an owned setting'
+);
+
+select lives_ok(
+  $$
+    insert into public.user_settings (user_id, key, value, created_at, updated_at)
+    values (
+      '11111111-1111-1111-1111-111111111111',
+      'permission_education_seen',
+      'true',
+      now(),
+      now()
+    )
+  $$,
+  'permission education state is an allowed synced setting'
+);
+
+select throws_ok(
+  $$
+    insert into public.user_settings (user_id, key, value, created_at, updated_at)
+    values (
+      '11111111-1111-1111-1111-111111111111',
+      'not_a_real_setting',
+      'true',
+      now(),
+      now()
+    )
+  $$,
+  '23514',
+  null,
+  'unknown setting keys remain rejected'
 );
 
 set local request.jwt.claims =

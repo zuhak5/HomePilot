@@ -3435,4 +3435,88 @@ class AppLocalizationsEn extends AppLocalizations {
 
     return '$countString points';
   }
+
+  @override
+  String get dashboardProductiveSubtitle => 'Let\'s make today productive';
+
+  @override
+  String get pointsLabel => 'Points';
+
+  @override
+  String get setUpYourHome => 'Set up your home';
+
+  @override
+  String get setupHomeSubtitle =>
+      'Complete a few steps so we can build your maintenance plan.';
+
+  @override
+  String setupProgress(int completed) {
+    final intl.NumberFormat completedNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String completedString = completedNumberFormat.format(completed);
+
+    return '$completedString of 3 complete';
+  }
+
+  @override
+  String get nextCreateFirstRoom => 'Create your first room';
+
+  @override
+  String get nextAddMaintainedItem => 'Add an item you want to maintain';
+
+  @override
+  String get nextScheduleMaintenanceTask =>
+      'Schedule your first maintenance task';
+
+  @override
+  String get getLocalMaintenanceTips => 'Get local maintenance tips';
+
+  @override
+  String get locationEducationBody =>
+      'Use your location to show local weather and recommend seasonal home tasks.';
+
+  @override
+  String get locationEducationPrivacy =>
+      'HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.';
+
+  @override
+  String get enableLocation => 'Enable location';
+
+  @override
+  String get neverMissImportantMaintenance =>
+      'Never miss important maintenance';
+
+  @override
+  String get notificationEducationBody =>
+      'Get reminders before tasks are due and alerts when something becomes overdue.';
+
+  @override
+  String get notificationEducationReassurance =>
+      'You can change notification preferences at any time.';
+
+  @override
+  String get enableNotificationsOnboarding => 'Enable notifications';
+
+  @override
+  String permissionStep(int current, int total) {
+    final intl.NumberFormat currentNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String currentString = currentNumberFormat.format(current);
+    final intl.NumberFormat totalNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String totalString = totalNumberFormat.format(total);
+
+    return 'Step $currentString of $totalString';
+  }
+
+  @override
+  String get permissionSetup => 'Location and notification setup';
+
+  @override
+  String get permissionSetupSubtitle =>
+      'Review how HomePilot uses location and reminders.';
+
+  @override
+  String get permissionsAlreadyEnabled =>
+      'Location and notifications are already enabled.';
 }
