@@ -50,7 +50,10 @@ double traceSampleRateFor(ObservabilityConfig config, String operation) {
     return 0.10;
   }
   if (operation.startsWith('sync.manual')) return 0.10;
-  if (operation.startsWith('sync.automatic')) return 0.03;
+  if (operation.startsWith('sync.automatic') ||
+      operation.startsWith('sync.resume')) {
+    return 0.03;
+  }
   if (operation.startsWith('/')) return 0.02;
   return baseRate;
 }
@@ -79,6 +82,13 @@ const homePilotTraceOperations = <String>{
   'locale.load',
   'unsupported_session.cleanup',
   'sync.run',
+  'sync.automatic',
+  'sync.manual',
+  'sync.retry',
+  'sync.full_reconcile',
+  'sync.initial_hydration',
+  'sync.resume',
+  'sync.pause',
   'sync.acquire_lease',
   'sync.prepare',
   'sync.push',
@@ -87,11 +97,16 @@ const homePilotTraceOperations = <String>{
   'sync.media_cleanup',
   'sync.reminders_reconcile',
   'sync.realtime_connect',
+  'restore.background_init',
   'restore.foreground_cycle',
   'restore.read_progress',
   'restore.update_notification',
   'restore.cloud_sync',
   'restore.finalize',
+  'auth.initial_session',
+  'auth.signed_in',
+  'auth.signed_out',
+  'auth.token_refreshed',
   'auth.google_sign_in',
   'auth.supabase_token_exchange',
   'auth.sign_out',
@@ -160,6 +175,9 @@ const _traceTagKeys = {
   'connectivity_state',
   'failure_kind',
   'execution',
+  'lease_scope',
+  'authenticated',
+  'provider',
 };
 
 const _traceMeasurementKeys = {
