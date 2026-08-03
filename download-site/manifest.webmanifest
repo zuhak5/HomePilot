@@ -2,11 +2,10 @@
   "id": "./",
   "name": "VersionDeck — HomePilot Releases",
   "short_name": "VersionDeck",
-  "description": "Official signed HomePilot APK releases, changelogs, and checksums.",
+  "description": "Official verified HomePilot APK releases, changelogs, checksums, and signing details.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait-primary",
   "background_color": "#f7f7f5",
   "theme_color": "#111827",
   "categories": [
