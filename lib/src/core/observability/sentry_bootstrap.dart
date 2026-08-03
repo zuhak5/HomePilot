@@ -22,6 +22,7 @@ Future<void> initializeHomePilotSentry({
   required ObservabilityConfig config,
   required Future<void> Function() appRunner,
   HomePilotSentryInitializer? initializer,
+  Duration initializationTimeout = const Duration(seconds: 2),
 }) async {
   var appStarted = false;
   Future<void> guardedAppRunner() async {
@@ -43,7 +44,7 @@ Future<void> initializeHomePilotSentry({
     await initialize(
       (options) => configureHomePilotSentryOptions(options, config),
       guardedAppRunner,
-    );
+    ).timeout(initializationTimeout);
   } on Object catch (error, stackTrace) {
     AppLogger.warning(
       'sentry_initialization_failed',
@@ -106,7 +107,7 @@ Future<bool> initializeBackgroundSentry() async {
     if (!observability.enabled) return false;
     await SentryFlutter.init(
       (options) => configureHomePilotSentryOptions(options, observability),
-    );
+    ).timeout(const Duration(seconds: 2));
     SentryLoggerBridge.install();
     await configureHomePilotSentryScope(observability);
     return true;
