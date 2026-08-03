@@ -98,6 +98,7 @@ void configureHomePilotSentryOptions(
 }
 
 Future<bool> initializeBackgroundSentry() async {
+  SentryWidgetsFlutterBinding.ensureInitialized();
   if (Sentry.isEnabled) return true;
   try {
     final appConfig = AppConfig.fromEnvironment();
