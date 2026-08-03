@@ -1666,22 +1666,36 @@ class _FixedFabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final safeBottom = MediaQuery.maybeOf(context)?.viewPadding.bottom ?? 0;
     return SizedBox(
       width: kHomePilotFabWidth,
       height: kHomePilotFabHeight,
-      child: FloatingActionButton.extended(
-        tooltip: tooltip,
-        onPressed: onPressed,
-        icon: Icon(icon, size: 20),
-        label: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: kHomePilotFabLabelMaxWidth,
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
+      child: Tooltip(
+        message: tooltip,
+        preferBelow: false,
+        verticalOffset: HkSpacing.sm,
+        margin: EdgeInsets.fromLTRB(
+          HkSpacing.gutter,
+          HkSpacing.gutter,
+          HkSpacing.gutter,
+          safeBottom +
+              kHomePilotBottomNavVisualHeight +
+              kHomePilotFloatingActionButtonBottomInset,
+        ),
+        child: FloatingActionButton.extended(
+          tooltip: null,
+          onPressed: onPressed,
+          icon: Icon(icon, size: 20),
+          label: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: kHomePilotFabLabelMaxWidth,
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
       ),

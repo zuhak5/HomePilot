@@ -6,7 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import 'app_theme.dart';
 
-enum PermissionEducationStep { location, notifications }
+enum PermissionEducationStep { location, notifications, exactAlarms }
 
 class PermissionEducationOverlay extends StatefulWidget {
   const PermissionEducationOverlay({
@@ -17,6 +17,7 @@ class PermissionEducationOverlay extends StatefulWidget {
     required this.onClose,
     required this.primaryLabel,
     this.onBack,
+    this.targetRect,
     this.busy = false,
     super.key,
   });
@@ -28,6 +29,7 @@ class PermissionEducationOverlay extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback? onBack;
   final String primaryLabel;
+  final Rect? targetRect;
   final bool busy;
 
   @override
@@ -71,97 +73,184 @@ class _PermissionEducationOverlayState extends State<PermissionEducationOverlay>
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final reduceMotion = media.disableAnimations || media.accessibleNavigation;
-    final bottomInset = math.max(media.padding.bottom, 8.0) + 76;
-    return Stack(
-      key: const ValueKey('permission-education-overlay'),
-      fit: StackFit.expand,
-      clipBehavior: Clip.none,
-      children: [
-        CompositedTransformFollower(
-          link: widget.targetLink,
-          targetAnchor: Alignment.center,
-          followerAnchor: Alignment.center,
-          showWhenUnlinked: false,
-          child: IgnorePointer(
-            child: AnimatedBuilder(
+    final bottomInset = math.max(media.padding.bottom, 8.0) + 92;
+    final topInset = math.max(media.padding.top, 12.0) + HkSpacing.sm;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxCardHeight = math.max(
+          280.0,
+          constraints.maxHeight - topInset - bottomInset,
+        );
+        return Stack(
+          key: const ValueKey('permission-education-overlay'),
+          fit: StackFit.expand,
+          clipBehavior: Clip.hardEdge,
+          children: [
+            ModalBarrier(
+              dismissible: false,
+              color: scheme.scrim.withValues(alpha: 0.28),
+            ),
+            _PermissionEducationHalo(
               animation: _controller,
-              builder: (context, child) {
-                final progress = reduceMotion ? 0.45 : _controller.value;
-                return Transform.scale(
-                  scale: 0.92 + (progress * 0.14),
-                  child: Opacity(
-                    opacity: 0.64 - (progress * 0.22),
-                    child: Container(
-                      key: const ValueKey('permission-education-target-halo'),
-                      width: widget.step == PermissionEducationStep.location
-                          ? 92
-                          : 70,
-                      height: widget.step == PermissionEducationStep.location
-                          ? 92
-                          : 70,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: HkColors.appPrimary,
-                          width: 3,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: HkColors.appPrimary.withValues(alpha: 0.22),
-                            blurRadius: 24,
-                            spreadRadius: 6,
-                          ),
-                        ],
+              reduceMotion: reduceMotion,
+              step: widget.step,
+              targetLink: widget.targetLink,
+              targetRect: widget.targetRect,
+              viewportSize: constraints.biggest,
+            ),
+            PositionedDirectional(
+              start: HkSpacing.md,
+              end: HkSpacing.md,
+              bottom: bottomInset,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 440,
+                    maxHeight: maxCardHeight,
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 260),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0.04, 0),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
                       ),
                     ),
+                    child: _PermissionEducationCard(
+                      key: ValueKey(widget.step),
+                      step: widget.step,
+                      animation: _controller,
+                      reduceMotion: reduceMotion,
+                      primaryLabel: widget.primaryLabel,
+                      busy: widget.busy,
+                      onContinue: widget.onContinue,
+                      onNotNow: widget.onNotNow,
+                      onClose: widget.onClose,
+                      onBack: widget.onBack,
+                    ),
                   ),
-                );
-              },
-            ),
-          ),
-        ),
-        PositionedDirectional(
-          start: HkSpacing.md,
-          end: HkSpacing.md,
-          bottom: bottomInset,
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: AnimatedSwitcher(
-                duration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 260),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.04, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                ),
-                child: _PermissionEducationCard(
-                  key: ValueKey(widget.step),
-                  step: widget.step,
-                  animation: _controller,
-                  reduceMotion: reduceMotion,
-                  primaryLabel: widget.primaryLabel,
-                  busy: widget.busy,
-                  onContinue: widget.onContinue,
-                  onNotNow: widget.onNotNow,
-                  onClose: widget.onClose,
-                  onBack: widget.onBack,
                 ),
               ),
             ),
-          ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+double _haloSize(PermissionEducationStep step) => switch (step) {
+  PermissionEducationStep.location => 92,
+  PermissionEducationStep.notifications => 70,
+  PermissionEducationStep.exactAlarms => 76,
+};
+
+class _PermissionEducationHalo extends StatelessWidget {
+  const _PermissionEducationHalo({
+    required this.animation,
+    required this.reduceMotion,
+    required this.step,
+    required this.targetLink,
+    required this.targetRect,
+    required this.viewportSize,
+  });
+
+  final Animation<double> animation;
+  final bool reduceMotion;
+  final PermissionEducationStep step;
+  final LayerLink targetLink;
+  final Rect? targetRect;
+  final Size viewportSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final haloSize = _haloSize(step);
+    final rect = targetRect;
+    if (rect != null && rect.isFinite) {
+      final maxLeft = math.max(0.0, viewportSize.width - haloSize);
+      final maxTop = math.max(0.0, viewportSize.height - haloSize);
+      final left = math.min(
+        math.max(rect.center.dx - (haloSize / 2), 0.0),
+        maxLeft,
+      );
+      final top = math.min(
+        math.max(rect.center.dy - (haloSize / 2), 0.0),
+        maxTop,
+      );
+      return Positioned(
+        left: left,
+        top: top,
+        width: haloSize,
+        height: haloSize,
+        child: _PermissionEducationHaloBody(
+          animation: animation,
+          reduceMotion: reduceMotion,
         ),
-      ],
+      );
+    }
+    return CompositedTransformFollower(
+      link: targetLink,
+      targetAnchor: Alignment.center,
+      followerAnchor: Alignment.center,
+      showWhenUnlinked: false,
+      child: SizedBox(
+        width: haloSize,
+        height: haloSize,
+        child: _PermissionEducationHaloBody(
+          animation: animation,
+          reduceMotion: reduceMotion,
+        ),
+      ),
+    );
+  }
+}
+
+class _PermissionEducationHaloBody extends StatelessWidget {
+  const _PermissionEducationHaloBody({
+    required this.animation,
+    required this.reduceMotion,
+  });
+
+  final Animation<double> animation;
+  final bool reduceMotion;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) {
+          final progress = reduceMotion ? 0.45 : animation.value;
+          return Opacity(
+            opacity: 0.64 - (progress * 0.22),
+            child: Container(
+              key: const ValueKey('permission-education-target-halo'),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: HkColors.appPrimary, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: HkColors.appPrimary.withValues(alpha: 0.22),
+                    blurRadius: 24,
+                    spreadRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -193,22 +282,16 @@ class _PermissionEducationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isLocation = step == PermissionEducationStep.location;
-    final stepNumber = isLocation ? 1 : 2;
-    final title = isLocation
-        ? context.l10n.getLocalMaintenanceTips
-        : context.l10n.neverMissImportantMaintenance;
-    final body = isLocation
-        ? context.l10n.locationEducationBody
-        : context.l10n.notificationEducationBody;
-    final reassurance = isLocation
-        ? context.l10n.locationEducationPrivacy
-        : context.l10n.notificationEducationReassurance;
+    final stepNumber = _stepNumber(step);
+    final title = _stepTitle(context, step);
+    final body = _stepBody(context, step);
+    final reassurance = _stepReassurance(context, step);
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      label: '${context.l10n.permissionStep(stepNumber, 2)}. $title',
+      label: '${context.l10n.permissionStep(stepNumber, 3)}. $title',
       child: Material(
+        key: const ValueKey('permission-education-card'),
         color: scheme.surfaceContainerLowest,
         elevation: 0,
         borderRadius: BorderRadius.circular(HkRadii.xxl),
@@ -239,7 +322,7 @@ class _PermissionEducationCard extends StatelessWidget {
                       const SizedBox(width: 48),
                     Expanded(
                       child: Text(
-                        context.l10n.permissionStep(stepNumber, 2),
+                        context.l10n.permissionStep(stepNumber, 3),
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: scheme.primary,
@@ -256,15 +339,23 @@ class _PermissionEducationCard extends StatelessWidget {
                 ),
                 SizedBox(
                   height: 116,
-                  child: isLocation
-                      ? _LocationPermissionIllustration(
-                          animation: animation,
-                          reduceMotion: reduceMotion,
-                        )
-                      : _NotificationPermissionIllustration(
-                          animation: animation,
-                          reduceMotion: reduceMotion,
-                        ),
+                  child: switch (step) {
+                    PermissionEducationStep.location =>
+                      _LocationPermissionIllustration(
+                        animation: animation,
+                        reduceMotion: reduceMotion,
+                      ),
+                    PermissionEducationStep.notifications =>
+                      _NotificationPermissionIllustration(
+                        animation: animation,
+                        reduceMotion: reduceMotion,
+                      ),
+                    PermissionEducationStep.exactAlarms =>
+                      _AlarmPermissionIllustration(
+                        animation: animation,
+                        reduceMotion: reduceMotion,
+                      ),
+                  },
                 ),
                 const SizedBox(height: HkSpacing.sm),
                 Text(
@@ -295,9 +386,14 @@ class _PermissionEducationCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        isLocation
-                            ? Symbols.privacy_tip_rounded
-                            : Symbols.tune_rounded,
+                        switch (step) {
+                          PermissionEducationStep.location =>
+                            Symbols.privacy_tip_rounded,
+                          PermissionEducationStep.notifications =>
+                            Symbols.tune_rounded,
+                          PermissionEducationStep.exactAlarms =>
+                            Symbols.schedule_rounded,
+                        },
                         size: 20,
                         color: scheme.primary,
                         semanticLabel: null,
@@ -337,11 +433,14 @@ class _PermissionEducationCard extends StatelessWidget {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : Icon(
-                                isLocation
-                                    ? Symbols.my_location_rounded
-                                    : Symbols.notifications_active_rounded,
-                              ),
+                            : Icon(switch (step) {
+                                PermissionEducationStep.location =>
+                                  Symbols.my_location_rounded,
+                                PermissionEducationStep.notifications =>
+                                  Symbols.notifications_active_rounded,
+                                PermissionEducationStep.exactAlarms =>
+                                  Symbols.alarm_on_rounded,
+                              }),
                         label: Text(primaryLabel),
                       ),
                     ),
@@ -355,6 +454,39 @@ class _PermissionEducationCard extends StatelessWidget {
     );
   }
 }
+
+int _stepNumber(PermissionEducationStep step) => switch (step) {
+  PermissionEducationStep.location => 1,
+  PermissionEducationStep.notifications => 2,
+  PermissionEducationStep.exactAlarms => 3,
+};
+
+String _stepTitle(BuildContext context, PermissionEducationStep step) =>
+    switch (step) {
+      PermissionEducationStep.location => context.l10n.getLocalMaintenanceTips,
+      PermissionEducationStep.notifications =>
+        context.l10n.neverMissImportantMaintenance,
+      PermissionEducationStep.exactAlarms =>
+        context.l10n.exactAlarmEducationTitle,
+    };
+
+String _stepBody(BuildContext context, PermissionEducationStep step) =>
+    switch (step) {
+      PermissionEducationStep.location => context.l10n.locationEducationBody,
+      PermissionEducationStep.notifications =>
+        context.l10n.notificationEducationBody,
+      PermissionEducationStep.exactAlarms =>
+        context.l10n.preciseAlarmsPermissionBody,
+    };
+
+String _stepReassurance(BuildContext context, PermissionEducationStep step) =>
+    switch (step) {
+      PermissionEducationStep.location => context.l10n.locationEducationPrivacy,
+      PermissionEducationStep.notifications =>
+        context.l10n.notificationEducationReassurance,
+      PermissionEducationStep.exactAlarms =>
+        context.l10n.approximateReminderTimingWarning,
+    };
 
 class _LocationPermissionIllustration extends StatelessWidget {
   const _LocationPermissionIllustration({
@@ -543,6 +675,98 @@ class _NotificationPermissionIllustration extends StatelessWidget {
                   top: 15,
                   child: _IllustrationBadge(
                     icon: Symbols.calendar_month_rounded,
+                    color: HkColors.appWarning,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _AlarmPermissionIllustration extends StatelessWidget {
+  const _AlarmPermissionIllustration({
+    required this.animation,
+    required this.reduceMotion,
+  });
+
+  final Animation<double> animation;
+  final bool reduceMotion;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: context.l10n.exactAlarmEducationTitle,
+      image: true,
+      child: ExcludeSemantics(
+        child: AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final phase = reduceMotion ? 0.35 : animation.value;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(HkRadii.xl),
+                    gradient: LinearGradient(
+                      colors: [
+                        scheme.primaryContainer.withValues(alpha: 0.74),
+                        scheme.surfaceContainerLowest,
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 82 + (phase * 5),
+                  height: 82 + (phase * 5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: scheme.primary.withValues(alpha: 0.22),
+                      width: 3,
+                    ),
+                  ),
+                ),
+                Transform.translate(
+                  offset: Offset(0, reduceMotion ? 0 : -2 + (phase * 4)),
+                  child: Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerLowest,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: scheme.primary.withValues(alpha: 0.18),
+                          blurRadius: 22,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Symbols.alarm_on_rounded,
+                      color: scheme.primary,
+                      size: 40,
+                    ),
+                  ),
+                ),
+                PositionedDirectional(
+                  start: 50,
+                  bottom: 16,
+                  child: _IllustrationBadge(
+                    icon: Symbols.task_alt_rounded,
+                    color: scheme.primary,
+                  ),
+                ),
+                PositionedDirectional(
+                  end: 50,
+                  top: 16,
+                  child: _IllustrationBadge(
+                    icon: Symbols.schedule_rounded,
                     color: HkColors.appWarning,
                   ),
                 ),

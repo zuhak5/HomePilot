@@ -1454,7 +1454,9 @@
       "total": {"type": "int", "format": "decimalPattern"}
     }
   },
-  "permissionSetup": "Location and notification setup",
+  "exactAlarmEducationTitle": "Keep reminders on time",
+  "enableAlarmsAndRemindersOnboarding": "Enable reminders",
+  "permissionSetup": "Location, notifications, and reminders setup",
   "permissionSetupSubtitle": "Review how HomePilot uses location and reminders.",
-  "permissionsAlreadyEnabled": "Location and notifications are already enabled."
+  "permissionsAlreadyEnabled": "Location, notifications, and reminders are already set up."
 }

@@ -3576,12 +3576,19 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
-  String get permissionSetup => 'إعداد الموقع والإشعارات';
+  String get exactAlarmEducationTitle => 'حافظ على التذكيرات في وقتها';
+
+  @override
+  String get enableAlarmsAndRemindersOnboarding => 'تفعيل التذكيرات';
+
+  @override
+  String get permissionSetup => 'إعداد الموقع والإشعارات والتذكيرات';
 
   @override
   String get permissionSetupSubtitle =>
       'راجع كيفية استخدام HomePilot للموقع والتذكيرات.';
 
   @override
-  String get permissionsAlreadyEnabled => 'الموقع والإشعارات مفعّلان بالفعل.';
+  String get permissionsAlreadyEnabled =>
+      'تم إعداد الموقع والإشعارات والتذكيرات بالفعل.';
 }

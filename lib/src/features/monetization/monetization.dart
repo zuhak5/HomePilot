@@ -1382,6 +1382,8 @@ class HkNativeAdSlotFrame extends StatelessWidget {
 class HkPointsPill extends ConsumerWidget {
   const HkPointsPill({required this.onTap, this.compact = false, super.key});
 
+  static const width = 82.0;
+
   final VoidCallback onTap;
   final bool compact;
 
@@ -1392,44 +1394,36 @@ class HkPointsPill extends ConsumerWidget {
     final pointsLabel = balance == null
         ? context.l10n.pointsUnavailable
         : context.l10n.pointsCount(balance);
-    final iconSize = compact ? 24.0 : 28.0;
     return hk_ui.HeaderActionSurface(
       onPressed: onTap,
       semanticLabel: pointsLabel,
       tooltip: context.l10n.pointsWallet,
-      child: Padding(
-        padding: EdgeInsetsDirectional.only(
-          start: compact ? HkSpacing.space6 : HkSpacing.xs,
-          end: compact ? HkSpacing.xs : HkSpacing.sm,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: iconSize,
-              height: iconSize,
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Symbols.stars_rounded,
-                size: compact ? 17 : 19,
-                color: scheme.primary,
-              ),
+      width: width,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              shape: BoxShape.circle,
             ),
-            const SizedBox(width: HkSpacing.space6),
-            Text(
-              balance?.toString() ?? '—',
-              maxLines: 1,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: scheme.onSurface,
-                fontWeight: FontWeight.w800,
-              ),
+            alignment: Alignment.center,
+            child: Icon(Symbols.star_rounded, size: 19, color: scheme.primary),
+          ),
+          const SizedBox(width: HkSpacing.space6),
+          Text(
+            balance?.toString() ?? '-',
+            maxLines: 1,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w900,
+              height: 1,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

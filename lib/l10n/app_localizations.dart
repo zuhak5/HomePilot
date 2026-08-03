@@ -5926,10 +5926,22 @@ abstract class AppLocalizations {
   /// **'Step {current} of {total}'**
   String permissionStep(int current, int total);
 
+  /// No description provided for @exactAlarmEducationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep reminders on time'**
+  String get exactAlarmEducationTitle;
+
+  /// No description provided for @enableAlarmsAndRemindersOnboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable reminders'**
+  String get enableAlarmsAndRemindersOnboarding;
+
   /// No description provided for @permissionSetup.
   ///
   /// In en, this message translates to:
-  /// **'Location and notification setup'**
+  /// **'Location, notifications, and reminders setup'**
   String get permissionSetup;
 
   /// No description provided for @permissionSetupSubtitle.
@@ -5941,7 +5953,7 @@ abstract class AppLocalizations {
   /// No description provided for @permissionsAlreadyEnabled.
   ///
   /// In en, this message translates to:
-  /// **'Location and notifications are already enabled.'**
+  /// **'Location, notifications, and reminders are already set up.'**
   String get permissionsAlreadyEnabled;
 }
 

@@ -3804,15 +3804,27 @@ class DashboardScreen extends ConsumerStatefulWidget {
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with WidgetsBindingObserver {
   static const _homeDataSettleDuration = Duration(milliseconds: 180);
+  static const _permissionEducationSteps = [
+    PermissionEducationStep.location,
+    PermissionEducationStep.notifications,
+    PermissionEducationStep.exactAlarms,
+  ];
 
   late _HomeRenderData _homeData;
   Timer? _homeDataTimer;
   final LayerLink _weatherEducationLink = LayerLink();
   final LayerLink _notificationEducationLink = LayerLink();
+  final GlobalKey _weatherEducationTargetKey = GlobalKey();
+  final GlobalKey _notificationEducationTargetKey = GlobalKey();
   PermissionEducationStep? _permissionEducationStep;
+  OverlayEntry? _permissionEducationOverlayEntry;
+  bool _permissionOverlaySyncScheduled = false;
   AppPermissionState _locationPermissionState = AppPermissionState.unavailable;
   AppPermissionState _notificationPermissionState =
       AppPermissionState.unavailable;
+  AppPermissionState _exactAlarmPermissionState =
+      AppPermissionState.unavailable;
+  final Map<AppPermissionKind, bool> _permissionPrompted = {};
   bool _permissionEducationBusy = false;
   bool _permissionEducationLoadInFlight = false;
   bool _forcePermissionEducationHandled = false;
@@ -3863,6 +3875,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _removePermissionEducationOverlay();
     _homeDataTimer?.cancel();
     super.dispose();
   }
@@ -3914,17 +3927,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       final states = await Future.wait([
         permissions.check(AppPermissionKind.location),
         permissions.check(AppPermissionKind.notifications),
+        permissions.check(AppPermissionKind.exactAlarms),
+      ]);
+      final prompted = await Future.wait([
+        permissions.wasPrompted(AppPermissionKind.location),
+        permissions.wasPrompted(AppPermissionKind.notifications),
+        permissions.wasPrompted(AppPermissionKind.exactAlarms),
       ]);
       if (!mounted) return;
       _locationPermissionState = states[0];
       _notificationPermissionState = states[1];
-      final locationResolved = _isPermissionStepSkipped(states[0]);
-      final notificationsResolved = _isPermissionStepSkipped(states[1]);
-      if (locationResolved && notificationsResolved) {
+      _exactAlarmPermissionState = states[2];
+      _permissionPrompted[AppPermissionKind.location] = prompted[0];
+      _permissionPrompted[AppPermissionKind.notifications] = prompted[1];
+      _permissionPrompted[AppPermissionKind.exactAlarms] = prompted[2];
+      final nextStep = _nextPendingPermissionStep();
+      if (nextStep == null) {
         if (!seen) await settings.setPermissionEducationSeen(true);
-        if (force &&
-            mounted &&
-            states.every((state) => state == AppPermissionState.granted)) {
+        if (force && mounted) {
           hk_ui.showToast(
             context,
             content: Text(context.l10n.permissionsAlreadyEnabled),
@@ -3933,11 +3953,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         }
         return;
       }
-      setState(() {
-        _permissionEducationStep = locationResolved
-            ? PermissionEducationStep.notifications
-            : PermissionEducationStep.location;
-      });
+      setState(() => _permissionEducationStep = nextStep);
+      _schedulePermissionEducationOverlaySync();
     } catch (error) {
       AppLogger.warning('permission_education_load', error: error);
     } finally {
@@ -3953,33 +3970,44 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final step = _permissionEducationStep;
     if (step == null || _permissionEducationBusy) return;
     setState(() => _permissionEducationBusy = true);
+    _schedulePermissionEducationOverlaySync();
     final permissions = ref.read(permissionCoordinatorProvider);
-    final kind = step == PermissionEducationStep.location
-        ? AppPermissionKind.location
-        : AppPermissionKind.notifications;
+    final kind = _permissionKindForStep(step);
     try {
       var state = await permissions.check(kind);
+      final wasPrompted = await permissions.wasPrompted(kind);
+      var openedSettings = false;
+      _permissionPrompted[kind] = wasPrompted;
       if (state == AppPermissionState.serviceDisabled) {
         await permissions.openLocationServiceSettings();
+        openedSettings = true;
       } else if (state == AppPermissionState.permanentlyDenied ||
-          state == AppPermissionState.restricted) {
+          state == AppPermissionState.restricted ||
+          (state == AppPermissionState.denied && wasPrompted)) {
         await permissions.openAppPermissionSettings();
+        openedSettings = true;
       } else if (state == AppPermissionState.denied) {
         state = await permissions.request(kind);
+        _permissionPrompted[kind] = true;
       }
       if (!mounted) return;
       _setPermissionState(step, state);
+      _schedulePermissionEducationOverlaySync();
       if (state == AppPermissionState.granted) {
         await _applyGrantedPermission(step);
         if (mounted) await _advancePermissionEducation();
-      } else if (state == AppPermissionState.denied ||
-          state == AppPermissionState.unavailable) {
+      } else if (!openedSettings &&
+          (state == AppPermissionState.denied ||
+              state == AppPermissionState.unavailable)) {
         await _advancePermissionEducation();
       }
     } catch (error) {
       AppLogger.warning('permission_education_continue', error: error);
     } finally {
-      if (mounted) setState(() => _permissionEducationBusy = false);
+      if (mounted) {
+        setState(() => _permissionEducationBusy = false);
+        _schedulePermissionEducationOverlaySync();
+      }
     }
   }
 
@@ -3989,8 +4017,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   ) {
     if (step == PermissionEducationStep.location) {
       _locationPermissionState = state;
-    } else {
+    } else if (step == PermissionEducationStep.notifications) {
       _notificationPermissionState = state;
+    } else {
+      _exactAlarmPermissionState = state;
     }
   }
 
@@ -4015,13 +4045,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   Future<void> _advancePermissionEducation() async {
     final step = _permissionEducationStep;
-    if (step == PermissionEducationStep.location &&
-        !_isPermissionStepSkipped(_notificationPermissionState)) {
-      if (mounted) {
-        setState(() {
-          _permissionEducationStep = PermissionEducationStep.notifications;
-        });
-      }
+    final nextStep = _nextPendingPermissionStep(after: step);
+    if (nextStep != null) {
+      if (mounted) setState(() => _permissionEducationStep = nextStep);
+      _schedulePermissionEducationOverlaySync();
       return;
     }
     await _completePermissionEducation();
@@ -4038,6 +4065,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
     if (!mounted) return;
     setState(() => _permissionEducationStep = null);
+    _schedulePermissionEducationOverlaySync();
     _clearPermissionSetupQuery();
   }
 
@@ -4054,12 +4082,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Future<void> _refreshPermissionEducationAfterSettings() async {
     final step = _permissionEducationStep;
     if (step == null || _permissionEducationBusy) return;
-    final kind = step == PermissionEducationStep.location
-        ? AppPermissionKind.location
-        : AppPermissionKind.notifications;
+    final kind = _permissionKindForStep(step);
     final state = await ref.read(permissionCoordinatorProvider).check(kind);
     if (!mounted || _permissionEducationStep != step) return;
     setState(() => _setPermissionState(step, state));
+    _schedulePermissionEducationOverlaySync();
     if (state == AppPermissionState.granted) {
       await _applyGrantedPermission(step);
       if (mounted) await _advancePermissionEducation();
@@ -4067,27 +4094,160 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   void _showPreviousPermissionStep() {
-    if (_permissionEducationStep != PermissionEducationStep.notifications ||
-        _isPermissionStepSkipped(_locationPermissionState)) {
+    final step = _permissionEducationStep;
+    if (step == null) {
       return;
     }
-    setState(() {
-      _permissionEducationStep = PermissionEducationStep.location;
-    });
+    final index = _permissionEducationSteps.indexOf(step);
+    for (
+      var candidateIndex = index - 1;
+      candidateIndex >= 0;
+      candidateIndex--
+    ) {
+      final candidate = _permissionEducationSteps[candidateIndex];
+      if (!_isPermissionStepSkipped(_permissionStateForStep(candidate))) {
+        setState(() => _permissionEducationStep = candidate);
+        _schedulePermissionEducationOverlaySync();
+        return;
+      }
+    }
   }
 
   String _permissionPrimaryLabel(BuildContext context) {
-    final state = _permissionEducationStep == PermissionEducationStep.location
-        ? _locationPermissionState
-        : _notificationPermissionState;
+    final step = _permissionEducationStep;
+    if (step == null) return context.l10n.continueLabel;
+    final kind = _permissionKindForStep(step);
+    final state = _permissionStateForStep(step);
     if (state == AppPermissionState.serviceDisabled ||
         state == AppPermissionState.permanentlyDenied ||
-        state == AppPermissionState.restricted) {
+        state == AppPermissionState.restricted ||
+        (state == AppPermissionState.denied &&
+            (_permissionPrompted[kind] ?? false))) {
       return context.l10n.openSettings;
     }
-    return _permissionEducationStep == PermissionEducationStep.location
-        ? context.l10n.enableLocation
-        : context.l10n.enableNotificationsOnboarding;
+    return switch (step) {
+      PermissionEducationStep.location => context.l10n.enableLocation,
+      PermissionEducationStep.notifications =>
+        context.l10n.enableNotificationsOnboarding,
+      PermissionEducationStep.exactAlarms =>
+        context.l10n.enableAlarmsAndRemindersOnboarding,
+    };
+  }
+
+  PermissionEducationStep? _nextPendingPermissionStep({
+    PermissionEducationStep? after,
+  }) {
+    final start = after == null
+        ? 0
+        : _permissionEducationSteps.indexOf(after) + 1;
+    for (var index = start; index < _permissionEducationSteps.length; index++) {
+      final step = _permissionEducationSteps[index];
+      if (!_isPermissionStepSkipped(_permissionStateForStep(step))) {
+        return step;
+      }
+    }
+    return null;
+  }
+
+  AppPermissionKind _permissionKindForStep(PermissionEducationStep step) =>
+      switch (step) {
+        PermissionEducationStep.location => AppPermissionKind.location,
+        PermissionEducationStep.notifications =>
+          AppPermissionKind.notifications,
+        PermissionEducationStep.exactAlarms => AppPermissionKind.exactAlarms,
+      };
+
+  AppPermissionState _permissionStateForStep(PermissionEducationStep step) =>
+      switch (step) {
+        PermissionEducationStep.location => _locationPermissionState,
+        PermissionEducationStep.notifications => _notificationPermissionState,
+        PermissionEducationStep.exactAlarms => _exactAlarmPermissionState,
+      };
+
+  LayerLink _permissionTargetLink(PermissionEducationStep step) =>
+      step == PermissionEducationStep.location
+      ? _weatherEducationLink
+      : _notificationEducationLink;
+
+  VoidCallback? _previousPermissionStepCallback(PermissionEducationStep step) {
+    final index = _permissionEducationSteps.indexOf(step);
+    for (
+      var candidateIndex = index - 1;
+      candidateIndex >= 0;
+      candidateIndex--
+    ) {
+      if (!_isPermissionStepSkipped(
+        _permissionStateForStep(_permissionEducationSteps[candidateIndex]),
+      )) {
+        return _showPreviousPermissionStep;
+      }
+    }
+    return null;
+  }
+
+  void _schedulePermissionEducationOverlaySync() {
+    if (!mounted || _permissionOverlaySyncScheduled) return;
+    _permissionOverlaySyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _permissionOverlaySyncScheduled = false;
+      if (!mounted) {
+        _removePermissionEducationOverlay();
+        return;
+      }
+      _syncPermissionEducationOverlay();
+    });
+  }
+
+  void _syncPermissionEducationOverlay() {
+    final step = _permissionEducationStep;
+    if (step == null) {
+      _removePermissionEducationOverlay();
+      return;
+    }
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    final entry = _permissionEducationOverlayEntry;
+    if (entry == null) {
+      final nextEntry = OverlayEntry(builder: _buildPermissionEducationOverlay);
+      _permissionEducationOverlayEntry = nextEntry;
+      overlay.insert(nextEntry);
+    } else {
+      entry.markNeedsBuild();
+    }
+  }
+
+  Widget _buildPermissionEducationOverlay(BuildContext overlayContext) {
+    final step = _permissionEducationStep;
+    if (step == null) return const SizedBox.shrink();
+    return PermissionEducationOverlay(
+      step: step,
+      targetLink: _permissionTargetLink(step),
+      targetRect: _permissionTargetRect(step),
+      primaryLabel: _permissionPrimaryLabel(overlayContext),
+      busy: _permissionEducationBusy,
+      onContinue: () => unawaited(_handlePermissionContinue()),
+      onNotNow: () => unawaited(_advancePermissionEducation()),
+      onClose: () => unawaited(_completePermissionEducation()),
+      onBack: _previousPermissionStepCallback(step),
+    );
+  }
+
+  void _removePermissionEducationOverlay() {
+    _permissionEducationOverlayEntry?.remove();
+    _permissionEducationOverlayEntry = null;
+  }
+
+  Rect? _permissionTargetRect(PermissionEducationStep step) {
+    final targetContext = switch (step) {
+      PermissionEducationStep.location =>
+        _weatherEducationTargetKey.currentContext,
+      PermissionEducationStep.notifications ||
+      PermissionEducationStep.exactAlarms =>
+        _notificationEducationTargetKey.currentContext,
+    };
+    final renderObject = targetContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    return renderObject.localToGlobal(Offset.zero) & renderObject.size;
   }
 
   @override
@@ -4133,6 +4293,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       topPadding: topPadding,
                       extent: headerExtent,
                       notificationEducationLink: _notificationEducationLink,
+                      notificationEducationTargetKey:
+                          _notificationEducationTargetKey,
                       onNotificationEducationTap:
                           permissionStep ==
                               PermissionEducationStep.notifications
@@ -4157,6 +4319,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                               RepaintBoundary(
                                 child: _DashboardWeatherCard(
                                   educationLink: _weatherEducationLink,
+                                  educationTargetKey:
+                                      _weatherEducationTargetKey,
                                   onEducationTap:
                                       permissionStep ==
                                           PermissionEducationStep.location
@@ -4284,25 +4448,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               ),
             ),
           ),
-          if (permissionStep != null)
-            Positioned.fill(
-              child: PermissionEducationOverlay(
-                step: permissionStep,
-                targetLink: permissionStep == PermissionEducationStep.location
-                    ? _weatherEducationLink
-                    : _notificationEducationLink,
-                primaryLabel: _permissionPrimaryLabel(context),
-                busy: _permissionEducationBusy,
-                onContinue: () => unawaited(_handlePermissionContinue()),
-                onNotNow: () => unawaited(_advancePermissionEducation()),
-                onClose: () => unawaited(_completePermissionEducation()),
-                onBack:
-                    permissionStep == PermissionEducationStep.notifications &&
-                        !_isPermissionStepSkipped(_locationPermissionState)
-                    ? _showPreviousPermissionStep
-                    : null,
-              ),
-            ),
         ],
       ),
     );
@@ -4373,10 +4518,12 @@ class _HomeRenderData {
 class _DashboardWeatherCard extends ConsumerWidget {
   const _DashboardWeatherCard({
     required this.educationLink,
+    required this.educationTargetKey,
     this.onEducationTap,
   });
 
   final LayerLink educationLink;
+  final GlobalKey educationTargetKey;
   final VoidCallback? onEducationTap;
 
   @override
@@ -4389,18 +4536,22 @@ class _DashboardWeatherCard extends ConsumerWidget {
         ref.watch(homeLocationProvider).value ?? snapshot?.homeLocation;
     return CompositedTransformTarget(
       link: educationLink,
-      child: Semantics(
-        button: onEducationTap != null,
-        label: onEducationTap == null ? null : context.l10n.enableLocation,
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: onEducationTap,
-          child: _WeatherCard(
-            weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
-            location: location,
-            localNow: themeNow,
-            isDark: brightness == Brightness.dark,
-            onToggleTheme: () => _toggleWeatherTheme(context, ref, brightness),
+      child: KeyedSubtree(
+        key: educationTargetKey,
+        child: Semantics(
+          button: onEducationTap != null,
+          label: onEducationTap == null ? null : context.l10n.enableLocation,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: onEducationTap,
+            child: _WeatherCard(
+              weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
+              location: location,
+              localNow: themeNow,
+              isDark: brightness == Brightness.dark,
+              onToggleTheme: () =>
+                  _toggleWeatherTheme(context, ref, brightness),
+            ),
           ),
         ),
       ),
@@ -4531,8 +4682,8 @@ class _DashboardReadinessCard extends ConsumerWidget {
 double _dashboardHeaderExtent(BuildContext context, double topPadding) {
   final width = MediaQuery.sizeOf(context).width;
   final scaledUnit = MediaQuery.textScalerOf(context).scale(16);
-  final scaleAdjustment = ((scaledUnit / 16) - 1).clamp(0.0, 1.0) * 28;
-  final contentExtent = width < 600 ? 190.0 : 144.0;
+  final scaleAdjustment = ((scaledUnit / 16) - 1).clamp(0.0, 1.0) * 14;
+  final contentExtent = width < 600 ? 82.0 : 88.0;
   return topPadding + contentExtent + scaleAdjustment;
 }
 
@@ -4541,12 +4692,14 @@ class _DashboardHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.topPadding,
     required this.extent,
     required this.notificationEducationLink,
+    required this.notificationEducationTargetKey,
     this.onNotificationEducationTap,
   });
 
   final double topPadding;
   final double extent;
   final LayerLink notificationEducationLink;
+  final GlobalKey notificationEducationTargetKey;
   final VoidCallback? onNotificationEducationTap;
 
   @override
@@ -4564,6 +4717,7 @@ class _DashboardHeaderDelegate extends SliverPersistentHeaderDelegate {
     return _DashboardHeader(
       overlapsContent: overlapsContent,
       notificationEducationLink: notificationEducationLink,
+      notificationEducationTargetKey: notificationEducationTargetKey,
       onNotificationEducationTap: onNotificationEducationTap,
     );
   }
@@ -4573,6 +4727,8 @@ class _DashboardHeaderDelegate extends SliverPersistentHeaderDelegate {
     return topPadding != oldDelegate.topPadding ||
         extent != oldDelegate.extent ||
         notificationEducationLink != oldDelegate.notificationEducationLink ||
+        notificationEducationTargetKey !=
+            oldDelegate.notificationEducationTargetKey ||
         onNotificationEducationTap != oldDelegate.onNotificationEducationTap;
   }
 }
@@ -4581,11 +4737,13 @@ class _DashboardHeader extends ConsumerWidget {
   const _DashboardHeader({
     required this.overlapsContent,
     required this.notificationEducationLink,
+    required this.notificationEducationTargetKey,
     this.onNotificationEducationTap,
   });
 
   final bool overlapsContent;
   final LayerLink notificationEducationLink;
+  final GlobalKey notificationEducationTargetKey;
   final VoidCallback? onNotificationEducationTap;
 
   @override
@@ -4623,12 +4781,7 @@ class _DashboardHeader extends ConsumerWidget {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final mobile = constraints.maxWidth < 600;
-                  final compact = constraints.maxWidth < 768;
-                  final actionSize = mobile
-                      ? 48.0
-                      : compact
-                      ? 50.0
-                      : 56.0;
+                  const actionSize = hk_ui.kHomePilotHeaderActionHeight;
                   return Padding(
                     padding: EdgeInsets.fromLTRB(
                       mobile ? HkSpacing.xs : HkSpacing.md,
@@ -4637,17 +4790,14 @@ class _DashboardHeader extends ConsumerWidget {
                       HkSpacing.xs,
                     ),
                     child: Container(
-                      padding: EdgeInsets.all(
-                        mobile
-                            ? HkSpacing.sm
-                            : compact
-                            ? HkSpacing.md
-                            : 20,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: mobile ? HkSpacing.xs : HkSpacing.sm,
+                        vertical: HkSpacing.xs,
                       ),
                       decoration: BoxDecoration(
                         color: scheme.surfaceContainerLowest,
                         borderRadius: BorderRadius.circular(
-                          mobile ? HkRadii.xxl : 40,
+                          mobile ? HkRadii.xxl : 32,
                         ),
                         border: Border.all(
                           color: scheme.outlineVariant.withValues(alpha: 0.46),
@@ -4669,79 +4819,21 @@ class _DashboardHeader extends ConsumerWidget {
                           ),
                         ],
                       ),
-                      child: mobile
-                          ? Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _DashboardIdentityGroup(
-                                  avatarUrl: session?.avatarUrl,
-                                  avatarProvider: snapshot?.avatarProvider,
-                                  fallbackName: greetingName,
-                                  mobile: true,
-                                ),
-                                const SizedBox(height: HkSpacing.xs),
-                                Divider(
-                                  height: 1,
-                                  color: scheme.outlineVariant.withValues(
-                                    alpha: 0.70,
-                                  ),
-                                ),
-                                const SizedBox(height: HkSpacing.xs),
-                                _DashboardHeaderActions(
-                                  actionSize: actionSize,
-                                  compact: true,
-                                  mobile: true,
-                                  unreadCount: unreadCount,
-                                  notificationEducationLink:
-                                      notificationEducationLink,
-                                  onSearch: () => context.push('/search'),
-                                  onPoints: () =>
-                                      showPointsWalletSheet(context, ref),
-                                  onNotifications:
-                                      onNotificationEducationTap ??
-                                      () => context.push('/notifications'),
-                                ),
-                              ],
-                            )
-                          : Row(
-                              children: [
-                                Expanded(
-                                  child: _DashboardIdentityGroup(
-                                    avatarUrl: session?.avatarUrl,
-                                    avatarProvider: snapshot?.avatarProvider,
-                                    fallbackName: greetingName,
-                                    mobile: false,
-                                    compact: compact,
-                                  ),
-                                ),
-                                Container(
-                                  width: 1,
-                                  height: compact ? 62 : 74,
-                                  margin: EdgeInsets.symmetric(
-                                    horizontal: compact
-                                        ? HkSpacing.sm
-                                        : HkSpacing.space24,
-                                  ),
-                                  color: scheme.outlineVariant.withValues(
-                                    alpha: 0.82,
-                                  ),
-                                ),
-                                _DashboardHeaderActions(
-                                  actionSize: actionSize,
-                                  compact: compact,
-                                  mobile: false,
-                                  unreadCount: unreadCount,
-                                  notificationEducationLink:
-                                      notificationEducationLink,
-                                  onSearch: () => context.push('/search'),
-                                  onPoints: () =>
-                                      showPointsWalletSheet(context, ref),
-                                  onNotifications:
-                                      onNotificationEducationTap ??
-                                      () => context.push('/notifications'),
-                                ),
-                              ],
-                            ),
+                      child: _DashboardHeaderActions(
+                        actionSize: actionSize,
+                        unreadCount: unreadCount,
+                        notificationEducationLink: notificationEducationLink,
+                        notificationEducationTargetKey:
+                            notificationEducationTargetKey,
+                        avatarUrl: session?.avatarUrl,
+                        avatarProvider: snapshot?.avatarProvider,
+                        fallbackName: greetingName,
+                        onSearch: () => context.push('/search'),
+                        onPoints: () => showPointsWalletSheet(context, ref),
+                        onNotifications:
+                            onNotificationEducationTap ??
+                            () => context.push('/notifications'),
+                      ),
                     ),
                   );
                 },
@@ -4754,182 +4846,176 @@ class _DashboardHeader extends ConsumerWidget {
   }
 }
 
-class _DashboardIdentityGroup extends StatelessWidget {
-  const _DashboardIdentityGroup({
-    required this.avatarUrl,
-    required this.avatarProvider,
-    required this.fallbackName,
-    required this.mobile,
-    this.compact = false,
-  });
-
-  final String? avatarUrl;
-  final ImageProvider<Object>? avatarProvider;
-  final String fallbackName;
-  final bool mobile;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final avatarRadius = mobile
-        ? 28.0
-        : compact
-        ? 31.0
-        : 36.0;
-    return Row(
-      children: [
-        Semantics(
-          button: true,
-          label: context.l10n.openAccount,
-          excludeSemantics: true,
-          child: Tooltip(
-            message: context.l10n.openAccount,
-            child: Material(
-              color: Colors.transparent,
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: () => context.push('/account'),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: scheme.outlineVariant.withValues(alpha: 0.74),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: HkColors.appTextPrimary.withValues(
-                            alpha: 0.10,
-                          ),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: hk_ui.ProfileAvatar(
-                      avatarUrl: avatarUrl,
-                      imageProvider: avatarProvider,
-                      fallbackName: fallbackName,
-                      radius: avatarRadius,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        SizedBox(width: mobile ? HkSpacing.sm : HkSpacing.md),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                context.l10n.goodAfternoon,
-                maxLines: 1,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: scheme.onSurface,
-                  fontSize: mobile
-                      ? 24
-                      : compact
-                      ? 27
-                      : 32,
-                  height: 1.05,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: HkSpacing.space6),
-              Text(
-                context.l10n.dashboardProductiveSubtitle,
-                maxLines: 2,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.76),
-                  fontSize: mobile
-                      ? 14
-                      : compact
-                      ? 15
-                      : 17,
-                  height: 1.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _DashboardHeaderActions extends StatelessWidget {
   const _DashboardHeaderActions({
     required this.actionSize,
-    required this.compact,
-    required this.mobile,
     required this.unreadCount,
     required this.notificationEducationLink,
+    required this.notificationEducationTargetKey,
+    required this.avatarUrl,
+    required this.avatarProvider,
+    required this.fallbackName,
     required this.onSearch,
     required this.onPoints,
     required this.onNotifications,
   });
 
   final double actionSize;
-  final bool compact;
-  final bool mobile;
   final int unreadCount;
   final LayerLink notificationEducationLink;
+  final GlobalKey notificationEducationTargetKey;
+  final String? avatarUrl;
+  final ImageProvider<Object>? avatarProvider;
+  final String fallbackName;
   final VoidCallback onSearch;
   final VoidCallback onPoints;
   final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) {
-    final search = _DashboardHeaderAction(
-      key: const ValueKey('home-search-control'),
-      size: actionSize,
-      semanticLabel: context.l10n.searchHomePilot,
-      tooltip: context.l10n.searchHomePilot,
-      onPressed: onSearch,
-      icon: Symbols.search_rounded,
-      iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
-    );
-    final points = _DashboardPointsCard(
+    final search = _DashboardSearchField(onPressed: onSearch);
+    final points = HkPointsPill(
       key: const ValueKey('home-points-control'),
-      compact: compact,
-      height: actionSize,
-      onPressed: onPoints,
+      onTap: onPoints,
     );
     final notifications = CompositedTransformTarget(
       link: notificationEducationLink,
-      child: _NotificationButton(
-        key: const ValueKey('home-notifications-control'),
-        size: actionSize,
-        unreadCount: unreadCount,
-        onPressed: onNotifications,
+      child: KeyedSubtree(
+        key: notificationEducationTargetKey,
+        child: _NotificationButton(
+          key: const ValueKey('home-notifications-control'),
+          size: actionSize,
+          unreadCount: unreadCount,
+          onPressed: onNotifications,
+        ),
       ),
     );
-    if (mobile) {
-      return Row(
-        children: [
-          search,
-          const SizedBox(width: HkSpacing.xs),
-          Expanded(child: points),
-          const SizedBox(width: HkSpacing.xs),
-          notifications,
-        ],
-      );
-    }
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        search,
-        SizedBox(width: compact ? HkSpacing.space6 : HkSpacing.sm),
-        SizedBox(width: compact ? 142 : 172, child: points),
-        SizedBox(width: compact ? HkSpacing.space6 : HkSpacing.sm),
+        _DashboardAvatarButton(
+          size: actionSize,
+          avatarUrl: avatarUrl,
+          avatarProvider: avatarProvider,
+          fallbackName: fallbackName,
+        ),
+        const SizedBox(width: HkSpacing.xs),
+        Expanded(child: search),
+        const SizedBox(width: HkSpacing.xs),
+        points,
+        const SizedBox(width: HkSpacing.xs),
         notifications,
       ],
+    );
+  }
+}
+
+class _DashboardAvatarButton extends StatelessWidget {
+  const _DashboardAvatarButton({
+    required this.size,
+    required this.avatarUrl,
+    required this.avatarProvider,
+    required this.fallbackName,
+  });
+
+  final double size;
+  final String? avatarUrl;
+  final ImageProvider<Object>? avatarProvider;
+  final String fallbackName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: context.l10n.openAccount,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: context.l10n.openAccount,
+        child: SizedBox.square(
+          dimension: size,
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => context.push('/account'),
+              child: Center(
+                child: hk_ui.ProfileAvatar(
+                  avatarUrl: avatarUrl,
+                  imageProvider: avatarProvider,
+                  fallbackName: fallbackName,
+                  radius: (size - 4) / 2,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardSearchField extends StatelessWidget {
+  const _DashboardSearchField({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(HkRadii.full),
+      side: BorderSide(color: scheme.outlineVariant),
+    );
+    return Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: context.l10n.searchHomePilot,
+      child: Tooltip(
+        message: context.l10n.searchHomePilot,
+        excludeFromSemantics: true,
+        child: SizedBox(
+          key: const ValueKey('home-search-control'),
+          height: hk_ui.kHomePilotHeaderActionHeight,
+          child: Material(
+            color: scheme.surfaceContainerLowest,
+            shape: shape,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              customBorder: shape,
+              onTap: onPressed,
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(
+                  start: HkSpacing.sm,
+                  end: HkSpacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Symbols.search_rounded,
+                      size: 24,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: HkSpacing.xs),
+                    Expanded(
+                      child: Text(
+                        context.l10n.searchRoomsItemsTasksNotes,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: scheme.onSurfaceVariant.withValues(
+                            alpha: 0.78,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -4942,7 +5028,6 @@ class _DashboardHeaderAction extends StatelessWidget {
     required this.onPressed,
     required this.icon,
     required this.iconColor,
-    super.key,
   });
 
   final double size;
@@ -4998,136 +5083,6 @@ class _DashboardHeaderAction extends StatelessWidget {
   }
 }
 
-class _DashboardPointsCard extends ConsumerWidget {
-  const _DashboardPointsCard({
-    required this.compact,
-    required this.height,
-    required this.onPressed,
-    super.key,
-  });
-
-  final bool compact;
-  final double height;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final balance = ref.watch(pointWalletProvider).value?.balance;
-    final semanticLabel = balance == null
-        ? context.l10n.pointsUnavailable
-        : context.l10n.pointsCount(balance);
-    final radius = compact ? HkRadii.lg : HkRadii.xl;
-    return Semantics(
-      button: true,
-      excludeSemantics: true,
-      label: semanticLabel,
-      child: Tooltip(
-        message: context.l10n.pointsWallet,
-        excludeFromSemantics: true,
-        child: SizedBox(
-          height: height,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  scheme.surfaceContainerLowest,
-                  scheme.primaryContainer.withValues(alpha: 0.64),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(color: scheme.primary.withValues(alpha: 0.34)),
-              boxShadow: [
-                BoxShadow(
-                  color: scheme.primary.withValues(alpha: 0.10),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(radius),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onPressed,
-                child: Padding(
-                  padding: EdgeInsetsDirectional.only(
-                    start: compact ? HkSpacing.xs : HkSpacing.sm,
-                    end: compact ? HkSpacing.space6 : HkSpacing.xs,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: compact ? 34 : 40,
-                        height: compact ? 34 : 40,
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerLowest,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: scheme.primary.withValues(alpha: 0.52),
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: scheme.primary.withValues(alpha: 0.18),
-                              blurRadius: 12,
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Symbols.star_rounded,
-                          color: scheme.primary,
-                          size: compact ? 22 : 26,
-                        ),
-                      ),
-                      SizedBox(
-                        width: compact ? HkSpacing.space6 : HkSpacing.xs,
-                      ),
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              context.l10n.pointsLabel,
-                              maxLines: 1,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: scheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            Text(
-                              balance?.toString() ?? '—',
-                              maxLines: 1,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    color: scheme.onSurface,
-                                    height: 1,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Symbols.chevron_right_rounded,
-                        color: scheme.primary,
-                        size: compact ? 20 : 24,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _NotificationButton extends StatelessWidget {
   const _NotificationButton({
     required this.size,
@@ -5166,7 +5121,7 @@ class _NotificationButton extends StatelessWidget {
               width: 20,
               height: 20,
               decoration: BoxDecoration(
-                color: HkColors.appPrimary,
+                color: HkColors.appDanger,
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: scheme.surfaceContainerLowest,
@@ -5174,7 +5129,7 @@ class _NotificationButton extends StatelessWidget {
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: HkColors.appPrimary.withValues(alpha: 0.24),
+                    color: HkColors.appDanger.withValues(alpha: 0.24),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -9246,13 +9201,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     };
     final selectedTasks = grouped[_selectedDate] ?? const <TaskItem>[];
     return Scaffold(
-      appBar: AppBar(
-        title: Text(context.l10n.calendar),
-        actions: [
-          HkPointsPill(onTap: () => showPointsWalletSheet(context, ref)),
-          const SizedBox(width: HkSpacing.xs),
-        ],
-      ),
+      appBar: AppBar(title: Text(context.l10n.calendar)),
       body: hk_ui.ProductivityBackdrop(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
@@ -9403,12 +9352,7 @@ class MoreScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(context.l10n.tools),
-        actions: [
-          HkPointsPill(onTap: () => showPointsWalletSheet(context, ref)),
-        ],
-      ),
+      appBar: AppBar(title: Text(context.l10n.tools)),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
           HkSpacing.gutter,
@@ -11088,13 +11032,7 @@ class StatisticsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(statisticsProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(context.l10n.statistics),
-        actions: [
-          HkPointsPill(onTap: () => showPointsWalletSheet(context, ref)),
-          const SizedBox(width: HkSpacing.xs),
-        ],
-      ),
+      appBar: AppBar(title: Text(context.l10n.statistics)),
       body: RepaintBoundary(
         key: const ValueKey('statistics-stability-boundary'),
         child: stats.when(
@@ -11946,9 +11884,14 @@ class SettingsScreen extends ConsumerWidget {
       final states = await Future.wait([
         permissions.check(AppPermissionKind.location),
         permissions.check(AppPermissionKind.notifications),
+        permissions.check(AppPermissionKind.exactAlarms),
       ]);
       if (!context.mounted) return;
-      if (states.every((state) => state == AppPermissionState.granted)) {
+      if (states.every(
+        (state) =>
+            state == AppPermissionState.granted ||
+            state == AppPermissionState.unavailable,
+      )) {
         hk_ui.showToast(
           context,
           content: Text(context.l10n.permissionsAlreadyEnabled),
@@ -12544,17 +12487,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                     onChoose: _chooseRestoreBackup,
                     onRestore: _confirmRestore,
                   ),
-                  const SizedBox(height: HkSpacing.sm),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Symbols.bug_report_rounded),
-                      title: Text(context.l10n.exportDiagnostics),
-                      subtitle: Text(context.l10n.diagnosticExportDisclosure),
-                      trailing: const Icon(Symbols.ios_share_rounded),
-                      enabled: !_busy,
-                      onTap: _busy ? null : _exportDiagnostics,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -12638,50 +12570,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         text: context.l10n.homePilotBackupShareText,
       ),
     );
-  }
-
-  Future<void> _exportDiagnostics() async {
-    final consent = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        icon: const Icon(Symbols.privacy_tip_rounded),
-        title: Text(context.l10n.exportDiagnostics),
-        content: Text(context.l10n.diagnosticExportDisclosure),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(context.l10n.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(context.l10n.exportDiagnostics),
-          ),
-        ],
-      ),
-    );
-    if (consent != true || !mounted) return;
-    _setBusy(context.l10n.exportingDiagnostics);
-    try {
-      final bundle = await DiagnosticExportService().export();
-      if (!mounted) return;
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(bundle.path)],
-          text: context.l10n.homePilotDiagnosticsShareText,
-        ),
-      );
-    } on Object catch (error) {
-      AppLogger.warning('diagnostic_export', error: error);
-      if (mounted) {
-        hk_ui.showToast(
-          context,
-          content: Text(context.l10n.diagnosticExportFailed),
-          severity: hk_ui.HkToastSeverity.error,
-        );
-      }
-    } finally {
-      if (mounted) _clearBusy();
-    }
   }
 
   Future<void> _setAutomaticBackupsEnabled(bool enabled) async {

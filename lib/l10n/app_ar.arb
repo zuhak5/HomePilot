@@ -982,7 +982,9 @@
       "total": {"type": "int", "format": "decimalPattern"}
     }
   },
-  "permissionSetup": "إعداد الموقع والإشعارات",
+  "exactAlarmEducationTitle": "حافظ على التذكيرات في وقتها",
+  "enableAlarmsAndRemindersOnboarding": "تفعيل التذكيرات",
+  "permissionSetup": "إعداد الموقع والإشعارات والتذكيرات",
   "permissionSetupSubtitle": "راجع كيفية استخدام HomePilot للموقع والتذكيرات.",
-  "permissionsAlreadyEnabled": "الموقع والإشعارات مفعّلان بالفعل."
+  "permissionsAlreadyEnabled": "تم إعداد الموقع والإشعارات والتذكيرات بالفعل."
 }

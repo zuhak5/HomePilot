@@ -1476,8 +1476,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Good afternoon'), findsOneWidget);
-    expect(find.text("Let's make today productive"), findsOneWidget);
+    expect(find.text('Search rooms, items, tasks, notes'), findsOneWidget);
+    expect(find.text('Good afternoon'), findsNothing);
+    expect(find.text("Let's make today productive"), findsNothing);
     expect(find.textContaining('Thulfiqar'), findsNothing);
     expect(find.textContaining('Home overview'), findsNothing);
     expect(find.text('Set up your home'), findsOneWidget);
@@ -1553,10 +1554,11 @@ void main() {
         find.byKey(const ValueKey('dashboard-header-card')),
         findsOneWidget,
       );
-      expect(find.text('Good afternoon'), findsOneWidget);
-      expect(find.text("Let's make today productive"), findsOneWidget);
+      expect(find.text('Good afternoon'), findsNothing);
+      expect(find.text("Let's make today productive"), findsNothing);
       expect(find.text('Hidden Name'), findsNothing);
-      expect(find.text('Points'), findsOneWidget);
+      expect(find.text('Points'), findsNothing);
+      expect(find.text('Search rooms, items, tasks, notes'), findsOneWidget);
       for (final key in [
         'home-search-control',
         'home-points-control',
@@ -1582,10 +1584,12 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.denied,
         AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
       },
       requestResults: {
         AppPermissionKind.location: AppPermissionState.granted,
         AppPermissionKind.notifications: AppPermissionState.granted,
+        AppPermissionKind.exactAlarms: AppPermissionState.granted,
       },
     );
     final weather = CountingWeatherRepository(
@@ -1624,6 +1628,15 @@ void main() {
       AppPermissionKind.location,
       AppPermissionKind.notifications,
     ]);
+    expect(find.text('Keep reminders on time'), findsOneWidget);
+
+    await tester.tap(find.text('Enable reminders'));
+    await _pumpPermissionEducation(tester);
+    expect(permissions.requests, [
+      AppPermissionKind.location,
+      AppPermissionKind.notifications,
+      AppPermissionKind.exactAlarms,
+    ]);
     expect(settings.permissionEducationSeenValue, isTrue);
     expect(
       find.byKey(const ValueKey('permission-education-overlay')),
@@ -1643,6 +1656,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.granted,
         AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.unavailable,
       },
     );
 
@@ -1675,6 +1689,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.permanentlyDenied,
         AppPermissionKind.notifications: AppPermissionState.granted,
+        AppPermissionKind.exactAlarms: AppPermissionState.granted,
       },
     );
 
@@ -1694,6 +1709,41 @@ void main() {
     expect(find.text('Get local maintenance tips'), findsOneWidget);
   });
 
+  testWidgets('prompted denied permission routes to settings without request', (
+    tester,
+  ) async {
+    final settings = FakeSettingsRepository(
+      onboardingCompletedValue: true,
+      permissionEducationSeenValue: false,
+    );
+    addTearDown(settings.close);
+    final permissions = FakeAppPermissionGateway(
+      states: {
+        AppPermissionKind.location: AppPermissionState.granted,
+        AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.granted,
+      },
+    )..prompted.add(AppPermissionKind.notifications);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _testOverrides(settings, permissionGateway: permissions),
+        child: const HomePilotApp(),
+      ),
+    );
+    await _pumpPermissionEducation(tester);
+
+    expect(find.text('Never miss important maintenance'), findsOneWidget);
+    await tester.tap(find.text('Open settings'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(permissions.openAppSettingsCount, 1);
+    expect(permissions.requests, isEmpty);
+    expect(find.text('Never miss important maintenance'), findsOneWidget);
+    expect(settings.permissionEducationSeenValue, isFalse);
+  });
+
   testWidgets('granted permissions skip education and persist completion', (
     tester,
   ) async {
@@ -1706,6 +1756,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.granted,
         AppPermissionKind.notifications: AppPermissionState.granted,
+        AppPermissionKind.exactAlarms: AppPermissionState.granted,
       },
     );
 
@@ -1725,7 +1776,7 @@ void main() {
     expect(permissions.requests, isEmpty);
   });
 
-  testWidgets('permission education does not block bottom navigation', (
+  testWidgets('permission education blocks bottom navigation while visible', (
     tester,
   ) async {
     final settings = FakeSettingsRepository(
@@ -1737,6 +1788,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.denied,
         AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
       },
     );
 
@@ -1749,10 +1801,29 @@ void main() {
     await _pumpPermissionEducation(tester);
     final router = GoRouter.of(tester.element(find.byType(HomeShell)));
 
-    await tester.tap(find.text('Tools'));
-    await tester.pumpAndSettle();
+    final overlayRect = tester.getRect(
+      find.byKey(const ValueKey('permission-education-overlay')),
+    );
+    final cardRect = tester.getRect(
+      find.byKey(const ValueKey('permission-education-card')),
+    );
+    final navRect = tester.getRect(
+      find.byType(hk_ui.SereneBottomNavigationBar),
+    );
+    final haloRect = tester.getRect(
+      find.byKey(const ValueKey('permission-education-target-halo')),
+    );
+    expect(overlayRect.top, 0);
+    expect(cardRect.bottom, lessThanOrEqualTo(navRect.top));
+    expect(haloRect.left, greaterThanOrEqualTo(0));
+    expect(haloRect.top, greaterThanOrEqualTo(0));
+    expect(haloRect.right, lessThanOrEqualTo(overlayRect.right));
+    expect(haloRect.bottom, lessThanOrEqualTo(overlayRect.bottom));
 
-    expect(router.routeInformationProvider.value.uri.path, '/more');
+    await tester.tap(find.text('Tools'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(router.routeInformationProvider.value.uri.path, '/');
     expect(settings.permissionEducationSeenValue, isFalse);
   });
 
@@ -1765,6 +1836,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.denied,
         AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
       },
     );
 
@@ -1800,6 +1872,7 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.denied,
         AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
       },
     );
 
@@ -1903,6 +1976,67 @@ void main() {
       tester.getSize(fab),
       const Size(hk_ui.kHomePilotFabWidth, hk_ui.kHomePilotFabHeight),
     );
+  });
+
+  testWidgets('shared floating action button tooltip stays above bottom nav', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: testLightTheme(),
+        home: Scaffold(
+          extendBody: true,
+          bottomNavigationBar: hk_ui.SereneBottomNavigationBar(
+            selectedIndex: 0,
+            destinations: const [
+              hk_ui.SereneBottomNavDestination(
+                icon: Symbols.home_rounded,
+                selectedIcon: Symbols.home_filled_rounded,
+                label: hk_ui.SereneBottomNavLabel.home,
+              ),
+              hk_ui.SereneBottomNavDestination(
+                icon: Symbols.inventory_2_rounded,
+                selectedIcon: Symbols.inventory_2_rounded,
+                label: hk_ui.SereneBottomNavLabel.rooms,
+              ),
+            ],
+            onDestinationSelected: (_) {},
+          ),
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: HkSpacing.bottomNav),
+            child: hk_ui.HomePilotFloatingActionButton(
+              icon: Icons.add,
+              label: 'Create',
+              tooltip: 'Create tooltip',
+              onPressed: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final fab = find.byType(FloatingActionButton);
+    await tester.longPress(fab);
+    await tester.pump(const Duration(milliseconds: 800));
+
+    final tooltip = find.text('Create tooltip');
+    expect(tooltip, findsOneWidget);
+    final tooltipRect = tester.getRect(tooltip);
+    final fabRect = tester.getRect(fab);
+    final navRect = tester.getRect(
+      find.byType(hk_ui.SereneBottomNavigationBar),
+    );
+
+    expect(tooltipRect.bottom, lessThanOrEqualTo(fabRect.top));
+    expect(tooltipRect.bottom, lessThan(navRect.top));
+    expect(tooltipRect.left, greaterThanOrEqualTo(0));
+    expect(tooltipRect.right, lessThanOrEqualTo(390));
   });
 
   testWidgets('Home Rooms and Tasks FABs share the same dimensions', (
@@ -3019,16 +3153,36 @@ void main() {
           );
           expect(points, findsOneWidget);
           expect(notifications, findsOneWidget);
-          final expectedActionSize = width < 600 ? 48.0 : 50.0;
-          expect(tester.getSize(points).height, expectedActionSize);
+          const expectedActionSize = hk_ui.kHomePilotHeaderActionHeight;
+          expect(
+            tester.getSize(points),
+            const Size(HkPointsPill.width, expectedActionSize),
+          );
           expect(
             tester.getSize(notifications),
-            Size(expectedActionSize, expectedActionSize),
+            const Size(expectedActionSize, expectedActionSize),
           );
           expect(
             tester.getTopLeft(notifications).dx -
                 tester.getBottomRight(points).dx,
-            width < 600 ? HkSpacing.xs : HkSpacing.space6,
+            HkSpacing.xs,
+          );
+          expect(find.text('Good afternoon'), findsNothing);
+          expect(find.text("Let's make today productive"), findsNothing);
+          expect(
+            find.text('Search rooms, items, tasks, notes'),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(of: points, matching: find.text('Points')),
+            findsNothing,
+          );
+          expect(
+            find.descendant(
+              of: points,
+              matching: find.byIcon(Symbols.chevron_right_rounded),
+            ),
+            findsNothing,
           );
           expect(find.bySemanticsLabel('7 points'), findsOneWidget);
           expect(
@@ -3044,7 +3198,7 @@ void main() {
           );
           expect(
             (unreadBadge.decoration! as BoxDecoration).color,
-            HkColors.appPrimary,
+            HkColors.appDanger,
           );
           final notificationMaterial = tester.widget<Material>(
             find
@@ -3117,6 +3271,78 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-notifications-control')));
     await tester.pumpAndSettle();
     expect(find.text('Notification route target'), findsOneWidget);
+  });
+
+  testWidgets('compact points card appears only on Home Rooms and Tasks', (
+    tester,
+  ) async {
+    final settings = FakeSettingsRepository(onboardingCompletedValue: true);
+    addTearDown(settings.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          ..._testOverrides(settings),
+          monetizationRepositoryProvider.overrideWithValue(null),
+          pointWalletProvider.overrideWithValue(
+            AsyncData(
+              PointWallet(
+                balance: 7,
+                timeZone: 'Asia/Baghdad',
+                updatedAt: DateTime.utc(2026, 8, 2),
+              ),
+            ),
+          ),
+          monetizationConfigProvider.overrideWithValue(
+            const AsyncData(MonetizationConfig.failClosed()),
+          ),
+          pendingRewardClaimsProvider.overrideWithValue(const AsyncData([])),
+        ],
+        child: const HomePilotApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    void expectCompactPointsCard() {
+      final points = find.byType(HkPointsPill);
+      expect(points, findsOneWidget);
+      expect(
+        tester.getSize(points),
+        const Size(HkPointsPill.width, hk_ui.kHomePilotHeaderActionHeight),
+      );
+      expect(
+        find.descendant(of: points, matching: find.text('Points')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: points,
+          matching: find.byIcon(Symbols.chevron_right_rounded),
+        ),
+        findsNothing,
+      );
+    }
+
+    expectCompactPointsCard();
+
+    await tester.tap(find.text('Rooms').last);
+    await tester.pumpAndSettle();
+    expectCompactPointsCard();
+
+    await tester.tap(find.text('Tasks').last);
+    await tester.pumpAndSettle();
+    expectCompactPointsCard();
+
+    await tester.tap(find.text('Calendar').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(HkPointsPill), findsNothing);
+
+    await tester.tap(find.text('Tools').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(HkPointsPill), findsNothing);
+
+    await tester.tap(find.text('Statistics'));
+    await tester.pumpAndSettle();
+    expect(find.byType(HkPointsPill), findsNothing);
   });
 
   testWidgets('Home weather shortens long district labels', (tester) async {
@@ -3486,7 +3712,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Set up your home'), findsOneWidget);
-    expect(find.text('Good afternoon'), findsOneWidget);
+    expect(find.text('Search rooms, items, tasks, notes'), findsOneWidget);
+    expect(find.text('Good afternoon'), findsNothing);
     expect(find.byType(hk_ui.SereneBottomNavigationBar), findsOneWidget);
     final toggle = find.byTooltip('Switch to light mode');
     expect(toggle, findsOneWidget);
@@ -4514,6 +4741,7 @@ void main() {
     await _pumpBackupScreen(tester, repository: repository);
 
     expect(find.text('Latest backup'), findsOneWidget);
+    expect(find.text('Export diagnostics'), findsNothing);
     expect(find.text('Available'), findsOneWidget);
     expect(find.text('Backup complete'), findsOneWidget);
     expect(find.text('Create backup'), findsWidgets);
@@ -5871,6 +6099,9 @@ class FakeAppPermissionGateway implements AppPermissionGateway {
   @override
   Future<AppPermissionState> request(AppPermissionKind kind) async {
     requests.add(kind);
+    if (!prompted.contains(kind)) {
+      prompted.add(kind);
+    }
     final result =
         requestResults[kind] ?? states[kind] ?? AppPermissionState.denied;
     states[kind] = result;

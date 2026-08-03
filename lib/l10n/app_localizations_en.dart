@@ -3510,7 +3510,13 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get permissionSetup => 'Location and notification setup';
+  String get exactAlarmEducationTitle => 'Keep reminders on time';
+
+  @override
+  String get enableAlarmsAndRemindersOnboarding => 'Enable reminders';
+
+  @override
+  String get permissionSetup => 'Location, notifications, and reminders setup';
 
   @override
   String get permissionSetupSubtitle =>
@@ -3518,5 +3524,5 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get permissionsAlreadyEnabled =>
-      'Location and notifications are already enabled.';
+      'Location, notifications, and reminders are already set up.';
 }
