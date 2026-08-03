@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../observability/sentry_logger_bridge.dart';
+import '../observability/sentry_tracing.dart';
 import 'sync_providers.dart';
 
 class CloudSyncBootstrap extends ConsumerStatefulWidget {
@@ -40,16 +42,55 @@ class _CloudSyncBootstrapState extends ConsumerState<CloudSyncBootstrap>
   }
 
   Future<void> _resumeSync() async {
+    final coordinator = ref.read(syncCoordinatorProvider);
+    if (coordinator == null) return;
     try {
-      await ref.read(syncCoordinatorProvider)?.onAppResumed();
-    } on Object {
+      await traceHomePilotOperation<void>(
+        'sync.resume',
+        () async => coordinator.onAppResumed(),
+        attributes: const {
+          'sync_mode': 'automatic',
+          'execution': 'main',
+        },
+      );
+    } on Object catch (error, stackTrace) {
+      reportOperationFailure(
+        operation: 'sync_resume_failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: const {
+          'sync_mode': 'automatic',
+          'execution': 'main',
+        },
+      );
       // The coordinator persists and exposes failures through SyncStatus.
       // Startup and the offline app must remain available.
     }
   }
 
   Future<void> _pauseSync() async {
-    await ref.read(syncCoordinatorProvider)?.onAppPaused();
+    final coordinator = ref.read(syncCoordinatorProvider);
+    if (coordinator == null) return;
+    try {
+      await traceHomePilotOperation<void>(
+        'sync.pause',
+        () async => coordinator.onAppPaused(),
+        attributes: const {
+          'sync_mode': 'automatic',
+          'execution': 'main',
+        },
+      );
+    } on Object catch (error, stackTrace) {
+      reportOperationFailure(
+        operation: 'sync_pause_failed',
+        error: error,
+        stackTrace: stackTrace,
+        fields: const {
+          'sync_mode': 'automatic',
+          'execution': 'main',
+        },
+      );
+    }
   }
 
   @override
