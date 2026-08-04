@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "download-site/**"
+      - "tool/build_versiondeck_site.mjs"
       - "tool/generate_versiondeck_manifest.mjs"
       - "tool/versiondeck.test.mjs"
       - "tool/validate_versiondeck.mjs"
@@ -16,41 +17,71 @@ on:
       - published
       - edited
       - deleted
+      - unpublished
       - prereleased
       - released
   workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: github-pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Validate and publish VersionDeck
+  build:
+    name: Verify and build VersionDeck
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
 
     steps:
-      - name: Check out repository
+      - name: Check out current VersionDeck source
         uses: actions/checkout@v6
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+
+      - name: Verify deployment source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "$remote_sha"
+          test "$(git branch --show-current)" = "main"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "### VersionDeck source" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`$source_sha\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
 
+      - name: Verify release-verification tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh --version
+          test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f \
+            \( -name apksigner -o -name apksigner.bat \) -print -quit | grep .
+          find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f \
+            \( -name aapt2 -o -name aapt2.exe \) -print -quit | grep .
+
       - name: Check JavaScript syntax
         run: |
           node --check download-site/app.js
+          node --check download-site/cache-policy.js
+          node --check download-site/manifest-schema.js
           node --check download-site/relative-time.js
           node --check download-site/sw.js
+          node --check tool/build_versiondeck_site.mjs
           node --check tool/generate_versiondeck_manifest.mjs
           node --check tool/validate_versiondeck.mjs
           node --check tool/versiondeck.test.mjs
@@ -58,13 +89,34 @@ jobs:
       - name: Run VersionDeck tests
         run: node --test tool/versiondeck.test.mjs
 
-      - name: Generate verified release manifest
+      - name: Generate independently verified release manifest
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          VERSIONDECK_GENERATOR_COMMIT: ${{ steps.source.outputs.sha }}
         run: node tool/generate_versiondeck_manifest.mjs
 
+      - name: Build revisioned VersionDeck artifact
+        run: >-
+          node tool/build_versiondeck_site.mjs
+          --source download-site
+          --output .versiondeck-site
+          --revision ${{ steps.source.outputs.sha }}
+
       - name: Validate generated site
-        run: node tool/validate_versiondeck.mjs
+        run: node tool/validate_versiondeck.mjs .versiondeck-site
+
+      - name: Summarize generated manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const manifest = require("./.versiondeck-site/releases.json");
+          console.log("### Verified releases");
+          console.log(`- Schema: ${manifest.schemaVersion}`);
+          console.log(`- Verified entries: ${manifest.releases.length}`);
+          console.log(`- Latest stable ID: ${manifest.latestStableReleaseId ?? "none"}`);
+          console.log(`- Latest prerelease ID: ${manifest.latestPrereleaseReleaseId ?? "none"}`);
+          NODE
 
       - name: Upload validation diagnostics
         if: always()
@@ -73,7 +125,9 @@ jobs:
           name: versiondeck-validation-${{ github.run_id }}
           path: |
             download-site/releases.json
-            download-site/release-diagnostics.json
+            .versiondeck-diagnostics/release-diagnostics.json
+            .versiondeck-site/asset-manifest.json
+            .versiondeck-site/build-info.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -83,8 +137,51 @@ jobs:
       - name: Upload VersionDeck artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: download-site
+          path: .versiondeck-site
 
+  deploy:
+    name: Publish VersionDeck
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify public VersionDeck manifest
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_url="${PAGE_URL%/}/releases.json"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error \
+              --header 'Cache-Control: no-cache' \
+              "$manifest_url?deployment=${GITHUB_RUN_ID}-${attempt}" \
+              --output /tmp/releases.json; then
+              if EXPECTED_SOURCE_SHA="$EXPECTED_SOURCE_SHA" node - <<'NODE'
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync("/tmp/releases.json", "utf8"));
+          if (manifest.schemaVersion !== 2) process.exit(1);
+          if (manifest.repository !== "zuhak5/HomePilot") process.exit(1);
+          if (manifest.generatorCommit !== process.env.EXPECTED_SOURCE_SHA) process.exit(1);
+          NODE
+              then
+                echo "Public VersionDeck manifest matches source $EXPECTED_SOURCE_SHA."
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "Public VersionDeck did not expose the expected manifest." >&2
+          exit 1
