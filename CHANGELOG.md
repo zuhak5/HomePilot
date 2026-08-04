@@ -17,6 +17,7 @@ No unreleased changes are currently recorded.
 - Added a subsystem-to-document impact matrix covering application behavior, architecture, data, synchronization, Supabase, authentication, monetization, backups, permissions, observability, releases, VersionDeck, localization, testing, and agent workflows.
 - Added a pull-request template requiring documentation, validation, privacy, synchronization, permission, compatibility, and release-impact reporting.
 - Updated repository agent instructions, contributor guidance, documentation governance, and Agent Skill audit/update procedures.
+- Chained VersionDeck deployment to successful protected production APK workflow completions while preserving independent release verification and manual/release recovery triggers.
 
 ### Compatibility
 
