@@ -25,7 +25,7 @@ Use this checklist before activating any downloaded or adapted skill.
 
 Reject or rewrite instructions that ask the agent to:
 
-- [ ] Ignore the user, `AGENTS.md`, tests, or security controls.
+- [ ] Ignore the user, `AGENTS.md`, tests, documentation policy, or security controls.
 - [ ] Read unrelated personal files or home-directory credentials.
 - [ ] Collect or transmit environment variables unnecessarily.
 - [ ] Upload repository content to an external service.
@@ -35,6 +35,7 @@ Reject or rewrite instructions that ask the agent to:
 - [ ] Auto-publish releases, deployments, or remote configuration.
 - [ ] Install additional code without review.
 - [ ] Weaken tests merely to produce a passing result.
+- [ ] Treat documentation as optional cleanup or defer required documentation to an unspecified follow-up.
 
 ## Script review
 
@@ -63,6 +64,18 @@ Inspect every shell, PowerShell, Python, JavaScript, executable, package file, a
 - [ ] VersionDeck remains independently verified and fail-closed.
 - [ ] Production signing and release operations remain protected.
 
+## Documentation compliance
+
+- [ ] The skill explicitly reads `docs/governance/documentation-maintenance.md` before implementation.
+- [ ] The workflow contains a documentation-impact assessment before editing.
+- [ ] The workflow maps the affected subsystem to the required HomePilot documents.
+- [ ] Affected documents are updated in the same branch and pull request as behavior changes.
+- [ ] `CHANGELOG.md` is reviewed for user-visible or material operational changes.
+- [ ] The skill removes, archives, or labels superseded instructions.
+- [ ] The closeout lists documents reviewed, documents changed, and reviewed-no-change rationale.
+- [ ] The closeout identifies documentation claims that remain dependent on CI, devices, hosted services, or protected environments.
+- [ ] The skill does not copy mutable values into prose without a maintenance strategy.
+
 ## Trigger quality
 
 - [ ] Description states both what the skill does and when it applies.
@@ -74,7 +87,7 @@ Inspect every shell, PowerShell, Python, JavaScript, executable, package file, a
 
 ## Output and validation
 
-- [ ] Skill requires scope, changed files, invariants, tests, unexecuted checks, and residual risk in the closeout.
+- [ ] Skill requires scope, changed files, invariants, tests, documentation impact, unexecuted checks, and residual risk in the closeout.
 - [ ] Local, local-service, CI-only, device-only, hosted, and protected validation are distinguished.
 - [ ] It does not claim success for operations it cannot observe.
 - [ ] All referenced paths and commands exist.
