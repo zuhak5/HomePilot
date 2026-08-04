@@ -34,6 +34,22 @@ Use executable sources before prose when they conflict:
 
 Do not copy mutable versions, ports, route lists, permissions, or workflow commands into new files without linking to their authoritative source.
 
+## Mandatory documentation synchronization
+
+Documentation is part of every implementation task. This requirement applies to every AI coding agent, automated agent, bot, reusable Agent Skill, and human contributor working in the repository.
+
+Before editing, read [`docs/governance/documentation-maintenance.md`](docs/governance/documentation-maintenance.md) and perform its documentation-impact assessment. Then:
+
+1. Identify every document affected by the requested behavior, architecture, data, privacy, permission, configuration, test, build, release, or operational change.
+2. Update those documents in the same branch and pull request as the implementation.
+3. Verify documentation claims against code, tests, migrations, workflows, configuration, and generated behavior.
+4. Update `CHANGELOG.md` when the change is user-visible or materially affects compatibility, privacy, security, migrations, releases, or operations.
+5. In the pull-request description and final report, list the documents reviewed and changed.
+6. When no documentation change is required, list the documents reviewed and explain why they remain accurate.
+7. Identify documentation claims that still depend on CI, a physical device, a hosted service, or a protected environment.
+
+Do not defer required documentation to an unspecified follow-up, silently leave stale prose, or declare the task complete while documented behavior disagrees with the repository. A temporary documentation exception requires explicit user approval, a tracked follow-up, and a clear statement of the inconsistency and risk.
+
 ## Non-negotiable safety rules
 
 - Never commit secrets, production configuration, signing material, tokens, private user data, database exports, or service-role credentials.
@@ -50,10 +66,10 @@ Do not copy mutable versions, ports, route lists, permissions, or workflow comma
 
 ### Before editing
 
-1. Read this file and relevant documents in `docs/`.
+1. Read this file, the documentation maintenance policy, and relevant documents in `docs/`.
 2. Inspect repository status and identify unrelated changes.
-3. Locate the implementation, tests, generated files, configuration, migrations, and workflows for the target subsystem.
-4. Identify data-integrity, synchronization, privacy, security, permission, backup, and release implications.
+3. Locate the implementation, tests, generated files, configuration, migrations, workflows, and documentation for the target subsystem.
+4. Identify data-integrity, synchronization, privacy, security, permission, backup, release, and documentation implications.
 5. Choose the smallest complete change.
 
 ### During editing
@@ -65,7 +81,8 @@ Do not copy mutable versions, ports, route lists, permissions, or workflow comma
 - Avoid logging user content, direct identifiers, location, tokens, media paths, or raw requests.
 - Keep server-authoritative decisions on the server.
 - Use additive migrations unless an explicitly approved destructive migration is required.
-- Update documentation when contracts, commands, permissions, data handling, or operations change.
+- Update documentation in the same change when contracts, commands, permissions, data handling, behavior, or operations change.
+- Remove, archive, or clearly label superseded instructions instead of leaving competing current guidance.
 
 ### Before completion
 
@@ -73,8 +90,8 @@ Do not copy mutable versions, ports, route lists, permissions, or workflow comma
 2. Format changed Dart source.
 3. Run focused tests.
 4. Run the broader relevant validation suite.
-5. Inspect the final diff for generated noise, secrets, and unrelated changes.
-6. Report checks executed, checks not executed, and protected validation still required.
+5. Inspect the final diff for generated noise, secrets, unrelated changes, and stale documentation.
+6. Report checks executed, checks not executed, protected validation still required, and documents reviewed or updated.
 
 ## Generated files
 
@@ -143,7 +160,7 @@ Follow `.github/workflows/deploy-download-site.yml` and `docs/versiondeck-releas
 
 ### Documentation
 
-Verify internal links, referenced paths, commands, permissions, and configuration against the repository. Do not present assumptions as implemented behavior.
+Follow `docs/governance/documentation-maintenance.md`. Verify internal links, referenced paths, commands, permissions, configuration, release claims, and privacy statements against the repository. Every final report must state which documents were reviewed or updated. Do not present assumptions as implemented behavior.
 
 ## Flutter and UI rules
 
@@ -259,7 +276,7 @@ Never publish an APK because release notes claim it is valid; verification must 
 
 ## Documentation requirements
 
-Update documentation when changing:
+Follow the complete matrix and exception rules in `docs/governance/documentation-maintenance.md`. At minimum, update documentation when changing:
 
 - Routes, features, architecture, data models, or synchronization contracts.
 - Configuration keys or local ports.
@@ -269,8 +286,9 @@ Update documentation when changing:
 - Monetization or reward authority.
 - Backup format or restore behavior.
 - Build, release, Sentry, VersionDeck, or operational procedures.
+- Agent Skills, agent instructions, validation commands, or contributor workflows.
 
-Prefer stable explanations and links to executable sources over copied mutable values.
+Prefer stable explanations and links to executable sources over copied mutable values. Documentation changes must ship with the behavior they describe.
 
 ## Definition of done
 
@@ -280,7 +298,8 @@ A change is complete only when:
 - Relevant tests are added or updated.
 - Generated files are current.
 - Formatting, analysis, and relevant test suites have passed or failures are disclosed.
-- Data, sync, privacy, security, permissions, backup, and release impacts are reviewed.
-- Documentation is updated.
+- Data, sync, privacy, security, permissions, backup, release, and documentation impacts are reviewed.
+- Affected documentation is updated in the same change, or the reviewed-no-change rationale is recorded.
+- The final report lists documentation reviewed and changed and identifies unverified claims.
 - No secrets or private data are introduced.
 - The final report distinguishes local evidence from CI, device, hosted, and protected-environment validation.
