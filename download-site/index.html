@@ -7,7 +7,7 @@
   <meta name="description" content="VersionDeck is the official download page for independently verified HomePilot Android releases, changelogs, checksums, signing details, and provenance attestations.">
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
   <meta property="og:title" content="VersionDeck — HomePilot Releases">
   <meta property="og:description" content="Download verified HomePilot APK releases and inspect their checksums, signer identity, commit, and build provenance.">
   <meta property="og:type" content="website">
@@ -22,7 +22,9 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="enhancements.css">
   <link rel="stylesheet" href="security.css">
+  <link rel="stylesheet" href="build-status.css">
   <script type="module" src="app.js"></script>
+  <script type="module" src="build-status.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -43,6 +45,7 @@
   </header>
 
   <p id="release-status" class="visually-hidden" role="status" aria-live="polite"></p>
+  <p id="build-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
 
   <div id="stale-banner" class="system-banner stale-banner" hidden>
     <div class="container">
@@ -65,6 +68,52 @@
       <p class="hero-copy">
         Get a verified Android APK, inspect its checksum, production signing identity, release commit, and GitHub build-provenance attestation, or return to an earlier version.
       </p>
+    </section>
+
+    <section id="build-progress-section" class="container build-progress-section" aria-labelledby="build-progress-heading" hidden>
+      <div class="build-progress-card">
+        <div class="build-progress-header">
+          <div>
+            <p class="section-label">Live production build</p>
+            <h2 id="build-progress-heading">Building the next HomePilot APK</h2>
+          </div>
+          <a id="build-progress-run-link" class="build-progress-run-link" href="https://github.com/zuhak5/HomePilot/actions/workflows/build-production-android.yml" target="_blank" rel="noopener noreferrer">View workflow run</a>
+        </div>
+
+        <div class="build-progress-live">
+          <span class="build-progress-motion" aria-hidden="true"></span>
+          <div>
+            <span id="build-progress-status-label" class="build-progress-status-label">Production build in progress</span>
+            <strong id="build-progress-step" class="build-progress-step">Preparing production build</strong>
+          </div>
+        </div>
+
+        <div id="build-progress-track" class="build-progress-track" role="progressbar" aria-label="Production build progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Preparing step list">
+          <span id="build-progress-bar" class="build-progress-bar"></span>
+        </div>
+
+        <div class="build-progress-metrics">
+          <div class="build-progress-metric">
+            <span>Progress</span>
+            <strong id="build-progress-summary">Preparing step list</strong>
+          </div>
+          <div class="build-progress-metric">
+            <span>Estimated time left</span>
+            <strong id="build-progress-eta">Calculating…</strong>
+            <small id="build-progress-basis">Estimate becomes more accurate after successful builds</small>
+          </div>
+        </div>
+
+        <div class="build-progress-actions">
+          <button id="build-progress-alerts" class="build-progress-alerts" type="button" aria-pressed="false">Enable spoken alerts</button>
+          <span class="build-progress-privacy">Visual and screen-reader alerts are automatic. Speech and desktop notifications are opt-in.</span>
+        </div>
+
+        <details class="build-progress-details">
+          <summary>View build steps</summary>
+          <ol id="build-progress-step-list" class="build-progress-step-list"></ol>
+        </details>
+      </div>
     </section>
 
     <noscript>
@@ -173,5 +222,6 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="build-toast" class="build-toast" aria-hidden="true"></div>
 </body>
 </html>
