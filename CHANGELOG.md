@@ -2,18 +2,35 @@
 
 HomePilot uses Git history, pull requests, and GitHub Releases as the authoritative record of shipped changes. This file records notable project-level changes that affect users, operators, contributors, architecture, security, or compatibility.
 
-The current application version is defined only in `pubspec.yaml`; do not duplicate it here as a mutable heading.
+The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
 ## Unreleased
 
-### Added
+No unreleased changes are currently recorded.
 
-- Reconstructed project documentation covering product behavior, architecture, synchronization, development, privacy, testing, releases, Sentry, VersionDeck, and agent workflows.
+## 1.3.8 (Build 23) — 2026-08-04
+
+### Improved
+
+- Improved the VersionDeck live production-build experience on mobile devices.
+- Grouped technical build steps into clearer, easier-to-read phases.
+- Improved progress, ETA, freshness, and target-version information.
+- Refined the build timeline with consistent completed, active, and upcoming states.
+- Clearly separated the current stable APK from a newer build that is still in progress.
+- Improved long-text wrapping, narrow-screen layouts, scrolling, accessibility, and reduced-motion support.
+
+### Maintenance
+
+- Reconstructed project documentation covering product behavior, architecture, synchronization, authentication, account deletion, monetization, backup and restore, Supabase, Sentry, testing, localization, privacy, releases, VersionDeck, and agent workflows.
 - Added repository-level contribution, security, privacy, and agent operating policies.
-
-### Changed
-
+- Added operational runbooks and architecture decision records for release verification, observability, and offline-first synchronization.
 - Aligned the development Supabase example URL with the local API port declared in `supabase/config.toml`.
+
+### Compatibility
+
+- No database migration is required.
+- No user action is required.
+- Existing local data, accounts, settings, backups, and synchronization state remain compatible.
 
 ## Historical releases
 
