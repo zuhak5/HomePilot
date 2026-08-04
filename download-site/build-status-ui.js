@@ -67,7 +67,7 @@ export function parsePubspecVersion(text) {
 }
 
 export function shouldShowStarting(summary, percentText) {
-  return /^Step 1 of \d+$/i.test(cleanText(summary)) && cleanText(percentText) === "0%";
+  return /^Step 1 of \d+$/i.test(cleanText(summary)) && ["0%", "Starting"].includes(cleanText(percentText));
 }
 
 function safeSessionStorage() {
@@ -208,9 +208,7 @@ function initializeBuildStatusUi() {
         targetBuild = target;
         scheduleEnhancement();
       })
-      .catch(() => {
-        targetPromise = null;
-      });
+      .catch(() => null);
   }
 
   function regroupTechnicalSteps() {
@@ -232,9 +230,8 @@ function initializeBuildStatusUi() {
   }
 
   function updateDisclosureLabel() {
-    detailsSummary.textContent = details.open
-      ? "Hide technical workflow"
-      : "Show technical workflow";
+    const label = details.open ? "Hide technical workflow" : "Show technical workflow";
+    if (detailsSummary.textContent !== label) detailsSummary.textContent = label;
   }
 
   function enhance() {
@@ -262,7 +259,8 @@ function initializeBuildStatusUi() {
         target.className = "build-progress-target";
         heading.insertAdjacentElement("afterend", target);
       }
-      target.textContent = `Build ${targetBuild.build} · Production APK`;
+      const targetText = `Build ${targetBuild.build} · Production APK`;
+      if (target.textContent !== targetText) target.textContent = targetText;
       if (stickyLabel) {
         stickyLabel.textContent = `Current stable APK · ${targetBuild.version} building`;
       }
@@ -275,7 +273,10 @@ function initializeBuildStatusUi() {
     if (starting) {
       progressPercent.textContent = "Starting";
       progressTrack.removeAttribute("aria-valuenow");
-      progressTrack.setAttribute("aria-valuetext", `${cleanText(progressSummary.textContent)}. Starting.`);
+      const progressText = `${cleanText(progressSummary.textContent)}. Starting.`;
+      if (progressTrack.getAttribute("aria-valuetext") !== progressText) {
+        progressTrack.setAttribute("aria-valuetext", progressText);
+      }
     }
 
     regroupTechnicalSteps();
