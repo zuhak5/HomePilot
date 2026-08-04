@@ -241,6 +241,8 @@ test("deployment workflow always checks out main and handles withdrawal", async 
   );
   assert.match(workflow, /ref:\s*refs\/heads\/main/);
   assert.match(workflow, /- unpublished/);
-  assert.match(workflow, /jobs:\s*\n\s*build:/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /jobs:\s*\n\s*verify-pr:/);
+  assert.match(workflow, /\n  build:[\s\S]*?if: github\.event_name != 'pull_request'/);
   assert.match(workflow, /\n  deploy:[\s\S]*?\n    needs:\s*build/);
 });
