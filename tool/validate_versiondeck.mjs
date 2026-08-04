@@ -14,8 +14,10 @@ const requiredFiles = [
   "enhancements.css",
   "security.css",
   "build-status.css",
+  "build-status-ui.css",
   "app.js",
   "build-status.js",
+  "build-status-ui.js",
   "manifest-schema.js",
   "cache-policy.js",
   "relative-time.js",
@@ -66,6 +68,12 @@ if (!/type="module"\s+src="build-status\.js\?v=[a-z\d-]+"/i.test(html)) {
 if (!/rel="stylesheet"\s+href="build-status\.css\?v=[a-z\d-]+"/i.test(html)) {
   throw new Error("index.html must load a versioned build-status.css asset.");
 }
+if (!/type="module"\s+src="build-status-ui\.js\?v=[a-z\d-]+"/i.test(html)) {
+  throw new Error("index.html must load a versioned build-status-ui.js asset.");
+}
+if (!/rel="stylesheet"\s+href="build-status-ui\.css\?v=[a-z\d-]+"/i.test(html)) {
+  throw new Error("index.html must load a versioned build-status-ui.css asset.");
+}
 if (/<script(?![^>]*\bsrc=)/i.test(html)) throw new Error("Inline scripts are not allowed.");
 if (/<style\b/i.test(html)) throw new Error("Inline styles are not allowed.");
 if (/\son[a-z]+\s*=/i.test(html)) throw new Error("Inline event handlers are not allowed.");
@@ -82,6 +90,18 @@ for (const directive of [
   "form-action 'none'",
 ]) {
   if (!html.includes(directive)) throw new Error(`Content Security Policy is missing ${directive}`);
+}
+
+const buildStatusUiCss = await fs.readFile(path.join(site, "build-status-ui.css"), "utf8");
+for (const marker of [
+  "overflow-wrap: anywhere",
+  ".build-phase-details",
+  "max-height: none",
+  ".build-progress-track.is-indeterminate",
+]) {
+  if (!buildStatusUiCss.includes(marker)) {
+    throw new Error(`build-status-ui.css is missing ${marker}`);
+  }
 }
 
 const webManifest = JSON.parse(await fs.readFile(path.join(site, "manifest.webmanifest"), "utf8"));
@@ -115,7 +135,12 @@ if (!appShellMatch) throw new Error("Service-worker app shell is missing.");
 if (appShellMatch[1].includes("releases.json")) {
   throw new Error("releases.json must not be included in the service-worker app shell.");
 }
-for (const asset of ["build-status.js", "build-status.css"]) {
+for (const asset of [
+  "build-status.js",
+  "build-status.css",
+  "build-status-ui.js",
+  "build-status-ui.css",
+]) {
   if (!appShellMatch[1].includes(asset)) {
     throw new Error(`Service-worker app shell is missing ${asset}.`);
   }
