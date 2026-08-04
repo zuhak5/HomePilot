@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <meta name="description" content="VersionDeck is the official download page for verified HomePilot Android releases, changelogs, checksums, and signing details.">
+  <meta name="description" content="VersionDeck is the official download page for independently verified HomePilot Android releases, changelogs, checksums, signing details, and provenance attestations.">
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
   <meta property="og:title" content="VersionDeck — HomePilot Releases">
-  <meta property="og:description" content="Download the latest verified HomePilot APK and review previous versions.">
+  <meta property="og:description" content="Download verified HomePilot APK releases and inspect their checksums, signer identity, commit, and build provenance.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://zuhak5.github.io/HomePilot/">
   <meta property="og:image" content="https://zuhak5.github.io/HomePilot/assets/versiondeck-512.png">
@@ -21,6 +21,7 @@
   <link rel="apple-touch-icon" href="assets/versiondeck-192.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="enhancements.css">
+  <link rel="stylesheet" href="security.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -62,9 +63,17 @@
       <p class="kicker">Official HomePilot releases</p>
       <h1>Download HomePilot.</h1>
       <p class="hero-copy">
-        Get the latest verified Android APK, inspect its signing identity and checksum, or return to an earlier version.
+        Get a verified Android APK, inspect its checksum, production signing identity, release commit, and GitHub build-provenance attestation, or return to an earlier version.
       </p>
     </section>
+
+    <noscript>
+      <section class="container no-script-note">
+        <h2>JavaScript is required for verified release data</h2>
+        <p>VersionDeck validates its generated release manifest in your browser. You can still inspect HomePilot releases directly on GitHub.</p>
+        <a href="https://github.com/zuhak5/HomePilot/releases" rel="noopener noreferrer">Open GitHub Releases</a>
+      </section>
+    </noscript>
 
     <section class="container latest-section" aria-labelledby="latest-heading">
       <div class="section-header">
@@ -73,7 +82,7 @@
           <h2 id="latest-heading">Latest stable release</h2>
         </div>
 
-        <button id="refresh-button" class="refresh-button" type="button" aria-label="Refresh releases">
+        <button id="refresh-button" class="refresh-button" type="button" aria-label="Refresh verified releases">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 11a8 8 0 0 0-14.9-3M4 4v5h5M4 13a8 8 0 0 0 14.9 3M20 20v-5h-5"/>
           </svg>
@@ -114,7 +123,7 @@
     <aside class="container verification-note">
       <div>
         <strong>Verify before installing</strong>
-        <p>SHA-256 verifies the downloaded file. The Android signing-certificate fingerprint verifies continuity with the expected HomePilot production key.</p>
+        <p>VersionDeck independently checks the APK hash, Android package metadata, production signer, release commit, and GitHub build-provenance attestation before enabling a download.</p>
       </div>
       <a href="https://github.com/zuhak5/HomePilot/releases" target="_blank" rel="noopener noreferrer">View on GitHub</a>
     </aside>
@@ -122,7 +131,7 @@
 
   <footer class="footer">
     <div class="container footer-inner">
-      <p><strong>VersionDeck</strong> · HomePilot releases and downloads</p>
+      <p><strong>VersionDeck</strong> · HomePilot releases and verified downloads</p>
       <p>APK files are distributed through GitHub Releases.</p>
     </div>
   </footer>
@@ -150,7 +159,7 @@
 
         <div class="release-row-actions">
           <a class="archive-download button button-secondary" href="./">Download</a>
-          <button class="details-toggle text-button" type="button" aria-expanded="false">Changes</button>
+          <button class="details-toggle text-button" type="button" aria-expanded="false">Show changes</button>
         </div>
       </div>
 
