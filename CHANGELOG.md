@@ -6,11 +6,25 @@ The current application version is defined only in `pubspec.yaml`. Released vers
 
 ## Unreleased
 
-### Changed
+No unreleased changes are currently recorded.
 
-- Added a mandatory documentation-maintenance policy for humans, AI agents, bots, and Agent Skills.
-- Required every change and pull request to report documentation impact, update affected documents in the same branch, and identify any unverified documentation claims.
-- Added a pull-request template with documentation, validation, privacy, synchronization, and release-impact checks.
+## 1.3.9 (Build 24) — 2026-08-05
+
+### Maintenance and governance
+
+- Added a mandatory documentation-maintenance policy for humans, AI coding agents, automated agents, bots, and reusable Agent Skills.
+- Required documentation-impact review and same-pull-request documentation updates for every repository change.
+- Added a subsystem-to-document impact matrix covering application behavior, architecture, data, synchronization, Supabase, authentication, monetization, backups, permissions, observability, releases, VersionDeck, localization, testing, and agent workflows.
+- Added a pull-request template requiring documentation, validation, privacy, synchronization, permission, compatibility, and release-impact reporting.
+- Updated repository agent instructions, contributor guidance, documentation governance, and Agent Skill audit/update procedures.
+
+### Compatibility
+
+- No application runtime behavior changed.
+- No database migration is required.
+- No permissions, synchronization protocol, backup format, privacy behavior, or account behavior changed.
+- No user action is required.
+- Existing local data, accounts, settings, backups, and synchronization state remain compatible.
 
 ## 1.3.8 (Build 23) — 2026-08-04
 
