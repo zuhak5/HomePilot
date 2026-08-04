@@ -34,6 +34,11 @@ This directory is the canonical entry point for product, architecture, developme
 - [`reference/configuration.md`](reference/configuration.md): configuration sources and secret handling.
 - [`reference/routes-and-permissions.md`](reference/routes-and-permissions.md): application routes and Android permissions.
 
+## Governance
+
+- [`governance/documentation-maintenance.md`](governance/documentation-maintenance.md): mandatory same-change documentation policy for humans, AI agents, bots, and Agent Skills.
+- [`governance/license-decision.md`](governance/license-decision.md): current licensing decision status.
+
 ## Decisions
 
 - [`adr/0001-offline-first-sync.md`](adr/0001-offline-first-sync.md)
@@ -52,6 +57,8 @@ This directory is the canonical entry point for product, architecture, developme
 - Implementation, tests, migrations, workflows, and configuration remain executable sources of truth.
 - Link to mutable values instead of duplicating them where practical.
 - Update documents in the same change as the behavior they describe.
+- Every AI agent, bot, and automated contributor must perform and report a documentation-impact review under [`governance/documentation-maintenance.md`](governance/documentation-maintenance.md).
+- When no documentation change is required, state which documents were reviewed and why they remain accurate.
 - Mark planned behavior clearly; do not present a roadmap item as implemented.
 - Archive superseded design plans under `docs/history/` instead of leaving conflicting operational instructions.
 - Validate paths and commands before merging documentation changes.
