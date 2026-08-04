@@ -8,6 +8,7 @@ on:
       - "download-site/**"
       - "tool/build_versiondeck_site.mjs"
       - "tool/generate_versiondeck_manifest.mjs"
+      - "tool/versiondeck_apk_verifier.mjs"
       - "tool/versiondeck.test.mjs"
       - "tool/validate_versiondeck.mjs"
       - "docs/versiondeck-release-runbook.md"
@@ -83,6 +84,7 @@ jobs:
           node --check download-site/sw.js
           node --check tool/build_versiondeck_site.mjs
           node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/versiondeck_apk_verifier.mjs
           node --check tool/validate_versiondeck.mjs
           node --check tool/versiondeck.test.mjs
 
