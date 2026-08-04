@@ -1,0 +1,48 @@
+[data-download-link][aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.verification-checks {
+  margin: 0 0 16px;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.verification-checks li + li {
+  margin-top: 5px;
+}
+
+.verification-checks li::marker {
+  color: var(--success);
+}
+
+.no-script-note {
+  margin-block: 24px 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 24px;
+  background: var(--surface);
+}
+
+.no-script-note h2 {
+  font-size: 1.25rem;
+}
+
+.no-script-note p {
+  margin: 8px 0 12px;
+  color: var(--muted);
+}
+
+.no-script-note a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.update-banner button:disabled,
+.refresh-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
