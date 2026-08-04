@@ -1,6 +1,18 @@
 name: Deploy VersionDeck
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "download-site/**"
+      - "tool/build_versiondeck_site.mjs"
+      - "tool/generate_versiondeck_manifest.mjs"
+      - "tool/versiondeck_apk_verifier.mjs"
+      - "tool/versiondeck.test.mjs"
+      - "tool/validate_versiondeck.mjs"
+      - "docs/versiondeck-release-runbook.md"
+      - ".github/workflows/deploy-download-site.yml"
   push:
     branches:
       - main
@@ -24,16 +36,62 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: github-pages
+  group: versiondeck-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
   cancel-in-progress: true
 
 jobs:
+  verify-pr:
+    name: Validate VersionDeck changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check download-site/app.js
+          node --check download-site/cache-policy.js
+          node --check download-site/manifest-schema.js
+          node --check download-site/relative-time.js
+          node --check download-site/sw.js
+          node --check tool/build_versiondeck_site.mjs
+          node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/versiondeck_apk_verifier.mjs
+          node --check tool/validate_versiondeck.mjs
+          node --check tool/versiondeck.test.mjs
+
+      - name: Run VersionDeck tests
+        run: node --test tool/versiondeck.test.mjs
+
+      - name: Build and validate static pull-request artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(node -p "require('./download-site/releases.json').generatorCommit")"
+          node tool/build_versiondeck_site.mjs \
+            --source download-site \
+            --output .versiondeck-site \
+            --revision "$revision"
+          node tool/validate_versiondeck.mjs .versiondeck-site
+
   build:
     name: Verify and build VersionDeck
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+      attestations: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
 
@@ -143,6 +201,7 @@ jobs:
 
   deploy:
     name: Publish VersionDeck
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
