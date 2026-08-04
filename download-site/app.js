@@ -3,350 +3,287 @@ import {
   formatExactDateTime,
   updateRelativeTimeElements,
 } from "./relative-time.js";
+import {
+  VERSIONDECK_REPOSITORY,
+  validateVersionDeckManifest,
+} from "./manifest-schema.js";
+import {
+  RELEASE_CACHE_SCHEMA_VERSION,
+  ReleaseCacheState,
+  classifyReleaseCache,
+} from "./cache-policy.js";
 
 const MANIFEST_URL = "./releases.json";
-const CACHE_KEY = "versiondeck-release-manifest-v3";
-const CACHE_FRESH_MS = 6 * 60 * 60 * 1000;
-const CACHE_MAX_MS = 24 * 60 * 60 * 1000;
+const CACHE_KEY = "versiondeck-release-manifest-v4";
+const LEGACY_CACHE_KEYS = [1, 2, 3].map((version) =>
+  `versiondeck-release-manifest-v${version}`);
 const REQUEST_TIMEOUT_MS = 12_000;
-const EXPECTED_SCHEMA_VERSION = 1;
-const EXPECTED_REPOSITORY = "zuhak5/HomePilot";
-const ALLOWED_DOWNLOAD_HOSTS = new Set([
-  "github.com",
-  "objects.githubusercontent.com",
-  "release-assets.githubusercontent.com",
-]);
-
 const numberFormat = new Intl.NumberFormat();
 
-const latestCard = document.querySelector("#latest-card");
-const releaseList = document.querySelector("#release-list");
-const releaseCount = document.querySelector("#release-count");
-const releaseTemplate = document.querySelector("#release-template");
-const refreshButton = document.querySelector("#refresh-button");
-const stickyDownload = document.querySelector("#sticky-download");
-const stickyVersion = document.querySelector("#sticky-version");
-const stickyDownloadLink = document.querySelector("#sticky-download-link");
-const installButtons = document.querySelectorAll(".install-button");
-const toast = document.querySelector("#toast");
-const releaseStatus = document.querySelector("#release-status");
-const staleBanner = document.querySelector("#stale-banner");
-const staleBannerText = document.querySelector("#stale-banner-text");
-const updateNotice = document.querySelector("#update-notice");
-const updateButton = document.querySelector("#update-button");
+function q(selector) {
+  const node = document.querySelector(selector);
+  if (!node) throw new Error(`Missing VersionDeck element: ${selector}`);
+  return node;
+}
+
+function el(tag, text = "", className = "") {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+const ui = {
+  latest: q("#latest-card"),
+  list: q("#release-list"),
+  count: q("#release-count"),
+  template: q("#release-template"),
+  refresh: q("#refresh-button"),
+  sticky: q("#sticky-download"),
+  stickyVersion: q("#sticky-version"),
+  stickyLink: q("#sticky-download-link"),
+  toast: q("#toast"),
+  status: q("#release-status"),
+  cacheBanner: q("#stale-banner"),
+  cacheText: q("#stale-banner-text"),
+  updateNotice: q("#update-notice"),
+  updateButton: q("#update-button"),
+};
 
 let deferredInstallPrompt = null;
+let waitingWorker = null;
+let activeController = null;
+let generation = 0;
 let toastTimer = null;
-let relativeTimeTimer = null;
-let activeRequestController = null;
-let waitingServiceWorker = null;
-let requestGeneration = 0;
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "Unknown size";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("visible");
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 2600);
-}
+let relativeTimer = null;
+let controllerReloaded = false;
 
 function announce(message) {
-  releaseStatus.textContent = "";
-  window.requestAnimationFrame(() => {
-    releaseStatus.textContent = message;
-  });
+  ui.status.textContent = "";
+  requestAnimationFrame(() => { ui.status.textContent = message; });
 }
 
-function safeUrl(value, allowedHosts = ALLOWED_DOWNLOAD_HOSTS) {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" || !allowedHosts.has(url.hostname)) return "";
-    return url.href;
-  } catch {
-    return "";
-  }
+function toast(message) {
+  ui.toast.textContent = message;
+  ui.toast.classList.add("visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ui.toast.classList.remove("visible"), 2600);
 }
 
-function validateSha256(value) {
-  return typeof value === "string" && /^[a-f\d]{64}$/i.test(value);
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 1) return "Unknown size";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3);
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
-function validateManifest(manifest) {
-  const errors = [];
-  if (!manifest || typeof manifest !== "object") return ["Manifest is not an object."];
-  if (manifest.schemaVersion !== EXPECTED_SCHEMA_VERSION) {
-    errors.push("Unsupported release manifest schema.");
-  }
-  if (manifest.repository !== EXPECTED_REPOSITORY) {
-    errors.push("Unexpected release repository.");
-  }
-  if (!Number.isFinite(Date.parse(manifest.generatedAt))) {
-    errors.push("Manifest generation time is invalid.");
-  }
-  if (!Array.isArray(manifest.releases)) errors.push("Release list is missing.");
-  if (manifest.productionSigner?.packageName !== "com.homepilot.app") {
-    errors.push("Unexpected production package identity.");
-  }
-  if (!/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/i.test(
-    manifest.productionSigner?.certificateSha256 || "",
-  )) {
-    errors.push("Production signer fingerprint is invalid.");
-  }
-
-  const ids = new Set();
-  for (const release of manifest.releases || []) {
-    if (!Number.isInteger(release.id) || ids.has(release.id)) {
-      errors.push("Release IDs are missing or duplicated.");
-      continue;
-    }
-    ids.add(release.id);
-    if (!/^\d+\.\d+\.\d+$/.test(release.version || "")) {
-      errors.push(`Release ${release.id} has an invalid version.`);
-    }
-    if (!Number.isInteger(release.build) || release.build < 1) {
-      errors.push(`Release ${release.id} has an invalid build number.`);
-    }
-    if (!Number.isFinite(Date.parse(release.publishedAt))) {
-      errors.push(`Release ${release.id} has an invalid publication time.`);
-    }
-    if (
-      !safeUrl(release.apk?.url) ||
-      !safeUrl(release.checksum?.url) ||
-      !safeUrl(release.releaseUrl, new Set(["github.com"]))
-    ) {
-      errors.push(`Release ${release.id} has an invalid URL.`);
-    }
-    if (!validateSha256(release.apk?.sha256)) {
-      errors.push(`Release ${release.id} has an invalid SHA-256.`);
-    }
-  }
-
-  if (
-    manifest.latestStableReleaseId !== null &&
-    !manifest.releases?.some(
-      (release) =>
-        release.id === manifest.latestStableReleaseId && !release.prerelease,
-    )
-  ) {
-    errors.push("Latest stable release does not reference an eligible stable release.");
-  }
-
-  return errors;
-}
-
-function resetReleaseUi() {
-  stickyDownload.hidden = true;
-  stickyDownloadLink.removeAttribute("href");
-  stickyVersion.textContent = "HomePilot";
-  document.body.classList.remove("has-sticky-download");
-  staleBanner.hidden = true;
-  latestCard.classList.remove("loading-card");
-  latestCard.setAttribute("aria-busy", "false");
-  latestCard.replaceChildren();
-  releaseList.replaceChildren();
-  releaseCount.textContent = "";
-}
-
-function createTextElement(tagName, text, className = "") {
-  const element = document.createElement(tagName);
-  element.textContent = text;
-  if (className) element.className = className;
-  return element;
-}
-
-function createExternalLink(label, href, className = "") {
-  const link = document.createElement("a");
-  link.textContent = label;
+function controlledLink(label, href, className = "", external = false) {
+  const link = el("a", label, className);
+  link.dataset.downloadLink = "true";
+  link.dataset.downloadHref = href;
   link.href = href;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  if (className) link.className = className;
+  if (external) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
   return link;
 }
 
-async function copyText(text, successMessage) {
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast(successMessage);
-  } catch {
-    showToast("Copy failed. Open the verification details to select the value.");
+function externalLink(label, href, className = "") {
+  const link = el("a", label, className);
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
+
+function setDownloadsEnabled(enabled) {
+  document.querySelectorAll("[data-download-link]").forEach((link) => {
+    if (enabled && link.dataset.downloadHref) {
+      link.href = link.dataset.downloadHref;
+      link.removeAttribute("aria-disabled");
+      link.removeAttribute("tabindex");
+      link.removeAttribute("title");
+    } else {
+      link.removeAttribute("href");
+      link.setAttribute("aria-disabled", "true");
+      link.setAttribute("tabindex", "-1");
+      link.title = "Reconnect and refresh verified release data before downloading.";
+    }
+  });
+  if (!enabled) {
+    ui.sticky.hidden = true;
+    document.body.classList.remove("has-sticky-download");
   }
 }
 
-function createCopyRow(label, value) {
-  const row = document.createElement("div");
-  row.className = "verification-row";
-  const content = document.createElement("div");
+async function copyValue(button, value, message) {
+  try {
+    await navigator.clipboard.writeText(value);
+    const original = button.textContent;
+    button.textContent = "Copied";
+    setTimeout(() => { button.textContent = original; }, 1400);
+    toast(message);
+  } catch {
+    toast("Copy failed. Select the value from the verification details.");
+  }
+}
+
+function copyRow(label, value, context) {
+  const row = el("div", "", "verification-row");
+  const content = el("div");
   content.append(
-    createTextElement("span", label, "verification-label"),
-    createTextElement("code", value, "verification-value"),
+    el("span", label, "verification-label"),
+    el("code", value, "verification-value"),
   );
-  const button = createTextElement("button", "Copy", "copy-button");
+  const button = el("button", "Copy", "copy-button");
   button.type = "button";
-  button.addEventListener("click", () => copyText(value, `${label} copied`));
+  button.setAttribute("aria-label", `Copy ${label} for ${context}`);
+  button.addEventListener("click", () => copyValue(button, value, `${label} copied`));
   row.append(content, button);
   return row;
 }
 
-function renderVerificationPanel(container, release, signer) {
-  const details = document.createElement("details");
-  details.className = "verification-details";
-  const summary = createTextElement("summary", "Verify this download");
-  const explanation = createTextElement(
-    "p",
-    "SHA-256 verifies file integrity. The Android signer certificate verifies continuity with the expected HomePilot production signing key.",
-    "verification-explanation",
-  );
-  details.append(summary, explanation);
+function verificationPanel(release) {
+  const details = el("details", "", "verification-details");
   details.append(
-    createCopyRow("APK SHA-256", release.apk.sha256),
-    createCopyRow("Signer certificate SHA-256", signer.certificateSha256),
+    el("summary", "Verified release details"),
+    el(
+      "p",
+      "VersionDeck independently checked the APK hash, package identity, production signer, release commit, and GitHub provenance attestation.",
+      "verification-explanation",
+    ),
   );
-  if (release.commitSha) details.append(createCopyRow("Release commit", release.commitSha));
+  const checks = el("ul", "", "verification-checks");
+  [
+    "APK hash matches GitHub and the checksum asset",
+    "Package, version, and build match the release",
+    "Production signing certificate matches",
+    "Release commit is contained in main",
+    "GitHub build-provenance attestation verifies",
+  ].forEach((text) => checks.append(el("li", text)));
+  details.append(checks);
 
-  const commands = document.createElement("div");
-  commands.className = "verification-commands";
-  commands.append(createTextElement("strong", "Verification commands"));
-  const commandList = [
+  const context = `HomePilot ${release.version}`;
+  details.append(
+    copyRow("APK SHA-256", release.apk.sha256, context),
+    copyRow("Signer certificate SHA-256", release.verification.signerCertificateSha256, context),
+    copyRow("Release commit", release.commitSha, context),
+  );
+  const commands = el("div", "", "verification-commands");
+  commands.append(el("strong", "Independent verification commands"));
+  [
     `Get-FileHash .\\${release.apk.name} -Algorithm SHA256`,
     `sha256sum ${release.apk.name}`,
     `shasum -a 256 ${release.apk.name}`,
-  ];
-  if (release.attestation?.available) {
-    commandList.push(
-      `gh attestation verify ${release.apk.name} --repo ${release.attestation.verificationRepository || EXPECTED_REPOSITORY}`,
-    );
-  }
-  for (const command of commandList) {
-    const pre = document.createElement("pre");
-    pre.textContent = command;
-    commands.append(pre);
-  }
+    `gh attestation verify ${release.apk.name} --repo ${VERSIONDECK_REPOSITORY}`,
+  ].forEach((command) => commands.append(el("pre", command)));
   details.append(commands);
-  container.append(details);
+  return details;
 }
 
 function addFact(list, label, value) {
-  const wrapper = document.createElement("div");
-  wrapper.append(
-    createTextElement("dt", label),
-    createTextElement("dd", value),
-  );
+  const wrapper = el("div");
+  wrapper.append(el("dt", label), el("dd", value));
   list.append(wrapper);
 }
 
-function renderLatest(release, signer) {
-  const layout = document.createElement("div");
-  layout.className = "latest-layout";
-  const content = document.createElement("div");
-  const status = document.createElement("div");
-  status.className = "latest-status";
+function renderLatest(release) {
+  const layout = el("div", "", "latest-layout");
+  const content = el("div");
+  const status = el("div", "", "latest-status");
   status.append(
-    createTextElement(
-      "span",
-      release.prerelease ? "Pre-release" : "Latest stable",
-      `status-pill ${release.prerelease ? "status-prerelease" : "status-stable"}`,
-    ),
+    el("span", "Latest stable", "status-pill status-stable"),
     createRelativeTimeElement(release.publishedAt, {
       prefix: "Published ",
       className: "latest-date",
     }),
   );
-
-  const title = createTextElement("h3", `HomePilot ${release.version}`, "latest-title");
-  const summary = createTextElement("p", release.summary, "latest-summary");
-  const facts = document.createElement("dl");
-  facts.className = "fact-list";
+  const facts = el("dl", "", "fact-list");
   addFact(facts, "Build", numberFormat.format(release.build));
   addFact(facts, "APK size", formatBytes(release.apk.size));
-  addFact(facts, "Downloads", numberFormat.format(release.apk.downloadCount || 0));
+  addFact(facts, "Downloads", numberFormat.format(release.apk.downloadCount));
 
-  const checksum = document.createElement("div");
-  checksum.className = "checksum";
-  const checksumCode = createTextElement("code", `SHA-256 ${release.apk.sha256}`);
-  checksumCode.title = release.apk.sha256;
-  const checksumCopy = createTextElement("button", "Copy", "copy-button");
-  checksumCopy.type = "button";
-  checksumCopy.addEventListener("click", () => copyText(release.apk.sha256, "APK SHA-256 copied"));
-  checksum.append(checksumCode, checksumCopy);
+  const checksum = el("div", "", "checksum");
+  const code = el("code", `SHA-256 ${release.apk.sha256}`);
+  code.title = release.apk.sha256;
+  const copy = el("button", "Copy", "copy-button");
+  copy.type = "button";
+  copy.addEventListener("click", () => copyValue(copy, release.apk.sha256, "APK SHA-256 copied"));
+  checksum.append(code, copy);
 
-  const exactDate = createTextElement(
-    "p",
-    `Exact publication time: ${formatExactDateTime(release.publishedAt)}`,
-    "exact-date",
+  content.append(
+    status,
+    el("h3", `HomePilot ${release.version}`, "latest-title"),
+    el("p", release.summary, "latest-summary"),
+    facts,
+    checksum,
+    el("p", `Exact publication time: ${formatExactDateTime(release.publishedAt)}`, "exact-date"),
+    verificationPanel(release),
   );
-
-  content.append(status, title, summary, facts, checksum, exactDate);
-  renderVerificationPanel(content, release, signer);
-
-  const actions = document.createElement("div");
-  actions.className = "latest-actions";
-  const download = createExternalLink("Download latest APK", release.apk.url, "button button-primary");
-  download.removeAttribute("target");
-  download.removeAttribute("rel");
+  const actions = el("div", "", "latest-actions");
   actions.append(
-    download,
-    createExternalLink("Release notes", release.releaseUrl, "button button-secondary"),
-    createExternalLink("Checksum file", release.checksum.url, "button button-secondary"),
+    controlledLink("Download verified APK", release.apk.url, "button button-primary"),
+    externalLink("Release notes", release.releaseUrl, "button button-secondary"),
+    controlledLink("Checksum file", release.checksum.url, "button button-secondary", true),
   );
-
   layout.append(content, actions);
-  latestCard.append(layout);
+  ui.latest.append(layout);
 
-  stickyVersion.textContent = `HomePilot ${release.version}`;
-  stickyDownloadLink.href = release.apk.url;
-  stickyDownload.hidden = false;
+  ui.stickyVersion.textContent = `HomePilot ${release.version}`;
+  ui.stickyLink.dataset.downloadLink = "true";
+  ui.stickyLink.dataset.downloadHref = release.apk.url;
+  ui.stickyLink.href = release.apk.url;
+  ui.sticky.hidden = false;
   document.body.classList.add("has-sticky-download");
 }
 
-function renderChangelog(container, release) {
-  if (!release.changelog?.length) {
-    container.append(createTextElement("p", "No changelog was supplied."));
+function renderLatestEmpty(hasPrereleases) {
+  const state = el("div", "", "empty-state");
+  state.append(
+    el("h3", "No verified stable release is available yet"),
+    el("p", hasPrereleases
+      ? "Verified prereleases are listed below, but VersionDeck does not present them as stable downloads."
+      : "VersionDeck is waiting for the first verified stable HomePilot release."),
+  );
+  ui.latest.append(state);
+}
+
+function renderArchive(releases, latestStableId) {
+  ui.count.textContent = `${numberFormat.format(releases.length)} ${
+    releases.length === 1 ? "version" : "versions"}`;
+  if (!releases.length) {
+    const state = el("div", "", "empty-state");
+    state.append(
+      el("h3", "No verified versions are available"),
+      el("p", "Published APKs appear here only after all verification gates pass."),
+    );
+    ui.list.append(state);
     return;
   }
-  const list = document.createElement("ul");
-  for (const item of release.changelog) list.append(createTextElement("li", item));
-  container.append(list);
-}
-
-function appendMetadataPart(meta, node) {
-  if (meta.childNodes.length) meta.append(document.createTextNode(" · "));
-  meta.append(node);
-}
-
-function renderArchive(releases, signer, latestStableId) {
-  releaseCount.textContent = `${numberFormat.format(releases.length)} ${
-    releases.length === 1 ? "version" : "versions"
-  }`;
 
   releases.forEach((release) => {
-    const fragment = releaseTemplate.content.cloneNode(true);
-    const card = fragment.querySelector(".release-card");
-    const title = fragment.querySelector(".release-title");
-    const label = fragment.querySelector(".release-label");
-    const meta = fragment.querySelector(".release-meta");
-    const download = fragment.querySelector(".archive-download");
-    const toggle = fragment.querySelector(".details-toggle");
-    const details = fragment.querySelector(".release-details");
-    const changelog = fragment.querySelector(".changelog");
-    const links = fragment.querySelector(".release-links");
-    const exactDate = fragment.querySelector(".archive-exact-date");
-    const verification = fragment.querySelector(".archive-verification");
+    const fragment = ui.template.content.cloneNode(true);
+    const get = (selector) => {
+      const node = fragment.querySelector(selector);
+      if (!node) throw new Error(`Incomplete release template: ${selector}`);
+      return node;
+    };
+    const card = get(".release-card");
+    const title = get(".release-title");
+    const label = get(".release-label");
+    const meta = get(".release-meta");
+    const download = get(".archive-download");
+    const toggle = get(".details-toggle");
+    const details = get(".release-details");
+    const changelog = get(".changelog");
+    const links = get(".release-links");
+    const exactDate = get(".archive-exact-date");
+    const verification = get(".archive-verification");
 
-    const detailId = `release-details-${release.id}`;
-    details.id = detailId;
-    toggle.setAttribute("aria-controls", detailId);
+    details.id = `release-details-${release.id}`;
+    toggle.setAttribute("aria-controls", details.id);
     title.textContent = `HomePilot ${release.version}`;
-
     if (release.id === latestStableId) {
       label.textContent = "Latest stable";
       label.classList.add("status-stable");
@@ -355,228 +292,265 @@ function renderArchive(releases, signer, latestStableId) {
       label.classList.add("status-prerelease");
     }
 
-    appendMetadataPart(meta, document.createTextNode(`Build ${numberFormat.format(release.build)}`));
-    appendMetadataPart(meta, createRelativeTimeElement(release.publishedAt));
-    appendMetadataPart(meta, document.createTextNode(formatBytes(release.apk.size)));
-    appendMetadataPart(
-      meta,
-      document.createTextNode(`${numberFormat.format(release.apk.downloadCount || 0)} downloads`),
-    );
-
-    download.href = release.apk.url;
-    exactDate.textContent = `Published ${formatExactDateTime(release.publishedAt)}`;
-    renderChangelog(changelog, release);
-    links.append(
-      createExternalLink("GitHub release", release.releaseUrl),
-      createExternalLink("Checksum file", release.checksum.url),
-    );
-    const copy = createTextElement("button", "Copy SHA-256");
-    copy.type = "button";
-    copy.addEventListener("click", () => copyText(release.apk.sha256, "APK SHA-256 copied"));
-    links.append(copy);
-    renderVerificationPanel(verification, release, signer);
-
-    toggle.addEventListener("click", () => {
-      const isOpen = toggle.getAttribute("aria-expanded") === "true";
-      toggle.setAttribute("aria-expanded", String(!isOpen));
-      toggle.textContent = isOpen ? "Changes" : "Close";
-      details.hidden = isOpen;
+    const parts = [
+      `Build ${numberFormat.format(release.build)}`,
+      createRelativeTimeElement(release.publishedAt),
+      formatBytes(release.apk.size),
+      `${numberFormat.format(release.apk.downloadCount)} downloads`,
+    ];
+    parts.forEach((part, index) => {
+      if (index) meta.append(document.createTextNode(" · "));
+      meta.append(typeof part === "string" ? document.createTextNode(part) : part);
     });
 
-    releaseList.append(card);
+    download.dataset.downloadLink = "true";
+    download.dataset.downloadHref = release.apk.url;
+    download.href = release.apk.url;
+    download.textContent = release.prerelease ? "Download prerelease" : "Download";
+    exactDate.textContent = `Published ${formatExactDateTime(release.publishedAt)}`;
+    if (release.changelog.length) {
+      const list = el("ul");
+      release.changelog.forEach((item) => list.append(el("li", item)));
+      changelog.append(list);
+    } else {
+      changelog.append(el("p", "No changelog was supplied."));
+    }
+    links.append(
+      externalLink("GitHub release", release.releaseUrl),
+      controlledLink("Checksum file", release.checksum.url, "", true),
+    );
+    const hashCopy = el("button", "Copy SHA-256");
+    hashCopy.type = "button";
+    hashCopy.addEventListener("click", () =>
+      copyValue(hashCopy, release.apk.sha256, "APK SHA-256 copied"));
+    links.append(hashCopy);
+    verification.append(verificationPanel(release));
+
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      toggle.textContent = open ? "Show changes" : "Hide changes";
+      details.hidden = open;
+    });
+    ui.list.append(card);
   });
 }
 
-function renderEmpty(title, message, detail = "") {
-  const latestEmpty = document.createElement("div");
-  latestEmpty.className = "empty-state";
-  latestEmpty.append(createTextElement("h3", title), createTextElement("p", message));
-  if (detail) latestEmpty.append(createTextElement("div", detail, "error-note"));
-  latestCard.append(latestEmpty);
-
-  const archiveEmpty = document.createElement("div");
-  archiveEmpty.className = "empty-state";
-  archiveEmpty.append(
-    createTextElement("h3", "The version archive is unavailable"),
-    createTextElement("p", "No verified downloadable releases can be displayed."),
-  );
-  releaseList.append(archiveEmpty);
-  releaseCount.textContent = "No verified versions";
+function resetUi() {
+  ui.latest.classList.remove("loading-card");
+  ui.latest.setAttribute("aria-busy", "false");
+  ui.latest.replaceChildren();
+  ui.list.replaceChildren();
+  ui.count.textContent = "";
+  ui.cacheBanner.hidden = true;
+  ui.sticky.hidden = true;
+  ui.stickyLink.removeAttribute("href");
+  ui.stickyLink.removeAttribute("data-download-link");
+  ui.stickyLink.removeAttribute("data-download-href");
+  document.body.classList.remove("has-sticky-download");
 }
 
-function renderManifest(manifest, { staleAgeMs = 0 } = {}) {
-  resetReleaseUi();
-  const errors = validateManifest(manifest);
+function renderFailure(reference) {
+  resetUi();
+  const latest = el("div", "", "empty-state");
+  latest.append(
+    el("h3", "Release information is unavailable"),
+    el("p", "VersionDeck could not load verified release data. Downloads are disabled."),
+    el("div", `Reference: ${reference}`, "error-note"),
+  );
+  ui.latest.append(latest);
+  const archive = el("div", "", "empty-state");
+  archive.append(el("h3", "The verified version archive is unavailable"));
+  ui.list.append(archive);
+  ui.count.textContent = "Unavailable";
+}
+
+function cacheBanner(state, ageMs) {
+  ui.cacheBanner.hidden = false;
+  const hours = Math.max(1, Math.round(ageMs / 3_600_000));
+  const age = `${numberFormat.format(hours)} hour${hours === 1 ? "" : "s"}`;
+  ui.cacheText.textContent = state === ReleaseCacheState.EXPIRED
+    ? `Saved data is ${age} old. Downloads are disabled until VersionDeck reconnects.`
+    : `VersionDeck is offline. Showing verified data saved ${age} ago.`;
+}
+
+function renderManifest(manifest, source = { kind: "live" }) {
+  const errors = validateVersionDeckManifest(manifest);
   if (errors.length) {
-    renderEmpty(
-      "Release information failed validation",
-      "Downloads are disabled because VersionDeck could not verify its release manifest.",
-      errors.join(" "),
-    );
-    announce("Release information failed validation. Downloads are disabled.");
+    console.error("VersionDeck manifest validation failed", errors);
+    renderFailure("VD-MANIFEST-001");
+    announce("Release validation failed. Downloads are disabled.");
     return false;
   }
 
-  const latest = manifest.releases.find(
-    (release) => release.id === manifest.latestStableReleaseId,
-  );
-  if (!latest) {
-    renderEmpty(
-      "No stable APK release is available yet",
-      "VersionDeck is connected and waiting for a verified stable HomePilot release.",
-    );
-    announce("No verified stable release is available.");
-    return true;
-  }
+  resetUi();
+  const latest = manifest.releases.find((release) =>
+    release.id === manifest.latestStableReleaseId);
+  if (latest) renderLatest(latest);
+  else renderLatestEmpty(manifest.releases.some((release) => release.prerelease));
+  renderArchive(manifest.releases, manifest.latestStableReleaseId);
 
-  renderLatest(latest, manifest.productionSigner);
-  renderArchive(manifest.releases, manifest.productionSigner, latest.id);
-
-  if (staleAgeMs >= CACHE_FRESH_MS) {
-    staleBanner.hidden = false;
-    staleBannerText.textContent = `Release information could not be refreshed. Showing data saved ${
-      Math.max(1, Math.round(staleAgeMs / 3_600_000))
-    } hour(s) ago.`;
-  }
-
+  const expired = source.state === ReleaseCacheState.EXPIRED;
+  if (source.kind === "cache") cacheBanner(source.state, source.ageMs);
+  setDownloadsEnabled(!expired);
   updateRelativeTimeElements();
-  announce(staleAgeMs ? "Showing cached release information." : "Release information updated.");
+  announce(expired
+    ? "Cached release data expired. Downloads are disabled."
+    : source.kind === "cache"
+      ? "Showing bounded cached release data."
+      : "Verified release information updated.");
   return true;
 }
 
 function saveCache(manifest) {
   try {
-    localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({ cachedAt: new Date().toISOString(), manifest }),
-    );
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      schemaVersion: RELEASE_CACHE_SCHEMA_VERSION,
+      fetchedAt: new Date().toISOString(),
+      manifest,
+    }));
+    LEGACY_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
   } catch {
-    // Live data remains usable when storage is unavailable.
+    // Live verified data remains usable when storage is blocked.
   }
+}
+
+function removeCache() {
+  try { localStorage.removeItem(CACHE_KEY); } catch { /* Storage may be blocked. */ }
 }
 
 function readCache() {
   try {
-    const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
-    const cachedAt = Date.parse(cached?.cachedAt);
-    if (!Number.isFinite(cachedAt) || !cached?.manifest) return null;
-    return { manifest: cached.manifest, ageMs: Date.now() - cachedAt };
+    const record = JSON.parse(localStorage.getItem(CACHE_KEY));
+    const policy = classifyReleaseCache(record);
+    if (
+      policy.state === ReleaseCacheState.INVALID ||
+      validateVersionDeckManifest(record?.manifest).length
+    ) {
+      removeCache();
+      return null;
+    }
+    return { record, policy };
   } catch {
+    removeCache();
     return null;
   }
 }
 
-async function fetchManifest({ force = false } = {}) {
-  activeRequestController?.abort();
+async function fetchManifest(force) {
+  activeController?.abort();
   const controller = new AbortController();
-  activeRequestController = controller;
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
+  activeController = controller;
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${MANIFEST_URL}${force ? `?refresh=${Date.now()}` : ""}`, {
+    const response = await fetch(MANIFEST_URL, {
       cache: force ? "reload" : "no-cache",
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`VersionDeck returned ${response.status}`);
-    return await response.json();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const manifest = await response.json();
+    if (validateVersionDeckManifest(manifest).length) throw new Error("Manifest validation failed");
+    return manifest;
   } finally {
-    window.clearTimeout(timeout);
-    if (activeRequestController === controller) activeRequestController = null;
+    clearTimeout(timeout);
+    if (activeController === controller) activeController = null;
   }
 }
 
-async function loadReleases({ force = false } = {}) {
-  const generation = ++requestGeneration;
-  refreshButton.classList.add("is-spinning");
-  refreshButton.disabled = true;
-  announce(force ? "Refreshing release information." : "Loading release information.");
-
+async function loadReleases(force = false) {
+  const request = ++generation;
+  ui.refresh.classList.add("is-spinning");
+  ui.refresh.disabled = true;
+  announce(force ? "Refreshing verified releases." : "Loading verified releases.");
   try {
-    const manifest = await fetchManifest({ force });
-    const errors = validateManifest(manifest);
-    if (errors.length) throw new Error(errors.join(" "));
+    const manifest = await fetchManifest(force);
+    if (request !== generation) return;
     saveCache(manifest);
     renderManifest(manifest);
   } catch (error) {
-    if (generation !== requestGeneration) return;
+    if (request !== generation) return;
+    console.error("VersionDeck release load failed", error);
     const cached = readCache();
-    if (cached && cached.ageMs <= CACHE_MAX_MS) {
-      renderManifest(cached.manifest, { staleAgeMs: cached.ageMs });
-      showToast("Showing bounded cached release information");
+    if (cached) {
+      renderManifest(cached.record.manifest, {
+        kind: "cache",
+        state: cached.policy.state,
+        ageMs: cached.policy.ageMs,
+      });
+      toast(cached.policy.state === ReleaseCacheState.EXPIRED
+        ? "Cached release data expired"
+        : "Showing bounded cached release data");
     } else {
-      resetReleaseUi();
-      renderEmpty(
-        "Release information is unavailable",
-        "VersionDeck could not load verified release data. Try refreshing when your connection is available.",
-        error.message,
-      );
+      renderFailure("VD-NETWORK-001");
       announce("Release information is unavailable. Downloads are disabled.");
     }
   } finally {
-    if (generation === requestGeneration) {
-      refreshButton.classList.remove("is-spinning");
-      refreshButton.disabled = false;
+    if (request === generation) {
+      ui.refresh.classList.remove("is-spinning");
+      ui.refresh.disabled = false;
     }
   }
 }
 
-function startRelativeTimeTicker() {
-  window.clearInterval(relativeTimeTimer);
+function startRelativeTicker() {
+  clearInterval(relativeTimer);
   if (document.hidden) return;
   updateRelativeTimeElements();
-  relativeTimeTimer = window.setInterval(() => updateRelativeTimeElements(), 60_000);
+  relativeTimer = setInterval(updateRelativeTimeElements, 60_000);
 }
 
-refreshButton.addEventListener("click", () => loadReleases({ force: true }));
-document.addEventListener("visibilitychange", startRelativeTimeTicker);
-window.addEventListener("pageshow", startRelativeTimeTicker);
+ui.refresh.addEventListener("click", () => loadReleases(true));
+document.addEventListener("visibilitychange", startRelativeTicker);
+window.addEventListener("pageshow", startRelativeTicker);
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
-  installButtons.forEach((button) => { button.hidden = false; });
+  document.querySelectorAll(".install-button").forEach((button) => { button.hidden = false; });
 });
-
-installButtons.forEach((button) => {
+document.querySelectorAll(".install-button").forEach((button) => {
   button.addEventListener("click", async () => {
     if (!deferredInstallPrompt) return;
     deferredInstallPrompt.prompt();
     await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
-    installButtons.forEach((item) => { item.hidden = true; });
+    document.querySelectorAll(".install-button").forEach((item) => { item.hidden = true; });
   });
 });
-
-window.addEventListener("appinstalled", () => showToast("VersionDeck installed"));
+window.addEventListener("appinstalled", () => toast("VersionDeck installed"));
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("sw.js");
       const showUpdate = (worker) => {
-        waitingServiceWorker = worker;
-        updateNotice.hidden = false;
+        waitingWorker = worker;
+        ui.updateNotice.hidden = false;
       };
       if (registration.waiting) showUpdate(registration.waiting);
       registration.addEventListener("updatefound", () => {
         const worker = registration.installing;
         worker?.addEventListener("statechange", () => {
-          if (worker.state === "installed" && navigator.serviceWorker.controller) {
-            showUpdate(worker);
-          }
+          if (worker.state === "installed" && navigator.serviceWorker.controller) showUpdate(worker);
         });
       });
-      navigator.serviceWorker.addEventListener("controllerchange", () => window.location.reload());
-    } catch {
-      // VersionDeck remains functional without offline shell support.
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (controllerReloaded) return;
+        controllerReloaded = true;
+        location.reload();
+      });
+    } catch (error) {
+      console.warn("VersionDeck service worker registration failed", error);
     }
   });
 }
-
-updateButton.addEventListener("click", () => {
-  waitingServiceWorker?.postMessage({ type: "SKIP_WAITING" });
+ui.updateButton.addEventListener("click", () => {
+  if (!waitingWorker) return;
+  ui.updateButton.disabled = true;
+  ui.updateButton.textContent = "Updating…";
+  waitingWorker.postMessage({ type: "SKIP_WAITING" });
 });
 
-startRelativeTimeTicker();
+startRelativeTicker();
 loadReleases();
