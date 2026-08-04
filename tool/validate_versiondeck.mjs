@@ -39,18 +39,32 @@ const requiredHtml = [
   'id="latest-card"',
   'id="release-template"',
   'id="build-progress-section"',
+  'id="build-progress-heading"',
+  'id="build-progress-meta"',
+  'id="build-progress-phase"',
   'id="build-progress-track"',
+  'id="build-progress-percent"',
+  'id="build-progress-preview"',
   'id="build-progress-step-list"',
   'id="build-progress-alerts"',
+  'id="build-progress-alerts-state"',
+  'id="build-progress-notifications"',
+  'id="build-progress-notifications-state"',
   'id="build-announcer"',
   'id="build-toast"',
+  'id="build-toast-message"',
+  'id="build-toast-dismiss"',
   'type="module" src="app.js"',
-  'type="module" src="build-status.js"',
-  'rel="stylesheet" href="build-status.css"',
   "Content-Security-Policy",
 ];
 for (const marker of requiredHtml) {
   if (!html.includes(marker)) throw new Error(`index.html is missing ${marker}`);
+}
+if (!/type="module"\s+src="build-status\.js\?v=[a-z\d-]+"/i.test(html)) {
+  throw new Error("index.html must load a versioned build-status.js asset.");
+}
+if (!/rel="stylesheet"\s+href="build-status\.css\?v=[a-z\d-]+"/i.test(html)) {
+  throw new Error("index.html must load a versioned build-status.css asset.");
 }
 if (/<script(?![^>]*\bsrc=)/i.test(html)) throw new Error("Inline scripts are not allowed.");
 if (/<style\b/i.test(html)) throw new Error("Inline styles are not allowed.");
