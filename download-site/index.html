@@ -22,9 +22,9 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="enhancements.css">
   <link rel="stylesheet" href="security.css?v=archive-actions-grid-1">
-  <link rel="stylesheet" href="build-status.css">
+  <link rel="stylesheet" href="build-status.css?v=live-card-2">
   <script type="module" src="app.js"></script>
-  <script type="module" src="build-status.js"></script>
+  <script type="module" src="build-status.js?v=live-card-2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -70,47 +70,80 @@
       </p>
     </section>
 
-    <section id="build-progress-section" class="container build-progress-section" aria-labelledby="build-progress-heading" hidden>
+    <section id="build-progress-section" class="container build-progress-section" aria-labelledby="build-progress-heading" data-state="inactive" hidden>
       <div class="build-progress-card">
         <div class="build-progress-header">
           <div>
             <p class="section-label">Live production build</p>
-            <h2 id="build-progress-heading">Building the next HomePilot APK</h2>
+            <h2 id="build-progress-heading">Building HomePilot APK</h2>
           </div>
-          <a id="build-progress-run-link" class="build-progress-run-link" href="https://github.com/zuhak5/HomePilot/actions/workflows/build-production-android.yml" target="_blank" rel="noopener noreferrer">View workflow run</a>
+          <div class="build-progress-run-group">
+            <a id="build-progress-run-link" class="build-progress-run-link" href="https://github.com/zuhak5/HomePilot/actions/workflows/build-production-android.yml" target="_blank" rel="noopener noreferrer">Workflow run</a>
+            <span id="build-progress-meta" class="build-progress-meta">Waiting for live status</span>
+          </div>
         </div>
 
         <div class="build-progress-live">
           <span class="build-progress-motion" aria-hidden="true"></span>
           <div>
             <span id="build-progress-status-label" class="build-progress-status-label">Production build in progress</span>
-            <strong id="build-progress-step" class="build-progress-step">Preparing production build</strong>
+            <strong id="build-progress-phase" class="build-progress-phase">Preparing the build</strong>
+            <small id="build-progress-step" class="build-progress-step">Preparing production build</small>
           </div>
         </div>
 
-        <div id="build-progress-track" class="build-progress-track" role="progressbar" aria-label="Production build progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Preparing step list">
-          <span id="build-progress-bar" class="build-progress-bar"></span>
+        <div class="build-progress-track-row">
+          <div id="build-progress-track" class="build-progress-track" role="progressbar" aria-label="Production build progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Preparing step list">
+            <span id="build-progress-bar" class="build-progress-bar"></span>
+          </div>
+          <strong id="build-progress-percent" class="build-progress-percent">0%</strong>
         </div>
 
         <div class="build-progress-metrics">
           <div class="build-progress-metric">
             <span>Progress</span>
             <strong id="build-progress-summary">Preparing step list</strong>
+            <small id="build-progress-remaining">Step count is loading</small>
           </div>
           <div class="build-progress-metric">
             <span>Estimated time left</span>
             <strong id="build-progress-eta">Calculating…</strong>
-            <small id="build-progress-basis">Estimate becomes more accurate after successful builds</small>
+            <small id="build-progress-basis">Estimate improves after successful builds</small>
           </div>
         </div>
 
-        <div class="build-progress-actions">
-          <button id="build-progress-alerts" class="build-progress-alerts" type="button" aria-pressed="false">Enable spoken alerts</button>
-          <span class="build-progress-privacy">Visual and screen-reader alerts are automatic. Speech and desktop notifications are opt-in.</span>
+        <p id="build-progress-elapsed" class="build-progress-timing">Start time unavailable</p>
+
+        <ol id="build-progress-preview" class="build-progress-preview" aria-label="Current build step context"></ol>
+
+        <div class="build-progress-actions" aria-label="Build alert preferences">
+          <button id="build-progress-alerts" class="build-setting" type="button" aria-pressed="false">
+            <span class="build-setting-copy">
+              <strong>Spoken build updates</strong>
+              <small>Read step changes aloud while VersionDeck remains open.</small>
+            </span>
+            <span class="build-setting-control">
+              <span id="build-progress-alerts-state" class="build-setting-state">Off</span>
+              <span class="build-switch" aria-hidden="true"></span>
+            </span>
+          </button>
+
+          <button id="build-progress-notifications" class="build-setting" type="button" aria-pressed="false">
+            <span class="build-setting-copy">
+              <strong>Desktop notifications</strong>
+              <small>Show build updates when this page is open in the background.</small>
+            </span>
+            <span class="build-setting-control">
+              <span id="build-progress-notifications-state" class="build-setting-state">Off</span>
+              <span class="build-switch" aria-hidden="true"></span>
+            </span>
+          </button>
+
+          <p class="build-progress-privacy">Visual and screen-reader updates are always enabled. Spoken and desktop alerts are stored only in this browser.</p>
         </div>
 
         <details class="build-progress-details">
-          <summary>View build steps</summary>
+          <summary id="build-progress-details-summary">View technical steps</summary>
           <ol id="build-progress-step-list" class="build-progress-step-list"></ol>
         </details>
       </div>
@@ -188,7 +221,7 @@
   <div id="sticky-download" class="sticky-download" hidden>
     <div class="container sticky-inner">
       <div class="sticky-copy">
-        <small>Latest verified HomePilot APK</small>
+        <small>Current stable HomePilot APK</small>
         <strong id="sticky-version">HomePilot</strong>
       </div>
       <a id="sticky-download-link" class="button button-primary" href="#latest-heading">Download APK</a>
@@ -222,6 +255,12 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <div id="build-toast" class="build-toast" aria-hidden="true"></div>
+  <div id="build-toast" class="build-toast" data-kind="info" role="status" aria-live="polite" aria-hidden="true">
+    <div class="build-toast-inner">
+      <span class="build-toast-indicator" aria-hidden="true"></span>
+      <span id="build-toast-message" class="build-toast-message"></span>
+      <button id="build-toast-dismiss" class="build-toast-dismiss" type="button">Dismiss</button>
+    </div>
+  </div>
 </body>
 </html>
