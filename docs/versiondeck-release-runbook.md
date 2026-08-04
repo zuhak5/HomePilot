@@ -29,6 +29,29 @@ A release is downloadable only when the pipeline can verify the expected propert
 
 Live workflow status is informational. It must not grant download trust to an in-progress artifact.
 
+## Workflow triggers and release handoff
+
+VersionDeck retains separate triggers for distinct operational needs:
+
+- Pull requests validate VersionDeck source changes without deploying.
+- Relevant pushes to `main` rebuild the site after VersionDeck source or runbook changes.
+- Release lifecycle events rebuild the manifest after a release is edited, deleted, unpublished, promoted, or otherwise changed.
+- Manual dispatch supports an explicitly requested rebuild.
+- A `workflow_run` handoff starts VersionDeck after the protected **Build Production APK** workflow completes successfully on `main`.
+
+The automated production handoff is deliberately fail-closed:
+
+1. The upstream workflow name must be `Build Production APK`.
+2. The upstream event must be `workflow_dispatch`.
+3. The upstream branch must be `main`.
+4. The upstream conclusion must be `success`.
+5. The upstream build commit must remain an ancestor of the current `main`.
+6. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
+
+Failed, cancelled, skipped, or non-production upstream runs do not deploy VersionDeck. Release lifecycle triggers remain necessary because operators can edit or remove releases independently of a new APK build. Shared Pages concurrency prevents overlapping deployment runs from publishing competing site revisions.
+
+The upstream production workflow is manual and protected. Do not broaden the `workflow_run` source to an untrusted pull-request workflow because downstream workflows can receive repository permissions unavailable to the upstream run.
+
 ## Pull-request validation
 
 For changes affecting VersionDeck:
@@ -45,16 +68,18 @@ The workflow currently enumerates test files explicitly. When a new focused test
 
 The deployment workflow:
 
-1. Checks out the current `main` source and verifies it matches `origin/main`.
-2. Confirms required GitHub and Android verification tools.
-3. Runs syntax checks and tests.
-4. Discovers releases and independently verifies candidate APKs.
-5. Generates the release manifest and diagnostics.
-6. Builds revisioned static assets.
-7. Validates the site.
-8. Uploads diagnostics and the Pages artifact.
-9. Deploys GitHub Pages with protected permissions.
-10. Verifies the public manifest/site after deployment where implemented.
+1. Validates the trigger and, for `workflow_run`, confirms the successful protected production-build handoff.
+2. Checks out the current `main` source and verifies it matches `origin/main`.
+3. Confirms a chained production-build commit remains in the current `main` history.
+4. Confirms required GitHub and Android verification tools.
+5. Runs syntax checks and tests.
+6. Discovers releases and independently verifies candidate APKs.
+7. Generates the release manifest and diagnostics.
+8. Builds revisioned static assets.
+9. Validates the site.
+10. Uploads diagnostics and the Pages artifact.
+11. Deploys GitHub Pages with protected permissions.
+12. Verifies the public manifest after deployment.
 
 ## Manifest rules
 
@@ -99,10 +124,13 @@ Validate:
 - Do not manually edit `releases.json` to force acceptance.
 - Do not bypass package, signer, checksum, ancestry, or provenance checks.
 - Do not expose a token in the public site to obtain richer live status.
+- If the production build fails or is cancelled, do not manually represent it as a verified release.
+- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually only after confirming the release evidence.
 - If Pages deploys bad static behavior, correct source and redeploy; do not change verified release metadata independently.
 
 ## Post-deployment checks
 
+- Confirm the successful production workflow has a corresponding VersionDeck workflow run.
 - Load the public site in a fresh browser session.
 - Confirm the manifest schema and latest stable/prerelease selection.
 - Confirm the download link points to the expected verified GitHub artifact.
@@ -113,4 +141,4 @@ Validate:
 
 ## Evidence
 
-Record source commit, workflow run, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
+Record the production workflow run, production source commit, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
