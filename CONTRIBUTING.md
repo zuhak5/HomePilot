@@ -2,10 +2,11 @@
 
 ## Before making changes
 
-1. Read [`AGENTS.md`](AGENTS.md) and the relevant documentation under [`docs/`](docs/README.md).
-2. Inspect the affected implementation, tests, generated files, migrations, workflows, and configuration.
+1. Read [`AGENTS.md`](AGENTS.md), the relevant documentation under [`docs/`](docs/README.md), and the mandatory [`documentation maintenance policy`](docs/governance/documentation-maintenance.md).
+2. Inspect the affected implementation, tests, generated files, migrations, workflows, configuration, and documentation.
 3. Keep changes narrowly scoped and preserve unrelated work.
 4. Never commit credentials, production configuration, signing material, service-role keys, or private user data.
+5. Perform a documentation-impact assessment before editing. This requirement applies to humans, AI agents, bots, and automated contributors.
 
 ## Local setup
 
@@ -65,6 +66,25 @@ Use the local ports in `supabase/config.toml`. Real configuration files and Supa
 - Do not run production signing, release publication, hosted database mutation, or public deployment commands without explicit authorization.
 - Preserve independent APK verification, package and signer checks, checksums, provenance, and fail-closed download behavior.
 
+## Documentation impact
+
+Documentation is part of the change, not a later cleanup task.
+
+- Update affected documents in the same branch and pull request as the implementation.
+- Use the change-to-document matrix in [`docs/governance/documentation-maintenance.md`](docs/governance/documentation-maintenance.md).
+- Verify prose against implementation, tests, migrations, workflows, and configuration.
+- Update `CHANGELOG.md` for user-visible, compatibility, privacy, security, migration, release, or material operational changes.
+- Remove, archive, or clearly label superseded instructions.
+- Do not duplicate mutable versions, ports, fingerprints, routes, or command inventories without a maintenance reason.
+
+Every contributor must report one documentation outcome in the pull request:
+
+- **Updated:** list the documents changed and why.
+- **Reviewed, no change:** list the documents reviewed and explain why they remain accurate.
+- **Temporary exception:** link a tracked follow-up and explain the temporary inconsistency.
+
+AI agents must also list documentation reviewed and changed in their final report and identify any claim that still depends on CI, a device, a hosted service, or a protected environment.
+
 ## Validation
 
 Run the narrowest relevant checks, then the standard Flutter suite when Flutter code changed:
@@ -92,6 +112,8 @@ npm run supabase:test
 
 VersionDeck changes require the JavaScript syntax checks, focused Node tests, static site build, and `tool/validate_versiondeck.mjs` used by `.github/workflows/deploy-download-site.yml`.
 
+Documentation-only changes require link, path, command, and source-of-truth review. Do not claim an automated documentation check ran unless it actually exists and was executed.
+
 ## Pull requests
 
 A pull request should state:
@@ -99,6 +121,7 @@ A pull request should state:
 - What changed and why.
 - User and developer impact.
 - Data, privacy, migration, synchronization, permission, and release impact.
+- Documentation impact and the documents reviewed or updated.
 - Tests and validation executed.
 - Checks not executed and why.
 - Screenshots for meaningful visual changes in both layout directions where relevant.

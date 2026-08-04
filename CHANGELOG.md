@@ -6,7 +6,11 @@ The current application version is defined only in `pubspec.yaml`. Released vers
 
 ## Unreleased
 
-No unreleased changes are currently recorded.
+### Changed
+
+- Added a mandatory documentation-maintenance policy for humans, AI agents, bots, and Agent Skills.
+- Required every change and pull request to report documentation impact, update affected documents in the same branch, and identify any unverified documentation claims.
+- Added a pull-request template with documentation, validation, privacy, synchronization, and release-impact checks.
 
 ## 1.3.8 (Build 23) — 2026-08-04
 
@@ -45,6 +49,6 @@ Add entries under `Unreleased` when a change is:
 - A data migration or compatibility change.
 - A material synchronization or backend protocol change.
 - A new or changed permission, SDK, external service, or operational dependency.
-- A release, deployment, backup-format, or VersionDeck trust-chain change.
+- A release, deployment, backup-format, VersionDeck trust-chain, documentation-governance, or agent-workflow change.
 
 Do not add routine refactoring, formatting, generated-file refreshes, or test-only changes unless they materially affect contributors or operators.

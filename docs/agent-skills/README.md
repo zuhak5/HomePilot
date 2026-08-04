@@ -6,12 +6,14 @@ Agent Skills provide task-specific reusable workflows. They complement, but do n
 
 The intended active project location is `.agents/skills/`. That directory is currently ignored and should not be activated until the source, audit, lock, and validation tooling described here is implemented.
 
+Every active or proposed skill must comply with [`../governance/documentation-maintenance.md`](../governance/documentation-maintenance.md). A skill that changes repository behavior must require a documentation-impact assessment, same-change documentation updates, and an evidence-based documentation closeout.
+
 ## Skill layers
 
 1. **Official exact-match skills**: maintained by the relevant technology project and directly compatible with HomePilot.
 2. **Official source-only skills**: trustworthy upstream guidance that targets another platform or SDK generation and must be adapted.
 3. **Audited community skills**: used only when no official source exists and after full review.
-4. **HomePilot-specific skills**: encode repository architecture, invariants, validation, and protected operations.
+4. **HomePilot-specific skills**: encode repository architecture, invariants, validation, documentation impact, and protected operations.
 
 ## External sources to evaluate
 
@@ -66,6 +68,24 @@ Additional technology-focused adaptations may cover Riverpod, routing, localizat
 - Add scripts only when they provide deterministic value.
 - Require an evidence-based closeout report.
 - Default production, hosted, signing, release, and destructive operations to planning or local validation only.
+- Require the skill to read the documentation maintenance policy before implementation.
+- Require a documentation-impact decision before editing.
+- Require affected documentation to be updated in the same branch and pull request.
+- Require the closeout to list documents reviewed, documents changed, reviewed-no-change rationale, and unverified claims.
+- Reject skill instructions that defer required documentation to an unspecified follow-up.
+
+## Required documentation workflow in every skill
+
+Each implementation skill must contain an explicit sequence equivalent to:
+
+1. Identify the affected subsystem and current documentation.
+2. Use the matrix in `docs/governance/documentation-maintenance.md`.
+3. Update implementation, tests, and documentation together.
+4. Update `CHANGELOG.md` when the change is material or user-visible.
+5. Validate links, paths, commands, privacy claims, and operational claims.
+6. Report documentation impact in the final output.
+
+The skill may delegate detailed documentation authoring to `homepilot-documentation`, but the primary skill remains responsible for ensuring that documentation work is completed.
 
 ## Installation sequence
 
@@ -75,11 +95,12 @@ Additional technology-focused adaptations may cover Riverpod, routing, localizat
 4. Vendor only approved skills at immutable commits.
 5. Create HomePilot adaptations under new names.
 6. Add trigger test cases and structural/security validation.
-7. Enable `.agents/skills/` in Git only after validation is enforced.
-8. Exercise every skill on a real repository task.
+7. Verify every skill enforces the documentation maintenance policy.
+8. Enable `.agents/skills/` in Git only after validation is enforced.
+9. Exercise every skill on a real repository task.
 
 ## Ownership
 
-Each skill requires a reviewer responsible for its subsystem. Review skills after architecture, dependency, command, workflow, permission, privacy, release, or data-contract changes and at least before major releases.
+Each skill requires a reviewer responsible for its subsystem. Review skills after architecture, dependency, command, workflow, permission, privacy, release, data-contract, or documentation-governance changes and at least before major releases.
 
 See `source-policy.md`, `audit-checklist.md`, and `update-runbook.md`.
