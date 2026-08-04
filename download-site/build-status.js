@@ -279,7 +279,7 @@ export function detectBuildTransition(previous, current) {
     ? `${formatRemainingTime(current.estimatedSeconds)} remaining.`
     : "The remaining time is still being calculated.";
 
-  if (!previous || previous.runId !== current.runId) {
+  if (!previous || previous.runId !== current.runId || previous.runAttempt !== current.runAttempt) {
     return {
       kind: "started",
       message: `HomePilot production build ${current.runNumber || ""} is active. Now running ${current.currentStepName}. ${remainingPhrase(current)} ${estimate}`.replace(/\s+/g, " ").trim(),
@@ -310,9 +310,17 @@ export function detectBuildTransition(previous, current) {
   };
 }
 
+function browserStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 function readJsonStorage(storage, key) {
   try {
-    return JSON.parse(storage.getItem(key));
+    return storage ? JSON.parse(storage.getItem(key)) : null;
   } catch {
     return null;
   }
@@ -320,9 +328,25 @@ function readJsonStorage(storage, key) {
 
 function writeJsonStorage(storage, key, value) {
   try {
-    storage.setItem(key, JSON.stringify(value));
+    storage?.setItem(key, JSON.stringify(value));
   } catch {
     // Status remains usable when storage is unavailable.
+  }
+}
+
+function readStringStorage(storage, key) {
+  try {
+    return storage?.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStringStorage(storage, key, value) {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // Preferences remain session-only when storage is unavailable.
   }
 }
 
@@ -372,8 +396,10 @@ async function fetchRunJob(runId, options) {
 
 async function loadHistoricalModel(successfulRuns, options) {
   const candidates = successfulRuns.slice(0, HISTORY_SAMPLE_LIMIT);
-  const runIds = candidates.map((run) => Number(run.id)).filter(Number.isFinite);
-  const cached = readJsonStorage(window.localStorage, HISTORY_CACHE_KEY);
+  const runIds = candidates
+    .map((run) => `${Number(run.id)}:${Number(run.run_attempt) || 1}`)
+    .filter((value) => !value.startsWith("NaN:"));
+  const cached = readJsonStorage(browserStorage(), HISTORY_CACHE_KEY);
   if (isHistoryCacheUsable(cached, runIds)) return cached.model;
 
   const jobs = [];
@@ -386,7 +412,7 @@ async function loadHistoricalModel(successfulRuns, options) {
     }
   }
   const model = buildHistoricalModel(jobs);
-  writeJsonStorage(window.localStorage, HISTORY_CACHE_KEY, {
+  writeJsonStorage(browserStorage(), HISTORY_CACHE_KEY, {
     schemaVersion: 1,
     fetchedAt: new Date().toISOString(),
     runIds,
@@ -406,6 +432,7 @@ function initializeBuildStatus() {
   const statusLabel = requiredElement("#build-progress-status-label");
   const runLink = requiredElement("#build-progress-run-link");
   const stepName = requiredElement("#build-progress-step");
+  const progressTrack = requiredElement("#build-progress-track");
   const progressBar = requiredElement("#build-progress-bar");
   const progressSummary = requiredElement("#build-progress-summary");
   const eta = requiredElement("#build-progress-eta");
@@ -415,15 +442,16 @@ function initializeBuildStatus() {
   const announcer = requiredElement("#build-announcer");
   const toast = requiredElement("#build-toast");
 
+  const storage = browserStorage();
   let currentRun = null;
-  let currentSnapshot = readJsonStorage(window.localStorage, SNAPSHOT_CACHE_KEY);
+  let currentSnapshot = readJsonStorage(storage, SNAPSHOT_CACHE_KEY);
   let history = null;
   let timer = null;
   let controller = null;
   let toastTimer = null;
   let consecutiveFailures = 0;
   let backoffUntil = 0;
-  let alertsEnabled = window.localStorage.getItem(ALERT_PREFERENCE_KEY) === "true";
+  let alertsEnabled = readStringStorage(storage, ALERT_PREFERENCE_KEY) === "true";
 
   function setAlertButton() {
     alertsButton.setAttribute("aria-pressed", String(alertsEnabled));
@@ -495,14 +523,20 @@ function initializeBuildStatus() {
     runLink.href = snapshot.runUrl;
     runLink.textContent = snapshot.runNumber ? `View run #${snapshot.runNumber}` : "View workflow run";
     stepName.textContent = snapshot.currentStepName;
-    progressBar.style.width = `${Math.max(2, Math.round(snapshot.progress * 100))}%`;
+    const progressPercent = Math.max(0, Math.min(100, Math.round(snapshot.progress * 100)));
+    progressBar.style.width = `${Math.max(2, progressPercent)}%`;
     progressSummary.textContent = snapshot.totalSteps
       ? `${snapshot.completedCount} of ${snapshot.totalSteps} complete · ${snapshot.remainingCount} left`
       : "Preparing step list";
+    progressTrack.setAttribute("aria-valuenow", String(progressPercent));
+    progressTrack.setAttribute("aria-valuetext", progressSummary.textContent);
     eta.textContent = formatRemainingTime(snapshot.estimatedSeconds);
-    etaBasis.textContent = snapshot.historySampleCount
+    const basis = snapshot.historySampleCount
       ? `Based on ${snapshot.historySampleCount} recent successful ${snapshot.historySampleCount === 1 ? "build" : "builds"} · ${snapshot.estimateConfidence} confidence`
       : "Estimate becomes more accurate after successful builds";
+    etaBasis.textContent = ["queued", "requested", "waiting", "pending"].includes(snapshot.status)
+      ? `Typical build time after approval and runner start · ${basis}`
+      : basis;
     renderSteps(snapshot);
   }
 
@@ -532,13 +566,16 @@ function initializeBuildStatus() {
   }
 
   function commitSnapshot(snapshot, { announceInitial = false } = {}) {
-    const previous = currentSnapshot?.runId === snapshot.runId ? currentSnapshot : null;
+    const previous = currentSnapshot?.runId === snapshot.runId &&
+      currentSnapshot?.runAttempt === snapshot.runAttempt
+      ? currentSnapshot
+      : null;
     render(snapshot);
     const transition = detectBuildTransition(previous, snapshot);
     const shouldAnnounce = transition && (previous || announceInitial || alertsEnabled);
     if (shouldAnnounce) notify(transition.message, snapshot);
     currentSnapshot = snapshot;
-    writeJsonStorage(window.localStorage, SNAPSHOT_CACHE_KEY, snapshot);
+    writeJsonStorage(storage, SNAPSHOT_CACHE_KEY, snapshot);
   }
 
   async function pollCurrentRun() {
@@ -571,7 +608,7 @@ function initializeBuildStatus() {
     controller = new AbortController();
     try {
       const payload = await fetchGitHubJson(
-        `/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=workflow_dispatch&per_page=20`,
+        `/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=workflow_dispatch&per_page=50`,
         { signal: controller.signal },
       );
       consecutiveFailures = 0;
@@ -616,7 +653,7 @@ function initializeBuildStatus() {
 
   alertsButton.addEventListener("click", async () => {
     alertsEnabled = !alertsEnabled;
-    window.localStorage.setItem(ALERT_PREFERENCE_KEY, String(alertsEnabled));
+    writeStringStorage(storage, ALERT_PREFERENCE_KEY, String(alertsEnabled));
     setAlertButton();
     if (alertsEnabled && "Notification" in window && Notification.permission === "default") {
       try { await Notification.requestPermission(); } catch { /* Speech alerts remain available. */ }
