@@ -13,7 +13,9 @@ const requiredFiles = [
   "styles.css",
   "enhancements.css",
   "security.css",
+  "build-status.css",
   "app.js",
+  "build-status.js",
   "manifest-schema.js",
   "cache-policy.js",
   "relative-time.js",
@@ -36,7 +38,15 @@ const requiredHtml = [
   'id="stale-banner"',
   'id="latest-card"',
   'id="release-template"',
+  'id="build-progress-section"',
+  'id="build-progress-track"',
+  'id="build-progress-step-list"',
+  'id="build-progress-alerts"',
+  'id="build-announcer"',
+  'id="build-toast"',
   'type="module" src="app.js"',
+  'type="module" src="build-status.js"',
+  'rel="stylesheet" href="build-status.css"',
   "Content-Security-Policy",
 ];
 for (const marker of requiredHtml) {
@@ -52,7 +62,7 @@ for (const directive of [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' https://api.github.com",
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -90,6 +100,11 @@ const appShellMatch = serviceWorker.match(/const APP_SHELL = \[([\s\S]*?)\];/);
 if (!appShellMatch) throw new Error("Service-worker app shell is missing.");
 if (appShellMatch[1].includes("releases.json")) {
   throw new Error("releases.json must not be included in the service-worker app shell.");
+}
+for (const asset of ["build-status.js", "build-status.css"]) {
+  if (!appShellMatch[1].includes(asset)) {
+    throw new Error(`Service-worker app shell is missing ${asset}.`);
+  }
 }
 if (!serviceWorker.includes('fetch(request, { cache: "no-store" })')) {
   throw new Error("Service worker must fetch releases.json without storage caching.");
