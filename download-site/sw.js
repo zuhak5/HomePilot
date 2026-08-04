@@ -1,11 +1,14 @@
 const CACHE_PREFIX = "versiondeck-";
-const CACHE_NAME = `${CACHE_PREFIX}shell-v3`;
+const CACHE_NAME = `${CACHE_PREFIX}shell-__VERSIONDECK_CACHE_REVISION__`;
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./enhancements.css",
+  "./security.css",
   "./app.js",
+  "./manifest-schema.js",
+  "./cache-policy.js",
   "./relative-time.js",
   "./manifest.webmanifest",
   "./assets/versiondeck-mark.svg",
@@ -17,20 +20,17 @@ function cacheable(response) {
   return response?.ok && response.type === "basic";
 }
 
-async function cacheResponse(request, response) {
-  if (!cacheable(response)) return;
-  const cache = await caches.open(CACHE_NAME);
-  await cache.put(request, response.clone());
-}
-
-async function networkFirst(request, fallbackRequest = request) {
+async function networkFirstNavigation(request) {
   try {
     const response = await fetch(request);
-    await cacheResponse(fallbackRequest, response);
+    if (cacheable(response)) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put("./index.html", response.clone());
+    }
     return response;
   } catch {
     return (
-      (await caches.match(fallbackRequest)) ||
+      (await caches.match("./index.html")) ||
       new Response("VersionDeck is unavailable offline.", {
         status: 503,
         headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -68,24 +68,30 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, "./index.html"));
+    event.respondWith(networkFirstNavigation(request));
     return;
   }
 
   if (url.pathname.endsWith("/releases.json")) {
-    event.respondWith(networkFirst(request));
+    event.respondWith(fetch(request, { cache: "no-store" }));
     return;
   }
 
-  const update = fetch(request)
-    .then(async (response) => {
-      await cacheResponse(request, response);
-      return response;
-    })
-    .catch(() => null);
+  const shellPath = `.${url.pathname.slice(self.registration.scope
+    ? new URL(self.registration.scope).pathname.length - 1
+    : 0)}`;
+  const isShellRequest = APP_SHELL.includes(shellPath) || APP_SHELL.includes(request.url);
+  if (!isShellRequest) return;
 
-  event.waitUntil(update.then(() => undefined));
   event.respondWith(
-    caches.match(request).then(async (cached) => cached || (await update) || fetch(request)),
+    caches.match(request).then(async (cached) => {
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (cacheable(response)) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, response.clone());
+      }
+      return response;
+    }),
   );
 });
