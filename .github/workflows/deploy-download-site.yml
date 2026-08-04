@@ -29,6 +29,13 @@ on:
       - "docs/versiondeck-release-runbook.md"
       - "docs/versiondeck-live-build-status.md"
       - ".github/workflows/deploy-download-site.yml"
+  workflow_run:
+    workflows:
+      - Build Production APK
+    types:
+      - completed
+    branches:
+      - main
   release:
     types:
       - published
@@ -92,7 +99,7 @@ jobs:
 
   build:
     name: Verify and build VersionDeck
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -118,10 +125,20 @@ jobs:
           remote_sha="$(git rev-parse origin/main)"
           test "$source_sha" = "$remote_sha"
           test "$(git branch --show-current)" = "main"
+
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "### VersionDeck source" >> "$GITHUB_STEP_SUMMARY"
           echo "- Commit: \`$source_sha\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Trigger: \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            upstream_sha="${{ github.event.workflow_run.head_sha }}"
+            upstream_url="${{ github.event.workflow_run.html_url }}"
+            test -n "$upstream_sha"
+            git merge-base --is-ancestor "$upstream_sha" origin/main
+            echo "- Production build commit: \`$upstream_sha\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Production build run: $upstream_url" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -209,7 +226,7 @@ jobs:
 
   deploy:
     name: Publish VersionDeck
-    if: github.event_name != 'pull_request'
+    if: ${{ needs.build.result == 'success' }}
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
