@@ -38,6 +38,7 @@ test("pubspec version parsing returns release and build numbers", () => {
 
 test("zero percent on the first active step is presented as starting", () => {
   assert.equal(shouldShowStarting("Step 1 of 18", "0%"), true);
+  assert.equal(shouldShowStarting("Step 1 of 18", "Starting"), true);
   assert.equal(shouldShowStarting("Step 2 of 18", "0%"), false);
   assert.equal(shouldShowStarting("Step 1 of 18", "4%"), false);
 });
