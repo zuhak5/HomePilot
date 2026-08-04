@@ -59,8 +59,11 @@ Start at [`docs/README.md`](docs/README.md). Particularly important documents ar
 - [`docs/development/testing.md`](docs/development/testing.md)
 - [`docs/SENTRY_OPERATIONS.md`](docs/SENTRY_OPERATIONS.md)
 - [`docs/versiondeck-release-runbook.md`](docs/versiondeck-release-runbook.md)
+- [`docs/governance/documentation-maintenance.md`](docs/governance/documentation-maintenance.md)
 - [`PRIVACY.md`](PRIVACY.md)
 - [`AGENTS.md`](AGENTS.md)
+
+Documentation is part of the implementation contract. Humans, AI agents, bots, and Agent Skills must review and update affected documents in the same change as the behavior they describe.
 
 ## Production releases
 
@@ -70,7 +73,7 @@ See [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md).
 
 ## Contributing and security
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing the project. Report vulnerabilities according to [`SECURITY.md`](SECURITY.md); do not disclose sensitive issues in public GitHub issues.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`documentation maintenance policy`](docs/governance/documentation-maintenance.md) before changing the project. Report vulnerabilities according to [`SECURITY.md`](SECURITY.md); do not disclose sensitive issues in public GitHub issues.
 
 ## License status
 
