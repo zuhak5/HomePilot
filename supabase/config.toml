@@ -63,6 +63,12 @@ verify_jwt = true
 import_map = "./functions/delete-account/deno.json"
 entrypoint = "./functions/delete-account/index.ts"
 
+[functions.homepilot-ai-chat]
+enabled = true
+verify_jwt = true
+import_map = "./functions/homepilot-ai-chat/deno.json"
+entrypoint = "./functions/homepilot-ai-chat/index.ts"
+
 [functions.admob-ssv-handler]
 enabled = true
 verify_jwt = false
