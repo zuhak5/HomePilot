@@ -12,6 +12,7 @@ The current application version is defined only in `pubspec.yaml`. Released vers
 - **AdMob Lifecycle & Listener Recovery**: Added `_pendingAd` lifecycle tracking in `_HkNativeAdCardState` to ensure `onAdFailedToLoad` triggers failure handling and exponential retry backoff without dropped callbacks.
 - **Profile Avatar 404 Resilience**: Added `onError` stream error handling to `precacheImage` in `ProfileAvatar` to absorb HTTP 404 network image exceptions cleanly and render initialed fallback avatars.
 - **AdMob SSV Edge Function Test Payloads**: Updated `isAdmobSetupVerificationProbe` in `admob-ssv-handler` to accept synthetic `fakeForAdDebugLog` test payloads as `verified_debug_noop` (HTTP 200), preventing 400 validation log noise.
+- **Network Request Usage Audit**: Compiled comprehensive network architecture review and request-usage audit report in `docs/request-audit-report.md`.
 
 ## 1.4.0 (Build 25) — 2026-08-06
 
