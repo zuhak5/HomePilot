@@ -1431,6 +1431,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get searchHomePilot => 'البحث في HomePilot';
 
   @override
+  String get searchShort => 'بحث…';
+
+  @override
+  String get searchRoomsItems => 'ابحث في الغرف والعناصر…';
+
+  @override
   String get itemActions => 'إجراءات العنصر';
 
   @override

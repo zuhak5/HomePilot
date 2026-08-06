@@ -15,7 +15,6 @@ import '../../../l10n/app_localizations_ext.dart';
 import '../../core/config/app_config.dart';
 import '../../core/utils/redacting_logger.dart';
 import '../../ui/app_theme.dart';
-import '../../ui/components.dart' as hk_ui;
 import '../auth/presentation/auth_providers.dart';
 
 const _nativeFactoryId = 'homepilotNative';
@@ -1475,36 +1474,90 @@ class HkPointsPill extends ConsumerWidget {
     final pointsLabel = balance == null
         ? context.l10n.pointsUnavailable
         : context.l10n.pointsCount(balance);
-    return hk_ui.HeaderActionSurface(
-      onPressed: onTap,
-      semanticLabel: pointsLabel,
-      tooltip: context.l10n.pointsWallet,
-      width: width,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              shape: BoxShape.circle,
+
+    // Spec Component C: independent squircle tile (border-radius: 16px).
+    // The solid filled star is enclosed in a circular tinted container.
+    final height = compact ? 40.0 : 44.0;
+    final starCircleSize = compact ? 28.0 : 32.0;
+    final innerGap = compact ? 6.0 : HkSpacing.space6;
+    final hPadStart = compact ? 6.0 : HkSpacing.xs;
+    final hPadEnd = compact ? 10.0 : 14.0;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(HkRadii.lg),
+      side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.72)),
+    );
+    return Semantics(
+      button: true,
+      container: true,
+      excludeSemantics: true,
+      label: pointsLabel,
+      child: Tooltip(
+        message: context.l10n.pointsWallet,
+        excludeFromSemantics: true,
+        child: SizedBox(
+          height: height,
+          child: Material(
+            color: scheme.surfaceContainerLowest,
+            shape: shape,
+            elevation: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(HkRadii.lg),
+                boxShadow: [
+                  BoxShadow(
+                    color: HkColors.appTextPrimary.withValues(alpha: 0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: InkWell(
+                customBorder: shape,
+                onTap: onTap,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: hPadStart,
+                    end: hPadEnd,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: starCircleSize,
+                        height: starCircleSize,
+                        decoration: const BoxDecoration(
+                          // spec: badge_green_bg #ECFDF5
+                          color: HkColors.headerBadgeGreenBg,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Symbols.star_rounded,
+                          size: 18,
+                          // spec: badge_green_icon #10B981 solid filled
+                          color: HkColors.headerBadgeGreenIcon,
+                          fill: 1,
+                        ),
+                      ),
+                      SizedBox(width: innerGap),
+                      Text(
+                        balance?.toString() ?? '-',
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: scheme.onSurface,
+                              fontWeight: FontWeight.w700,
+                              height: 1,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            alignment: Alignment.center,
-            child: Icon(Symbols.star_rounded, size: 19, color: scheme.primary),
           ),
-          const SizedBox(width: HkSpacing.space6),
-          Text(
-            balance?.toString() ?? '-',
-            maxLines: 1,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: scheme.onSurface,
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

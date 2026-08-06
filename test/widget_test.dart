@@ -1558,13 +1558,23 @@ void main() {
       expect(find.text("Let's make today productive"), findsNothing);
       expect(find.text('Hidden Name'), findsNothing);
       expect(find.text('Points'), findsNothing);
-      expect(find.text('Search rooms, items, tasks, notes'), findsOneWidget);
+      // At width 390 the layout is in the standard-mobile breakpoint
+      // (360 ≤ W ≤ 400), so the placeholder shortens to 'Search rooms, items…'.
+      // At width 768+ it is in the large-mobile/desktop breakpoint (W > 400)
+      // and shows the full string.
+      final expectedPlaceholder =
+          width == 390.0
+              ? 'Search rooms, items\u2026'
+              : 'Search rooms, items, tasks, notes';
+      expect(find.text(expectedPlaceholder), findsOneWidget);
       for (final key in [
         'home-search-control',
         'home-points-control',
         'home-notifications-control',
       ]) {
         final size = tester.getSize(find.byKey(ValueKey(key)));
+        // Spec: standard component height is 44 px; compact (<360 px) is 40 px.
+        // Width 390 is standard, so all controls are at least 44 px tall.
         expect(size.height, greaterThanOrEqualTo(44));
       }
       expect(tester.takeException(), isNull, reason: 'width $width');
@@ -3153,26 +3163,27 @@ void main() {
           );
           expect(points, findsOneWidget);
           expect(notifications, findsOneWidget);
-          const expectedActionSize = hk_ui.kHomePilotHeaderActionHeight;
-          expect(
-            tester.getSize(points),
-            const Size(HkPointsPill.width, expectedActionSize),
-          );
-          expect(
-            tester.getSize(notifications),
-            const Size(expectedActionSize, expectedActionSize),
-          );
+          // Spec: compact (<360 layout px) → 40 px; standard (≥360) → 44 px.
+          // At screen 320 the full layout width is 320, which is <360 → compact.
+          // At screen 600 the full layout width is 600 → standard.
+          final expectedH = width == 320.0 ? 40.0 : 44.0;
+          expect(tester.getSize(points).height, expectedH);
+          expect(tester.getSize(notifications), Size(expectedH, expectedH));
           expect(
             tester.getTopLeft(notifications).dx -
                 tester.getBottomRight(points).dx,
-            HkSpacing.xs,
+            // Spec: compact (<360 px) gap = 6; standard gap = HkSpacing.xs (8).
+            width == 320.0 ? 6.0 : HkSpacing.xs,
           );
           expect(find.text('Good afternoon'), findsNothing);
           expect(find.text("Let's make today productive"), findsNothing);
-          expect(
-            find.text('Search rooms, items, tasks, notes'),
-            findsOneWidget,
-          );
+          // At screen width 320 the layout is compact (<360), placeholder is short.
+          // At screen width 600 the layout is large (>400), full placeholder shown.
+          final expectedSearch =
+              width == 320.0
+                  ? 'Search\u2026'
+                  : 'Search rooms, items, tasks, notes';
+          expect(find.text(expectedSearch), findsOneWidget);
           expect(
             find.descendant(of: points, matching: find.text('Points')),
             findsNothing,
@@ -3198,7 +3209,8 @@ void main() {
           );
           expect(
             (unreadBadge.decoration! as BoxDecoration).color,
-            HkColors.appDanger,
+            // Spec: status_danger #EF4444 (brighter red than legacy appDanger).
+            const Color(0xFFEF4444),
           );
           final notificationMaterial = tester.widget<Material>(
             find
@@ -3305,10 +3317,12 @@ void main() {
     void expectCompactPointsCard() {
       final points = find.byType(HkPointsPill);
       expect(points, findsOneWidget);
-      expect(
-        tester.getSize(points),
-        const Size(HkPointsPill.width, hk_ui.kHomePilotHeaderActionHeight),
-      );
+      // Spec: Component C is now an intrinsic-width squircle tile at 44 px height.
+      // The old fixed width (82 px) and height (48 px) from HeaderActionSurface
+      // no longer apply after the modular refactoring.
+      final size = tester.getSize(points);
+      expect(size.height, 44.0);
+      expect(size.width, greaterThan(0));
       expect(
         find.descendant(of: points, matching: find.text('Points')),
         findsNothing,

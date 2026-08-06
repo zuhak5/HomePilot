@@ -4796,11 +4796,15 @@ class _DashboardHeader extends ConsumerWidget {
         const AppProfile();
     final session = ref.watch(authSessionProvider).value ?? snapshot?.session;
     final greetingName = _greetingName(context, profile, session);
+    // Step 2: The outer pill container is removed. Components now float
+    // independently on the transparent canvas per the refactoring spec.
+    // The bottom border is preserved via a thin DecoratedBox wrapper so the
+    // scroll-depth affordance (overlapsContent) continues to function.
     return RepaintBoundary(
       key: const ValueKey('dashboard-header-card'),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: scheme.surface,
+          color: Colors.transparent,
           border: Border(
             bottom: BorderSide(
               color: scheme.outlineVariant.withValues(
@@ -4816,60 +4820,30 @@ class _DashboardHeader extends ConsumerWidget {
               constraints: const BoxConstraints(maxWidth: 1180),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final mobile = constraints.maxWidth < 600;
-                  const actionSize = hk_ui.kHomePilotHeaderActionHeight;
+                  final screenWidth = constraints.maxWidth;
+                  final isCompact = screenWidth < 360;
                   return Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      mobile ? HkSpacing.xs : HkSpacing.md,
+                    padding: const EdgeInsets.fromLTRB(
+                      HkSpacing.md,
                       HkSpacing.xs,
-                      mobile ? HkSpacing.xs : HkSpacing.md,
+                      HkSpacing.md,
                       HkSpacing.xs,
                     ),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: mobile ? HkSpacing.xs : HkSpacing.sm,
-                        vertical: HkSpacing.xs,
-                      ),
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerLowest,
-                        borderRadius: BorderRadius.circular(
-                          mobile ? HkRadii.xxl : 32,
-                        ),
-                        border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: 0.46),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: HkColors.appTextPrimary.withValues(
-                              alpha: overlapsContent ? 0.10 : 0.075,
-                            ),
-                            blurRadius: 34,
-                            offset: const Offset(0, 14),
-                          ),
-                          BoxShadow(
-                            color: HkColors.appTextPrimary.withValues(
-                              alpha: 0.03,
-                            ),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: _DashboardHeaderActions(
-                        actionSize: actionSize,
-                        unreadCount: unreadCount,
-                        notificationEducationLink: notificationEducationLink,
-                        notificationEducationTargetKey:
-                            notificationEducationTargetKey,
-                        avatarUrl: session?.avatarUrl,
-                        avatarProvider: snapshot?.avatarProvider,
-                        fallbackName: greetingName,
-                        onSearch: () => context.push('/search'),
-                        onPoints: () => showPointsWalletSheet(context, ref),
-                        onNotifications:
-                            onNotificationEducationTap ??
-                            () => context.push('/notifications'),
-                      ),
+                    child: _DashboardHeaderActions(
+                      screenWidth: screenWidth,
+                      isCompact: isCompact,
+                      unreadCount: unreadCount,
+                      notificationEducationLink: notificationEducationLink,
+                      notificationEducationTargetKey:
+                          notificationEducationTargetKey,
+                      avatarUrl: session?.avatarUrl,
+                      avatarProvider: snapshot?.avatarProvider,
+                      fallbackName: greetingName,
+                      onSearch: () => context.push('/search'),
+                      onPoints: () => showPointsWalletSheet(context, ref),
+                      onNotifications:
+                          onNotificationEducationTap ??
+                          () => context.push('/notifications'),
                     ),
                   );
                 },
@@ -4884,7 +4858,8 @@ class _DashboardHeader extends ConsumerWidget {
 
 class _DashboardHeaderActions extends StatelessWidget {
   const _DashboardHeaderActions({
-    required this.actionSize,
+    required this.screenWidth,
+    required this.isCompact,
     required this.unreadCount,
     required this.notificationEducationLink,
     required this.notificationEducationTargetKey,
@@ -4896,7 +4871,12 @@ class _DashboardHeaderActions extends StatelessWidget {
     required this.onNotifications,
   });
 
-  final double actionSize;
+  /// Logical width of the header row, used for responsive placeholder text.
+  final double screenWidth;
+
+  /// True when [screenWidth] < 360 px (compact/small breakpoint).
+  final bool isCompact;
+
   final int unreadCount;
   final LayerLink notificationEducationLink;
   final GlobalKey notificationEducationTargetKey;
@@ -4909,10 +4889,17 @@ class _DashboardHeaderActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final search = _DashboardSearchField(onPressed: onSearch);
+    final componentHeight = isCompact ? 40.0 : 44.0;
+    final gap = isCompact ? 6.0 : HkSpacing.xs;
+    final search = _DashboardSearchField(
+      onPressed: onSearch,
+      isCompact: isCompact,
+      screenWidth: screenWidth,
+    );
     final points = HkPointsPill(
       key: const ValueKey('home-points-control'),
       onTap: onPoints,
+      compact: isCompact,
     );
     final notifications = CompositedTransformTarget(
       link: notificationEducationLink,
@@ -4920,7 +4907,8 @@ class _DashboardHeaderActions extends StatelessWidget {
         key: notificationEducationTargetKey,
         child: _NotificationButton(
           key: const ValueKey('home-notifications-control'),
-          size: actionSize,
+          size: componentHeight,
+          isCompact: isCompact,
           unreadCount: unreadCount,
           onPressed: onNotifications,
         ),
@@ -4930,16 +4918,16 @@ class _DashboardHeaderActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _DashboardAvatarButton(
-          size: actionSize,
+          size: componentHeight,
           avatarUrl: avatarUrl,
           avatarProvider: avatarProvider,
           fallbackName: fallbackName,
         ),
-        const SizedBox(width: HkSpacing.xs),
+        SizedBox(width: gap),
         Expanded(child: search),
-        const SizedBox(width: HkSpacing.xs),
+        SizedBox(width: gap),
         points,
-        const SizedBox(width: HkSpacing.xs),
+        SizedBox(width: gap),
         notifications,
       ],
     );
@@ -4992,17 +4980,41 @@ class _DashboardAvatarButton extends StatelessWidget {
 }
 
 class _DashboardSearchField extends StatelessWidget {
-  const _DashboardSearchField({required this.onPressed});
+  const _DashboardSearchField({
+    required this.onPressed,
+    required this.isCompact,
+    required this.screenWidth,
+  });
 
   final VoidCallback onPressed;
+
+  /// True when the available width is below 360 px.
+  final bool isCompact;
+
+  /// Available layout width, used to select the responsive placeholder text.
+  final double screenWidth;
+
+  /// Returns the responsive placeholder text for the three mobile breakpoints
+  /// defined in the header refactoring spec (Section 3):
+  ///   W < 360 px  → short form
+  ///   360 ≤ W ≤ 400 px → medium form
+  ///   W > 400 px  → full form
+  String _placeholder(AppLocalizations l10n) {
+    if (screenWidth < 360) return l10n.searchShort;
+    if (screenWidth <= 400) return l10n.searchRoomsItems;
+    return l10n.searchRoomsItemsTasksNotes;
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final height = isCompact ? 40.0 : 44.0;
+    final hPad = isCompact ? 10.0 : HkSpacing.sm;
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(HkRadii.full),
       side: BorderSide(color: scheme.outlineVariant),
     );
+    final placeholder = _placeholder(context.l10n);
     return Semantics(
       button: true,
       excludeSemantics: true,
@@ -5012,7 +5024,7 @@ class _DashboardSearchField extends StatelessWidget {
         excludeFromSemantics: true,
         child: SizedBox(
           key: const ValueKey('home-search-control'),
-          height: hk_ui.kHomePilotHeaderActionHeight,
+          height: height,
           child: Material(
             color: scheme.surfaceContainerLowest,
             shape: shape,
@@ -5021,24 +5033,21 @@ class _DashboardSearchField extends StatelessWidget {
               customBorder: shape,
               onTap: onPressed,
               child: Padding(
-                padding: const EdgeInsetsDirectional.only(
-                  start: HkSpacing.sm,
-                  end: HkSpacing.sm,
-                ),
+                padding: EdgeInsetsDirectional.only(start: hPad, end: hPad),
                 child: Row(
                   children: [
                     Icon(
                       Symbols.search_rounded,
-                      size: 24,
+                      size: 20,
                       color: scheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: HkSpacing.xs),
                     Expanded(
                       child: Text(
-                        context.l10n.searchRoomsItemsTasksNotes,
+                        placeholder,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurfaceVariant.withValues(
                             alpha: 0.78,
                           ),
@@ -5056,28 +5065,36 @@ class _DashboardSearchField extends StatelessWidget {
   }
 }
 
-class _DashboardHeaderAction extends StatelessWidget {
-  const _DashboardHeaderAction({
+class _NotificationButton extends StatelessWidget {
+  const _NotificationButton({
     required this.size,
-    required this.semanticLabel,
-    required this.tooltip,
+    required this.isCompact,
+    required this.unreadCount,
     required this.onPressed,
-    required this.icon,
-    required this.iconColor,
+    super.key,
   });
 
+  /// Component height and width (44 px standard, 40 px compact).
   final double size;
-  final String semanticLabel;
-  final String tooltip;
+
+  /// True when the available width is below 360 px.
+  final bool isCompact;
+
+  final int unreadCount;
   final VoidCallback onPressed;
-  final IconData icon;
-  final Color iconColor;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final semanticLabel = unreadCount > 0
+        ? '${context.l10n.notifications}, ${context.l10n.unreadCount(unreadCount)}'
+        : context.l10n.notifications;
+    // Spec Component D: independent squircle tile with an inline absolute dot
+    // badge (8 × 8 px at top: 10, right: 10) replacing the former oversized
+    // external badge (20 px at top: -7, right: -7).
+    final dotOffset = isCompact ? 8.0 : 10.0;
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(size < 52 ? HkRadii.lg : 19),
+      borderRadius: BorderRadius.circular(HkRadii.lg),
       side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.72)),
     );
     return Semantics(
@@ -5085,7 +5102,7 @@ class _DashboardHeaderAction extends StatelessWidget {
       excludeSemantics: true,
       label: semanticLabel,
       child: Tooltip(
-        message: tooltip,
+        message: context.l10n.notifications,
         excludeFromSemantics: true,
         child: SizedBox.square(
           dimension: size,
@@ -5095,9 +5112,7 @@ class _DashboardHeaderAction extends StatelessWidget {
             elevation: 0,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(
-                  size < 52 ? HkRadii.lg : 19,
-                ),
+                borderRadius: BorderRadius.circular(HkRadii.lg),
                 boxShadow: [
                   BoxShadow(
                     color: HkColors.appTextPrimary.withValues(alpha: 0.06),
@@ -5109,71 +5124,39 @@ class _DashboardHeaderAction extends StatelessWidget {
               child: InkWell(
                 customBorder: shape,
                 onTap: onPressed,
-                child: Icon(icon, color: iconColor, size: size * 0.43),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Icon(
+                        Symbols.notifications_rounded,
+                        size: 20,
+                        // Neutral dark icon per spec (icon_neutral: #344054)
+                        color: const Color(0xFF344054),
+                      ),
+                    ),
+                    if (unreadCount > 0)
+                      PositionedDirectional(
+                        top: dotOffset,
+                        end: dotOffset,
+                        child: Container(
+                          key: const ValueKey('home-notification-unread-badge'),
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            // spec: status_danger #EF4444
+                            color: const Color(0xFFEF4444),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _NotificationButton extends StatelessWidget {
-  const _NotificationButton({
-    required this.size,
-    required this.unreadCount,
-    required this.onPressed,
-    super.key,
-  });
-
-  final double size;
-  final int unreadCount;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final semanticLabel = unreadCount > 0
-        ? '${context.l10n.notifications}, ${context.l10n.unreadCount(unreadCount)}'
-        : context.l10n.notifications;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        _DashboardHeaderAction(
-          size: size,
-          semanticLabel: semanticLabel,
-          tooltip: context.l10n.notifications,
-          onPressed: onPressed,
-          icon: Symbols.notifications_rounded,
-          iconColor: scheme.primary,
-        ),
-        if (unreadCount > 0)
-          PositionedDirectional(
-            end: -7,
-            top: -7,
-            child: Container(
-              key: const ValueKey('home-notification-unread-badge'),
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: HkColors.appDanger,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: scheme.surfaceContainerLowest,
-                  width: 4,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: HkColors.appDanger.withValues(alpha: 0.24),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

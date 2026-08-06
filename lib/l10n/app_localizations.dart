@@ -2731,6 +2731,18 @@ abstract class AppLocalizations {
   /// **'Search HomePilot'**
   String get searchHomePilot;
 
+  /// No description provided for @searchShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Search…'**
+  String get searchShort;
+
+  /// No description provided for @searchRoomsItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Search rooms, items…'**
+  String get searchRoomsItems;
+
   /// No description provided for @itemActions.
   ///
   /// In en, this message translates to:

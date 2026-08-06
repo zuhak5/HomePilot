@@ -438,6 +438,8 @@
   "zoneCount": "{count, plural, =0{لا مناطق} =1{منطقة واحدة} =2{منطقتان} few{{count} مناطق} many{{count} منطقة} other{{count} منطقة}}",
   "calendarDaySummary": "{today, select, true{{date}، {count, plural, =0{لا مهام مستحقة اليوم} =1{مهمة واحدة مستحقة اليوم} =2{مهمتان مستحقتان اليوم} few{{count} مهام مستحقة اليوم} many{{count} مهمة مستحقة اليوم} other{{count} مهمة مستحقة اليوم}}} other{{date}، {count, plural, =0{لا مهام مستحقة} =1{مهمة واحدة مستحقة} =2{مهمتان مستحقتان} few{{count} مهام مستحقة} many{{count} مهمة مستحقة} other{{count} مهمة مستحقة}}}}",
   "searchHomePilot": "البحث في HomePilot",
+  "searchShort": "بحث\u2026",
+  "searchRoomsItems": "ابحث في الغرف والعناصر\u2026",
   "itemActions": "إجراءات العنصر",
   "searchRoomsItemsTasksNotes": "ابحث في الغرف والعناصر والمهام والملاحظات",
   "restore": "استعادة",

@@ -65,6 +65,10 @@ class HkColors {
   static const surfaceAlt = surfaceContainer;
   static const line = outlineVariant;
   static const red = error;
+
+  // Header badge tokens (spec: badge_green_bg / badge_green_icon)
+  static const headerBadgeGreenBg = Color(0xFFECFDF5);
+  static const headerBadgeGreenIcon = Color(0xFF10B981);
 }
 
 class HkSpacing {

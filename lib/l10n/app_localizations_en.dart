@@ -1419,6 +1419,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchHomePilot => 'Search HomePilot';
 
   @override
+  String get searchShort => 'Search…';
+
+  @override
+  String get searchRoomsItems => 'Search rooms, items…';
+
+  @override
   String get itemActions => 'Item actions';
 
   @override

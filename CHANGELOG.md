@@ -4,6 +4,15 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.3 (Build 28) — 2026-08-07
+
+### Improved
+
+- **App Header Refactoring**: Completely modularized and redesigned the dashboard header for responsiveness and clarity. Unnested the monolithic pill container into floating components on a transparent canvas.
+- Responsive search placeholder text and control sizing based on exact device width.
+- Replaced the external notification badge with an inline 8px dot inside the bell icon button.
+- Replaced the legacy points pill with a compact squircle tile featuring a solid emerald star badge.
+
 ## 1.4.2 (Build 27) — 2026-08-06
 
 ### Fixed and Improved

@@ -551,6 +551,8 @@
     }
   },
   "searchHomePilot": "Search HomePilot",
+  "searchShort": "Search\u2026",
+  "searchRoomsItems": "Search rooms, items\u2026",
   "itemActions": "Item actions",
   "searchRoomsItemsTasksNotes": "Search rooms, items, tasks, notes",
   "restore": "Restore",
