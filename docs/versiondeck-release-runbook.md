@@ -48,7 +48,7 @@ The automated production handoff is deliberately fail-closed:
 5. The upstream build commit must remain an ancestor of the current `main`.
 6. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
 
-Failed, cancelled, skipped, or non-production upstream runs do not deploy VersionDeck. Release lifecycle triggers remain necessary because operators can edit or remove releases independently of a new APK build. Shared Pages concurrency prevents overlapping deployment runs from publishing competing site revisions.
+Failed, cancelled, skipped, or non-production upstream runs do not deploy VersionDeck. Release lifecycle triggers remain necessary because operators can edit or remove releases independently of a new APK build. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
 
 The upstream production workflow is manual and protected. Do not broaden the `workflow_run` source to an untrusted pull-request workflow because downstream workflows can receive repository permissions unavailable to the upstream run.
 
@@ -78,8 +78,10 @@ The deployment workflow:
 8. Builds revisioned static assets.
 9. Validates the site.
 10. Uploads diagnostics and the Pages artifact.
-11. Deploys GitHub Pages with protected permissions.
+11. Deploys GitHub Pages with protected permissions. The Pages action may poll for up to 20 minutes before declaring a deployment timeout, while the deployment job allows additional time for the public-manifest check.
 12. Verifies the public manifest after deployment.
+
+The Pages workflow uses the current Node.js 24-compatible major versions of `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`. Upgrade these actions together when GitHub publishes a new supported major so the artifact and deployment contracts remain aligned.
 
 ## Manifest rules
 
@@ -126,6 +128,7 @@ Validate:
 - Do not expose a token in the public site to obtain richer live status.
 - If the production build fails or is cancelled, do not manually represent it as a verified release.
 - If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually only after confirming the release evidence.
+- If `actions/deploy-pages` remains `deployment_in_progress` until its timeout, confirm that no Pages deployment is still active or queued, retain the existing live site, and rerun the VersionDeck workflow. Do not rebuild or republish the APK solely because Pages timed out.
 - If Pages deploys bad static behavior, correct source and redeploy; do not change verified release metadata independently.
 
 ## Post-deployment checks
