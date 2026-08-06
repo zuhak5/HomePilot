@@ -565,6 +565,8 @@ class SyncCoordinator implements CloudSyncRepository {
             0,
             (total, count) => total + count,
           );
+          final failedVisibleCount =
+              mutationCountsAfter[SyncMutationState.failedVisible] ?? 0;
           AppLogger.info(
             'sync_push_completed',
             fields: {
@@ -575,10 +577,24 @@ class SyncCoordinator implements CloudSyncRepository {
                   mutationCountsAfter[SyncMutationState.pending] ?? 0,
               'conflict_recovery':
                   mutationCountsAfter[SyncMutationState.conflictRecovery] ?? 0,
-              'failed_visible':
-                  mutationCountsAfter[SyncMutationState.failedVisible] ?? 0,
+              'failed_visible': failedVisibleCount,
             },
           );
+          if (failedVisibleCount > 0) {
+            final details = await _localStore.listFailedVisibleDetails();
+            AppLogger.info(
+              'sync_failed_visible_detail',
+              fields: {'count': failedVisibleCount, 'details': details},
+            );
+            final abandonedCount = await _localStore
+                .abandonStaleFailedVisibleMutations();
+            if (abandonedCount > 0) {
+              AppLogger.info(
+                'sync_outbox_abandoned',
+                fields: {'abandoned_count': abandonedCount},
+              );
+            }
+          }
         }
       }
       await _ensureActiveAccountScope(activeScope);

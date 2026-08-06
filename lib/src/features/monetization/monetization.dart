@@ -310,8 +310,8 @@ abstract class MonetizationRepository {
   Stream<MonetizationConfig> watchConfig() =>
       Stream.value(const MonetizationConfig.failClosed());
 
-  Stream<List<PendingRewardClaim>> watchPendingRewardClaims(String userId) =>
-      Stream.value(const []);
+  Future<List<PendingRewardClaim>> fetchPendingRewardClaims(String userId) =>
+      Future.value(const []);
 
   Future<PointDebitResult> createAsset(Map<String, dynamic> operation) =>
       Future.error(UnsupportedError('Asset point debit is unavailable.'));
@@ -363,18 +363,24 @@ class SupabaseMonetizationRepository extends MonetizationRepository {
   }
 
   @override
-  Stream<List<PendingRewardClaim>> watchPendingRewardClaims(String userId) {
-    return client
+  Future<List<PendingRewardClaim>> fetchPendingRewardClaims(
+    String userId,
+  ) async {
+    final rows = await client
         .from('reward_claim_requests')
-        .stream(primaryKey: ['claim_id'])
+        .select(
+          'claim_id,user_id,reward_type,ad_unit_id,reward_amount,status,'
+          'reward_day,expires_at,created_at,processed_at,rejection_reason',
+        )
         .eq('user_id', userId)
-        .map(
-          (List<Map<String, dynamic>> rows) => rows
-              .where((row) => row['status'] == 'pending')
-              .map(PendingRewardClaim.fromJson)
-              .where((claim) => claim.expiresAt.isAfter(DateTime.now()))
-              .toList(growable: false),
-        );
+        .eq('status', 'pending')
+        .gt('expires_at', DateTime.now().toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(10);
+    return [
+      for (final row in rows)
+        PendingRewardClaim.fromJson(Map<String, dynamic>.from(row)),
+    ];
   }
 
   @override
@@ -460,14 +466,14 @@ final monetizationConfigProvider = StreamProvider<MonetizationConfig>((ref) {
   return repository.watchConfig();
 });
 
-final pendingRewardClaimsProvider = StreamProvider<List<PendingRewardClaim>>((
+final pendingRewardClaimsProvider = FutureProvider<List<PendingRewardClaim>>((
   ref,
-) {
+) async {
   ref.watch(authSessionProvider);
   final repository = ref.watch(monetizationRepositoryProvider);
   final userId = repository?.currentUserId;
-  if (repository == null || userId == null) return Stream.value(const []);
-  return repository.watchPendingRewardClaims(userId);
+  if (repository == null || userId == null) return const [];
+  return repository.fetchPendingRewardClaims(userId);
 });
 
 class ConsentSnapshot {
@@ -704,6 +710,7 @@ class HomePilotAdsService {
     final completion = Completer<bool>();
     ad.fullScreenContentCallback = FullScreenContentCallback<InterstitialAd>(
       onAdShowedFullScreenContent: (_) {
+        AppLogger.info('ad_impression', fields: {'ad_type': 'interstitial'});
         unawaited(
           repository?.recordEvent('ad_interstitial_shown', analyticsProperties),
         );
@@ -786,7 +793,11 @@ class HomePilotAdsService {
         },
       );
       await ad.show(
-        onUserEarnedReward: (_, _) {
+        onUserEarnedReward: (_, reward) {
+          AppLogger.info(
+            'ad_rewarded',
+            fields: {'ad_type': 'rewarded', 'reward_amount': reward.amount},
+          );
           if (!earned.isCompleted) earned.complete(true);
         },
       );
@@ -820,7 +831,14 @@ class HomePilotAdsService {
             },
           );
       await ad.show(
-        onUserEarnedReward: (_, _) {
+        onUserEarnedReward: (_, reward) {
+          AppLogger.info(
+            'ad_rewarded',
+            fields: {
+              'ad_type': 'rewarded_interstitial',
+              'reward_amount': reward.amount,
+            },
+          );
           if (!earned.isCompleted) earned.complete(true);
         },
       );
@@ -839,6 +857,14 @@ class HomePilotAdsService {
         'verification': 'server_pending',
       }),
     );
+    AppLogger.info(
+      'ad_show_completed',
+      fields: {
+        'ad_type': type.name,
+        'entry_point': entryPoint,
+        'verification': 'server_pending',
+      },
+    );
     return RewardShowResult.shownAwaitingServerVerification;
   }
 
@@ -852,6 +878,7 @@ class HomePilotAdsService {
     }
     _interstitialRetry?.cancel();
     _interstitialRetry = null;
+    AppLogger.info('ad_load_requested', fields: {'ad_type': 'interstitial'});
     _interstitialLoading = true;
     final completion = Completer<void>();
     try {
@@ -862,6 +889,7 @@ class HomePilotAdsService {
           onAdLoaded: (ad) {
             _interstitialLoading = false;
             _interstitialFailures = 0;
+            AppLogger.info('ad_loaded', fields: {'ad_type': 'interstitial'});
             if (_disposed) {
               ad.dispose();
             } else {
@@ -871,7 +899,11 @@ class HomePilotAdsService {
           },
           onAdFailedToLoad: (error) {
             _interstitialLoading = false;
-            AppLogger.warning('interstitial_load', error: error);
+            AppLogger.warning(
+              'ad_load_failed',
+              error: error,
+              fields: {'ad_type': 'interstitial'},
+            );
             _scheduleInterstitialRetry();
             if (!completion.isCompleted) completion.complete();
           },
@@ -879,7 +911,11 @@ class HomePilotAdsService {
       );
     } on Object catch (error) {
       _interstitialLoading = false;
-      AppLogger.warning('interstitial_load', error: error);
+      AppLogger.warning(
+        'ad_load_failed',
+        error: error,
+        fields: {'ad_type': 'interstitial'},
+      );
       _scheduleInterstitialRetry();
       if (!completion.isCompleted) completion.complete();
     }
@@ -896,6 +932,7 @@ class HomePilotAdsService {
     }
     _rewardedRetry?.cancel();
     _rewardedRetry = null;
+    AppLogger.info('ad_load_requested', fields: {'ad_type': 'rewarded'});
     _rewardedLoading = true;
     final completion = Completer<void>();
     try {
@@ -906,6 +943,7 @@ class HomePilotAdsService {
           onAdLoaded: (ad) {
             _rewardedLoading = false;
             _rewardedFailures = 0;
+            AppLogger.info('ad_loaded', fields: {'ad_type': 'rewarded'});
             if (_disposed) {
               ad.dispose();
             } else {
@@ -915,7 +953,11 @@ class HomePilotAdsService {
           },
           onAdFailedToLoad: (error) {
             _rewardedLoading = false;
-            AppLogger.warning('rewarded_load', error: error);
+            AppLogger.warning(
+              'ad_load_failed',
+              error: error,
+              fields: {'ad_type': 'rewarded'},
+            );
             _scheduleRewardedRetry();
             if (!completion.isCompleted) completion.complete();
           },
@@ -923,7 +965,11 @@ class HomePilotAdsService {
       );
     } on Object catch (error) {
       _rewardedLoading = false;
-      AppLogger.warning('rewarded_load', error: error);
+      AppLogger.warning(
+        'ad_load_failed',
+        error: error,
+        fields: {'ad_type': 'rewarded'},
+      );
       _scheduleRewardedRetry();
       if (!completion.isCompleted) completion.complete();
     }
@@ -940,6 +986,10 @@ class HomePilotAdsService {
     }
     _rewardedInterstitialRetry?.cancel();
     _rewardedInterstitialRetry = null;
+    AppLogger.info(
+      'ad_load_requested',
+      fields: {'ad_type': 'rewarded_interstitial'},
+    );
     _rewardedInterstitialLoading = true;
     final completion = Completer<void>();
     try {
@@ -950,6 +1000,10 @@ class HomePilotAdsService {
           onAdLoaded: (ad) {
             _rewardedInterstitialLoading = false;
             _rewardedInterstitialFailures = 0;
+            AppLogger.info(
+              'ad_loaded',
+              fields: {'ad_type': 'rewarded_interstitial'},
+            );
             if (_disposed) {
               ad.dispose();
             } else {
@@ -959,7 +1013,11 @@ class HomePilotAdsService {
           },
           onAdFailedToLoad: (error) {
             _rewardedInterstitialLoading = false;
-            AppLogger.warning('rewarded_interstitial_load', error: error);
+            AppLogger.warning(
+              'ad_load_failed',
+              error: error,
+              fields: {'ad_type': 'rewarded_interstitial'},
+            );
             _scheduleRewardedInterstitialRetry();
             if (!completion.isCompleted) completion.complete();
           },
@@ -967,7 +1025,11 @@ class HomePilotAdsService {
       );
     } on Object catch (error) {
       _rewardedInterstitialLoading = false;
-      AppLogger.warning('rewarded_interstitial_load', error: error);
+      AppLogger.warning(
+        'ad_load_failed',
+        error: error,
+        fields: {'ad_type': 'rewarded_interstitial'},
+      );
       _scheduleRewardedInterstitialRetry();
       if (!completion.isCompleted) completion.complete();
     }
