@@ -148,20 +148,29 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
         : ResizeImage.resizeIfNeeded(decodedWidth, decodedWidth, source);
     final provider = _resolvedProvider;
     if (provider != null) {
-      precacheImage(provider, context)
-          .then((_) {
-            if (mounted && _sourceKey == key) {
-              setState(() => _previousProvider = null);
-            }
-          })
-          .catchError((Object _) {
-            if (mounted && _sourceKey == key) {
-              setState(() {
-                _failed = true;
-                _previousProvider = null;
-              });
-            }
+      precacheImage(
+        provider,
+        context,
+        onError: (Object _, StackTrace? _) {
+          if (mounted && _sourceKey == key) {
+            setState(() {
+              _failed = true;
+              _previousProvider = null;
+            });
+          }
+        },
+      ).then((_) {
+        if (mounted && _sourceKey == key && !_failed) {
+          setState(() => _previousProvider = null);
+        }
+      }).catchError((Object _) {
+        if (mounted && _sourceKey == key) {
+          setState(() {
+            _failed = true;
+            _previousProvider = null;
           });
+        }
+      });
     }
   }
 

@@ -4,6 +4,15 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.1 (Build 26) — 2026-08-06
+
+### Fixed and Improved
+
+- **Maintenance Completion Conflict Resolution**: `SyncCoordinator` now acknowledges and applies canonical remote plan/record snapshots when non-retryable 409 conflicts occur, clearing `failed_visible` mutations automatically.
+- **AdMob Lifecycle & Listener Recovery**: Added `_pendingAd` lifecycle tracking in `_HkNativeAdCardState` to ensure `onAdFailedToLoad` triggers failure handling and exponential retry backoff without dropped callbacks.
+- **Profile Avatar 404 Resilience**: Added `onError` stream error handling to `precacheImage` in `ProfileAvatar` to absorb HTTP 404 network image exceptions cleanly and render initialed fallback avatars.
+- **AdMob SSV Edge Function Test Payloads**: Updated `isAdmobSetupVerificationProbe` in `admob-ssv-handler` to accept synthetic `fakeForAdDebugLog` test payloads as `verified_debug_noop` (HTTP 200), preventing 400 validation log noise.
+
 ## 1.4.0 (Build 25) — 2026-08-06
 
 ### Fixed and Improved

@@ -1360,6 +1360,14 @@ class SyncCoordinator implements CloudSyncRepository {
       result = retried;
     }
 
+    if (result.acknowledged ||
+        (result.status == MaintenanceCompletionStatus.conflict &&
+            !result.retryable &&
+            result.plan != null)) {
+      await _acknowledgeMaintenanceCompletion(mutation, result);
+      return;
+    }
+
     final message = _maintenanceConflictMessage(result);
     await _localStore.markMaintenanceCompletionFailedVisible(
       mutation,
@@ -1398,18 +1406,21 @@ class SyncCoordinator implements CloudSyncRepository {
   ) async {
     final plan = result.plan;
     final record = result.record;
-    if (plan == null || record == null) {
-      throw const SupabaseFailure(
-        kind: SupabaseFailureKind.incompatibleSchema,
-        message: 'The cloud omitted maintenance acknowledgement data.',
+    if (plan != null && record != null) {
+      await _localStore.markMaintenanceCompletionSucceeded(
+        mutation,
+        plan: plan,
+        record: record,
       );
+    } else {
+      await _localStore.markMutationSucceeded(mutation, plan);
+      if (record != null) {
+        await _localStore.applyRemoteRecords([record]);
+      }
     }
-    await _localStore.markMaintenanceCompletionSucceeded(
-      mutation,
-      plan: plan,
-      record: record,
-    );
-    await _reconcileMaintenanceCompletionReminders(mutation);
+    if (plan != null) {
+      await _reconcileMaintenanceCompletionReminders(mutation);
+    }
     AppLogger.info(
       'sync_maintenance_completion_acknowledged',
       fields: {

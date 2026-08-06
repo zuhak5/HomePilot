@@ -1131,6 +1131,7 @@ class HkNativeAdCard extends ConsumerStatefulWidget {
 
 class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
   NativeAd? _ad;
+  NativeAd? _pendingAd;
   bool _loaded = false;
   bool _failed = false;
   bool _loadStarted = false;
@@ -1149,6 +1150,7 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
   void dispose() {
     _retryTimer?.cancel();
     _ad?.dispose();
+    _pendingAd?.dispose();
     super.dispose();
   }
 
@@ -1193,6 +1195,7 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
       request: const AdRequest(),
       listener: NativeAdListener(
         onAdLoaded: (loadedAd) {
+          if (_pendingAd == loadedAd) _pendingAd = null;
           if (!mounted ||
               _ad != loadedAd ||
               !(ModalRoute.isCurrentOf(context) ?? true)) {
@@ -1215,9 +1218,11 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
         },
         onAdFailedToLoad: (failedAd, _) {
           failedAd.dispose();
-          if (!mounted || _ad != failedAd) return;
+          final isTracked = _ad == failedAd || _pendingAd == failedAd;
+          if (_pendingAd == failedAd) _pendingAd = null;
+          if (_ad == failedAd) _ad = null;
+          if (!mounted || !isTracked) return;
           setState(() {
-            _ad = null;
             _loaded = false;
             _failed = true;
           });
@@ -1242,6 +1247,7 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
       ),
     );
     _ad = ad;
+    _pendingAd = ad;
     await ad.load();
   }
 
@@ -1262,11 +1268,14 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
     _retryTimer?.cancel();
     _retryTimer = null;
     final ad = _ad;
+    final pending = _pendingAd;
     _ad = null;
+    _pendingAd = null;
     _loaded = false;
     _failed = false;
     _loadStarted = false;
     ad?.dispose();
+    pending?.dispose();
   }
 }
 

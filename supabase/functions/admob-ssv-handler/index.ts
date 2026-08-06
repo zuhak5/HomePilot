@@ -573,9 +573,13 @@ function isAdmobSetupVerificationProbe(
   request: Request,
   callback: ParsedSsvCallback,
 ): boolean {
-  return request.headers.get("user-agent") === admobVerificationUserAgent &&
-    callback.rawAdUnitId === admobVerificationAdUnit &&
-    callback.transactionId === admobVerificationTransaction;
+  return (
+    (request.headers.get("user-agent") === admobVerificationUserAgent &&
+      callback.rawAdUnitId === admobVerificationAdUnit &&
+      callback.transactionId === admobVerificationTransaction) ||
+    callback.claimId === "fakeForAdDebugLog" ||
+    callback.userId === "fakeForAdDebugLog"
+  );
 }
 
 function setupProbeTimestampFailure(
