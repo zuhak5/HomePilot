@@ -4,19 +4,25 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.2 (Build 27) — 2026-08-06
+
+### Fixed and Improved
+
+- **Reward Claims Request Optimization**: Replaced `reward_claim_requests` `.stream()` polling loop (22 calls/4 min) in `MonetizationRepository` with `fetchPendingRewardClaims` returning a `FutureProvider` one-shot query, eliminating approximately 95% of reward claim REST API traffic.
+- **Stuck Outbox Row Observability & Abandonment**: Added `listFailedVisibleDetails` and `abandonStaleFailedVisibleMutations` in `LocalSyncStore`. `SyncCoordinator` now emits `sync_failed_visible_detail` structured logs for failed outbox entries and auto-abandons stale mutations older than 7 days (`sync_outbox_abandoned`).
+- **AdMob Firebase Integration**: Added `com.google.firebase:firebase-analytics` and Google Services Gradle plugin configuration to resolve the AdMob SDK Firebase integration warning and enable enhanced targeting.
+- **AdMob Application-Layer Structured Logging**: Added structured `AppLogger.info` lifecycle events (`ad_load_requested`, `ad_loaded`, `ad_load_failed`, `ad_impression`, `ad_rewarded`, `ad_show_completed`) to `HomePilotAdsService`.
+- **Network Request Usage Audit**: Added a comprehensive network architecture review and request-usage audit report in `docs/request-audit-report.md`.
+- **VersionDeck Deployment Reliability**: Upgraded the GitHub Pages actions to their Node.js 24-compatible major versions, serialized production deployments without cancelling an active publish, and extended Pages deployment polling to tolerate slow but healthy deployments.
+
 ## 1.4.1 (Build 26) — 2026-08-06
 
 ### Fixed and Improved
 
-- **Reward Claims Request Optimization**: Replaced `reward_claim_requests` `.stream()` polling loop (22 calls/4 min) in `MonetizationRepository` with `fetchPendingRewardClaims` returning a `FutureProvider` one-shot query, eliminating ~95% of reward claim REST API traffic.
-- **Stuck Outbox Row Observability & Abandonment**: Added `listFailedVisibleDetails` and `abandonStaleFailedVisibleMutations` in `LocalSyncStore`. `SyncCoordinator` now emits `sync_failed_visible_detail` structured logs for failed outbox entries and auto-abandons stale mutations older than 7 days (`sync_outbox_abandoned`).
-- **AdMob Firebase Integration**: Added `com.google.firebase:firebase-analytics` dependency and Google Services Gradle plugin configuration to resolve AdMob SDK Firebase integration warning and enable enhanced targeting.
-- **AdMob Application-Layer Structured Logging**: Added structured `AppLogger.info` lifecycle events (`ad_load_requested`, `ad_loaded`, `ad_load_failed`, `ad_impression`, `ad_rewarded`, `ad_show_completed`) to `HomePilotAdsService`.
 - **Maintenance Completion Conflict Resolution**: `SyncCoordinator` now acknowledges and applies canonical remote plan/record snapshots when non-retryable 409 conflicts occur, clearing `failed_visible` mutations automatically.
 - **AdMob Lifecycle & Listener Recovery**: Added `_pendingAd` lifecycle tracking in `_HkNativeAdCardState` to ensure `onAdFailedToLoad` triggers failure handling and exponential retry backoff without dropped callbacks.
 - **Profile Avatar 404 Resilience**: Added `onError` stream error handling to `precacheImage` in `ProfileAvatar` to absorb HTTP 404 network image exceptions cleanly and render initialed fallback avatars.
 - **AdMob SSV Edge Function Test Payloads**: Updated `isAdmobSetupVerificationProbe` in `admob-ssv-handler` to accept synthetic `fakeForAdDebugLog` test payloads as `verified_debug_noop` (HTTP 200), preventing 400 validation log noise.
-- **Network Request Usage Audit**: Compiled comprehensive network architecture review and request-usage audit report in `docs/request-audit-report.md`.
 
 ## 1.4.0 (Build 25) — 2026-08-06
 
