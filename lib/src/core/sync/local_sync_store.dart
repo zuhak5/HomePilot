@@ -1987,6 +1987,35 @@ ON CONFLICT(key) DO UPDATE SET
     ];
   }
 
+  Future<List<Map<String, String>>> listFailedVisibleDetails() async {
+    final rows =
+        await (db.select(db.syncOutbox)..where(
+              (row) =>
+                  row.state.equals('failedVisible') | row.attempts.equals(-1),
+            ))
+            .get();
+    return [
+      for (final row in rows)
+        {
+          'entity': row.entity,
+          'operation': row.operation,
+          'error_code': row.lastErrorCode ?? 'unknown',
+        },
+    ];
+  }
+
+  Future<int> abandonStaleFailedVisibleMutations({
+    Duration maxAge = const Duration(days: 7),
+  }) async {
+    final cutoff = DateTime.now().subtract(maxAge);
+    return (db.delete(db.syncOutbox)..where(
+          (row) =>
+              (row.state.equals('failedVisible') | row.attempts.equals(-1)) &
+              row.changedAt.isSmallerThanValue(cutoff),
+        ))
+        .go();
+  }
+
   Future<void> resolveFailedMutation({
     required String entity,
     required String recordKey,
