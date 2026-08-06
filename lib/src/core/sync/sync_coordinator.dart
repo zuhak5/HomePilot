@@ -1232,10 +1232,7 @@ class SyncCoordinator implements CloudSyncRepository {
                   rethrow;
                 } on Object catch (error) {
                   final failure = SupabaseFailure.from(error);
-                  await _recordMutationFailure(
-                    batchMutations[offset],
-                    failure,
-                  );
+                  await _recordMutationFailure(batchMutations[offset], failure);
                   rethrow;
                 }
               }
