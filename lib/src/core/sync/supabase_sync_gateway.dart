@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../supabase/supabase_failure.dart';
+import '../utils/redacting_logger.dart';
 import 'media_download_cache.dart';
 import 'sync_dtos.dart';
 
@@ -88,6 +89,10 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
   final SupabaseClient _client;
   final MediaDownloadCache _mediaDownloadCache;
   RealtimeChannel? _realtimeChannel;
+  static final _processInstanceId =
+      'proc-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+  String? _channelLifecycleId;
+
   static const pageSize = 200;
   static const _bucket = 'user-media';
   static const _maximumMediaBytes = 10 * 1024 * 1024;
@@ -110,6 +115,18 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
     required void Function(SyncRealtimeStatus status, Object? error) onStatus,
   }) async {
     await stopRealtime();
+    _channelLifecycleId =
+        'chan-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+    final lifecycleId = _channelLifecycleId!;
+    AppLogger.info(
+      'realtime_channel_lifecycle',
+      fields: {
+        'process_instance_id': _processInstanceId,
+        'channel_lifecycle_id': lifecycleId,
+        'event': 'connecting',
+        'active_channels_count': 1,
+      },
+    );
     var channel = _client.channel(
       'homepilot-sync-$userId-$deviceId-${DateTime.now().microsecondsSinceEpoch}',
     );
@@ -148,12 +165,24 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
     }
     _realtimeChannel = channel;
     channel.subscribe((status, error) {
-      onStatus(switch (status) {
+      final syncStatus = switch (status) {
         RealtimeSubscribeStatus.subscribed => SyncRealtimeStatus.subscribed,
         RealtimeSubscribeStatus.closed ||
         RealtimeSubscribeStatus.timedOut => SyncRealtimeStatus.disconnected,
         RealtimeSubscribeStatus.channelError => SyncRealtimeStatus.failed,
-      }, error);
+      };
+      AppLogger.info(
+        'realtime_channel_lifecycle',
+        fields: {
+          'process_instance_id': _processInstanceId,
+          'channel_lifecycle_id': lifecycleId,
+          'event': status.name,
+          'active_channels_count': syncStatus == SyncRealtimeStatus.subscribed
+              ? 1
+              : 0,
+        },
+      );
+      onStatus(syncStatus, error);
     });
   }
 
@@ -172,8 +201,19 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
   @override
   Future<void> stopRealtime() async {
     final channel = _realtimeChannel;
+    final lifecycleId = _channelLifecycleId;
     _realtimeChannel = null;
+    _channelLifecycleId = null;
     if (channel != null) {
+      AppLogger.info(
+        'realtime_channel_lifecycle',
+        fields: {
+          'process_instance_id': _processInstanceId,
+          'channel_lifecycle_id': lifecycleId ?? 'unknown',
+          'event': 'stopped',
+          'active_channels_count': 0,
+        },
+      );
       await _client.removeChannel(channel);
     }
   }
@@ -492,12 +532,12 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
     }
   }
 
-  Future<List<SyncRecord>?> writeNewBatch({
+  Future<BatchWriteResult> writeNewBatch({
     required List<SyncRecord> records,
     required String userId,
     required String deviceId,
   }) async {
-    if (records.isEmpty) return const [];
+    if (records.isEmpty) return const BatchWriteSuccess([]);
     final spec = records.first.spec;
     if (records.any(
       (record) =>
@@ -506,7 +546,7 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
           record.spec.entity == 'asset_photo' ||
           record.spec.entity == 'profile',
     )) {
-      return null;
+      return const BatchWriteUnsuitable();
     }
     try {
       final payloads = <Map<String, dynamic>>[];
@@ -519,12 +559,27 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
             .insert(payloads)
             .select(spec.selectClause),
       );
-      return [
+      return BatchWriteSuccess([
         for (final item in response)
           SyncRecord.fromRemote(spec, Map<String, dynamic>.from(item)),
-      ];
+      ]);
     } on PostgrestException catch (error) {
-      if (error.code == '23505') return null;
+      if (error.code == '23505') {
+        final details = error.details?.toString().toLowerCase() ?? '';
+        final message = error.message.toLowerCase();
+        final isPkey =
+            details.contains('_pkey') ||
+            message.contains('_pkey') ||
+            details.contains('primary key') ||
+            message.contains('primary key') ||
+            error.details == null;
+        return BatchWriteConflict(
+          code: error.code ?? '23505',
+          message: error.message,
+          details: error.details?.toString(),
+          isPrimaryKeyConflict: isPkey,
+        );
+      }
       throw SupabaseFailure.from(error);
     } on Object catch (error) {
       throw SupabaseFailure.from(error);
@@ -819,6 +874,32 @@ RealtimeSyncEvent _realtimeEvent(
     updatedAt: _parseUtc(row['updated_at']),
     originDeviceId: row['origin_device_id'] as String?,
   );
+}
+
+sealed class BatchWriteResult {
+  const BatchWriteResult();
+}
+
+final class BatchWriteSuccess extends BatchWriteResult {
+  const BatchWriteSuccess(this.records);
+  final List<SyncRecord> records;
+}
+
+final class BatchWriteUnsuitable extends BatchWriteResult {
+  const BatchWriteUnsuitable();
+}
+
+final class BatchWriteConflict extends BatchWriteResult {
+  const BatchWriteConflict({
+    required this.code,
+    required this.message,
+    required this.details,
+    required this.isPrimaryKeyConflict,
+  });
+  final String code;
+  final String message;
+  final String? details;
+  final bool isPrimaryKeyConflict;
 }
 
 SyncRealtimeEventType _realtimeType(PostgresChangeEvent event) {

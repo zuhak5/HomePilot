@@ -17887,6 +17887,13 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
         await ref
             .read(offlineCreationDraftStoreProvider)
             .clear(_offlineDraftKey);
+        await ref
+            .read(localSyncStoreProvider)
+            ?.acknowledgeTaskCreationComposite(
+              planId: planId,
+              planJson: debitResult?.plan,
+              metadataJson: debitResult?.metadata,
+            );
       }
       if (debitResult?.charged == 1) {
         unawaited(

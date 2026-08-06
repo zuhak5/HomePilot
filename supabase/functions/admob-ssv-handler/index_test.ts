@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists, assertMatch } from "jsr:@std/assert@1";
 
 import {
   derEcdsaSignatureToP1363,
@@ -61,18 +61,18 @@ Deno.test("callback only accepts GET and advertises the allowed method", async (
 Deno.test("Google optional user_id and custom_data may be absent from the envelope", () => {
   const parsed = parseSsvCallback(reportedGoogleUrl());
   assertExists(parsed);
-  assertEquals(parsed.userId, null);
-  assertEquals(parsed.claimId, null);
-  assertEquals(parsed.rawAdUnitId, "1234567890");
-  assertEquals(parsed.rewardItem, "point");
+  assertEquals(parsed!.userId, null);
+  assertEquals(parsed!.claimId, null);
+  assertEquals(parsed!.rawAdUnitId, "1234567890");
+  assertEquals(parsed!.rewardItem, "point");
 });
 
 Deno.test("the exact reported Google callback has a valid ECDSA signature", async () => {
   const parsed = parseSsvCallback(reportedGoogleUrl());
   assertExists(parsed);
-  assertEquals(parsed.keyId, 3335741209);
+  assertEquals(parsed!.keyId, 3335741209);
   assertEquals(
-    await verifySsvSignature(parsed, reportedGooglePublicKey),
+    await verifySsvSignature(parsed!, reportedGooglePublicKey),
     true,
   );
 });
@@ -99,7 +99,9 @@ Deno.test("the exact signed AdMob configuration probe returns 200 without settle
   assertEquals(await response.json(), {
     request_id: requestId,
     accepted: true,
-    mode: "admob_configuration_test",
+    credited: false,
+    duplicate: false,
+    mode: "verified_debug_noop",
   });
   assertEquals(settled, false);
   assert(
@@ -108,7 +110,7 @@ Deno.test("the exact signed AdMob configuration probe returns 200 without settle
     ),
   );
   assert(
-    logs.some((record) => record.event === "setup_probe_accepted"),
+    logs.some((record) => record.event === "debug_callback_accepted"),
   );
 });
 
@@ -420,7 +422,7 @@ Deno.test("structured logs cover every parameter without sensitive values", asyn
   );
   const parsedLog = logs.find((record) => record.event === "callback_parsed");
   assertExists(parsedLog);
-  const parameters = parsedLog.parameters as Record<string, unknown>;
+  const parameters = parsedLog!.parameters as Record<string, unknown>;
   assertEquals(Object.keys(parameters).sort(), [
     "ad_network",
     "ad_unit",
@@ -444,7 +446,7 @@ Deno.test("strict DER conversion returns a 64-byte P-256 signature", async () =>
   const vector = await signedRequest();
   const parsed = parseSsvCallback(new URL(vector.request.url));
   assertExists(parsed);
-  const raw = derEcdsaSignatureToP1363(parsed.signature, 32);
+  const raw = derEcdsaSignatureToP1363(parsed!.signature, 32);
   assertEquals(raw.length, 64);
   assertMatch(toBase64Url(raw), /^[A-Za-z0-9_-]+$/);
 });

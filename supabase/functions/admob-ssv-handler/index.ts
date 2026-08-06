@@ -263,14 +263,17 @@ export async function handleAdmobSsv(
         });
         return respond(400, { error: "invalid_timestamp" });
       }
-      emit("info", "setup_probe_accepted", {
-        key_id: parsed.keyId,
+      emit("info", "debug_callback_accepted", {
+        transaction_fingerprint: await identifierFingerprint(parsed.transactionId),
         database_operation: "skipped",
+        key_id: parsed.keyId,
         reason: "signed_admob_configuration_test",
       });
       return respond(200, {
         accepted: true,
-        mode: "admob_configuration_test",
+        credited: false,
+        duplicate: false,
+        mode: "verified_debug_noop",
       });
     }
 

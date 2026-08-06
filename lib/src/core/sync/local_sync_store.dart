@@ -1957,6 +1957,103 @@ ON CONFLICT(key) DO UPDATE SET
     });
   }
 
+  Future<List<Map<String, dynamic>>> exportFailedMutationDiagnostics() async {
+    final rows =
+        await (db.select(db.syncOutbox)..where(
+              (row) =>
+                  row.state.equals('failedVisible') | row.attempts.equals(-1),
+            ))
+            .get();
+    return [
+      for (final row in rows)
+        {
+          'mutation_type': row.entity,
+          'state': row.state,
+          'operation_fingerprint': sha256
+              .convert(utf8.encode(row.recordKey))
+              .toString()
+              .substring(0, 12),
+          'changed_at': row.changedAt.toUtc().toIso8601String(),
+          'created_at': row.createdAt?.toUtc().toIso8601String(),
+          'attempt_count': row.attempts,
+          'last_error_code': row.lastErrorCode ?? 'unknown',
+          'sanitized_reason': row.lastError ?? 'none',
+          'retryable': false,
+          'payload_hash': row.payloadJson != null
+              ? sha256.convert(utf8.encode(row.payloadJson!)).toString()
+              : null,
+          'supported_actions': const ['retry', 'acknowledge', 'dismiss'],
+        },
+    ];
+  }
+
+  Future<void> resolveFailedMutation({
+    required String entity,
+    required String recordKey,
+    required String action,
+  }) async {
+    await db.transaction(() async {
+      Expression<bool> target(SyncOutbox row) =>
+          row.entity.equals(entity) & row.recordKey.equals(recordKey);
+      if (action == 'dismiss' || action == 'acknowledge') {
+        await (db.delete(db.syncOutbox)..where(target)).go();
+      } else if (action == 'retry') {
+        await (db.update(db.syncOutbox)..where(target)).write(
+          const SyncOutboxCompanion(
+            attempts: Value(0),
+            state: Value('pending'),
+            nextAttemptAt: Value(null),
+          ),
+        );
+      }
+    });
+  }
+
+  Future<void> acknowledgeTaskCreationComposite({
+    required String planId,
+    Map<String, dynamic>? planJson,
+    Map<String, dynamic>? metadataJson,
+  }) async {
+    final records = <SyncRecord>[];
+    final planSpec = syncEntitySpecs.firstWhere(
+      (s) => s.entity == 'maintenance_plan',
+    );
+    final metaSpec = syncEntitySpecs.firstWhere(
+      (s) => s.entity == 'maintenance_plan_metadata',
+    );
+    if (planJson != null) {
+      records.add(SyncRecord.fromRemote(planSpec, planJson));
+    }
+    if (metadataJson != null && metadataJson.isNotEmpty) {
+      records.add(SyncRecord.fromRemote(metaSpec, metadataJson));
+    }
+
+    await db.transaction(() async {
+      if (records.isNotEmpty) {
+        await applyRemoteRecords(records);
+      }
+      await (db.delete(db.syncOutbox)..where(
+            (row) =>
+                (row.entity.equals('maintenance_plan') &
+                    row.recordKey.equals(planId)) |
+                (row.entity.equals('maintenance_plan_metadata') &
+                    row.recordKey.equals(planId)),
+          ))
+          .go();
+    });
+  }
+
+  bool validateUserSettingKey(String key) {
+    if (!allowedRemoteSettingKeys.contains(key)) {
+      throw ArgumentError.value(
+        key,
+        'key',
+        'Undeclared remote setting key cannot be enqueued for sync.',
+      );
+    }
+    return true;
+  }
+
   Future<void> _restoreRejectedMaintenanceCompletionPreimage(
     LocalSyncMutation mutation,
   ) async {

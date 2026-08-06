@@ -276,6 +276,8 @@ class PointDebitResult {
     required this.balance,
     required this.charged,
     required this.alreadyProcessed,
+    this.plan,
+    this.metadata,
   });
 
   factory PointDebitResult.fromJson(Map<String, dynamic> json) =>
@@ -283,11 +285,19 @@ class PointDebitResult {
         balance: json['balance'] as int? ?? 0,
         charged: json['charged'] as int? ?? 0,
         alreadyProcessed: json['already_processed'] as bool? ?? false,
+        plan: json['plan'] is Map
+            ? Map<String, dynamic>.from(json['plan'] as Map)
+            : null,
+        metadata: json['metadata'] is Map
+            ? Map<String, dynamic>.from(json['metadata'] as Map)
+            : null,
       );
 
   final int balance;
   final int charged;
   final bool alreadyProcessed;
+  final Map<String, dynamic>? plan;
+  final Map<String, dynamic>? metadata;
 }
 
 abstract class MonetizationRepository {

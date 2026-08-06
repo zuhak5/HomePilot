@@ -6,7 +6,15 @@ The current application version is defined only in `pubspec.yaml`. Released vers
 
 ## Unreleased
 
-No unreleased changes are currently recorded.
+### Fixed and Improved
+
+- **Database & Sync Contracts**: Aligned `user_settings_key_check` PostgreSQL constraint to include `permission_education_seen_v2`. Enforced pre-enqueue validation against Dart setting key allowlist (`userSettingSyncSpec`).
+- **Composite Task Creation**: Extended `create_task_with_point_debit_impl` RPC to return canonical `plan` and `metadata` JSON. Implemented `acknowledgeTaskCreationComposite` in `LocalSyncStore` to apply canonical rows and clear outbox entries atomically without redundant POST attempts.
+- **Batch Conflict Recovery**: Updated `writeNewBatch` handling in `SupabaseSyncGateway` and `SyncCoordinator` with `BatchWriteResult`. 23505 primary key conflicts fetch/merge canonical records directly instead of issuing second blind inserts.
+- **Failed Mutation Diagnostics**: Implemented single-row `resolveFailedMutation` (`dismiss`, `retry`, `acknowledge`) and `exportFailedMutationDiagnostics()` with strict DLP PII scrubbing.
+- **AdMob SSV Edge Function**: Updated setup probe response mode to `verified_debug_noop` with `credited: false` and `duplicate: false`.
+- **Realtime Observability**: Added ephemeral process instance ID, channel lifecycle tracking, and active subscription count metrics.
+- **Startup Performance**: Instrumented release-safe startup spans and added cold launch performance benchmarks.
 
 ## 1.3.9 (Build 24) — 2026-08-05
 

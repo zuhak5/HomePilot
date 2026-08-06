@@ -71,7 +71,7 @@ class _StatefulGateway implements SupabaseSyncGateway {
   }
 
   @override
-  Future<List<SyncRecord>?> writeNewBatch({
+  Future<BatchWriteResult> writeNewBatch({
     required List<SyncRecord> records,
     required String userId,
     required String deviceId,
@@ -85,10 +85,17 @@ class _StatefulGateway implements SupabaseSyncGateway {
         deviceId: deviceId,
         expectedRevision: null,
       );
-      if (result.conflict || result.canonical == null) return null;
+      if (result.conflict || result.canonical == null) {
+        return const BatchWriteConflict(
+          code: '23505',
+          message: 'Conflict',
+          details: 'primary key',
+          isPrimaryKeyConflict: true,
+        );
+      }
       canonical.add(result.canonical!);
     }
-    return canonical;
+    return BatchWriteSuccess(canonical);
   }
 
   @override
@@ -1034,7 +1041,7 @@ void main() {
           userId: any(named: 'userId'),
           deviceId: any(named: 'deviceId'),
         ),
-      ).thenAnswer((_) async => null);
+      ).thenAnswer((_) async => const BatchWriteUnsuitable());
       when(
         () => gateway.pullCatalogCategories(userId: any(named: 'userId')),
       ).thenAnswer((_) async => const []);
@@ -1307,7 +1314,7 @@ void main() {
         userId: any(named: 'userId'),
         deviceId: any(named: 'deviceId'),
       ),
-    ).thenAnswer((_) async => null);
+    ).thenAnswer((_) async => const BatchWriteUnsuitable());
     final pulls = <String, int>{};
     when(
       () => gateway.pullCatalogCategories(userId: any(named: 'userId')),

@@ -1137,9 +1137,9 @@ class SyncCoordinator implements CloudSyncRepository {
               index++;
             }
             if (batchRecords.isNotEmpty) {
-              List<SyncRecord>? canonical;
+              BatchWriteResult batchResult;
               try {
-                canonical = await _remoteGateway.writeNewBatch(
+                batchResult = await _remoteGateway.writeNewBatch(
                   records: batchRecords,
                   userId: userId,
                   deviceId: deviceId,
@@ -1154,9 +1154,10 @@ class SyncCoordinator implements CloudSyncRepository {
                 }
                 rethrow;
               }
-              if (canonical != null) {
+              if (batchResult is BatchWriteSuccess) {
                 final byKey = {
-                  for (final record in canonical) record.recordKey: record,
+                  for (final record in batchResult.records)
+                    record.recordKey: record,
                 };
                 for (final item in batchMutations) {
                   await _localStore.markMutationSucceeded(
@@ -1168,6 +1169,52 @@ class SyncCoordinator implements CloudSyncRepository {
                   await _localStore.addHydrationUnits(batchMutations.length);
                 }
                 continue;
+              } else if (batchResult is BatchWriteConflict) {
+                AppLogger.warning(
+                  'sync_batch_write_conflict',
+                  fields: {
+                    'entity': mutation.entity,
+                    'code': batchResult.code,
+                    'is_pkey': batchResult.isPrimaryKeyConflict,
+                    'count': batchMutations.length,
+                  },
+                );
+                if (batchResult.isPrimaryKeyConflict) {
+                  for (
+                    var offset = 0;
+                    offset < batchMutations.length;
+                    offset++
+                  ) {
+                    final item = batchMutations[offset];
+                    final rec = batchRecords[offset];
+                    final canonical = await _remoteGateway.fetch(
+                      spec: rec.spec,
+                      userId: userId,
+                      deviceId: deviceId,
+                      recordKey: rec.recordKey,
+                    );
+                    if (canonical != null) {
+                      await _localStore.markMutationSucceeded(item, canonical);
+                    } else {
+                      await _localStore.markMutationFailed(
+                        item,
+                        'Primary key conflict occurred but canonical row was absent (23505).',
+                      );
+                    }
+                  }
+                  if (trackHydration) {
+                    await _localStore.addHydrationUnits(batchMutations.length);
+                  }
+                  continue;
+                } else {
+                  for (final item in batchMutations) {
+                    await _localStore.markMutationFailed(
+                      item,
+                      'Batch write conflict ${batchResult.code}: ${batchResult.message}',
+                    );
+                  }
+                  continue;
+                }
               }
               for (var offset = 0; offset < batchMutations.length; offset++) {
                 try {
@@ -1185,7 +1232,10 @@ class SyncCoordinator implements CloudSyncRepository {
                   rethrow;
                 } on Object catch (error) {
                   final failure = SupabaseFailure.from(error);
-                  await _recordMutationFailure(batchMutations[offset], failure);
+                  await _recordMutationFailure(
+                    batchMutations[offset],
+                    failure,
+                  );
                   rethrow;
                 }
               }
@@ -1322,10 +1372,14 @@ class SyncCoordinator implements CloudSyncRepository {
       await _reconcileMaintenanceCompletionReminders(mutation);
     }
     AppLogger.warning(
-      'sync_maintenance_completion_failed_visible',
+      'sync_maintenance_completion_result',
       fields: {
         'operation': _diagnosticId(mutation.operationId),
-        'retryable': false,
+        'status': result.status.name,
+        'reason': result.conflictReason ?? 'none',
+        'retryable': result.retryable,
+        'current_revision': result.currentPlanRevision,
+        'attempt': mutation.attempts,
       },
     );
     throw SupabaseFailure(

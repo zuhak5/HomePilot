@@ -124,6 +124,35 @@ class SyncEntitySpec {
   }
 }
 
+const allowedRemoteSettingKeys = <String>{
+  'theme',
+  'app_language',
+  'app_language_explicit',
+  'theme_time_of_day_enabled',
+  'notifications_enabled',
+  'notification_preferences',
+  'onboarding_completed',
+  'permission_education_seen',
+  'permission_education_seen_v2',
+  'home_location',
+};
+
+const userSettingSyncSpec = SyncEntitySpec(
+  entity: 'user_setting',
+  localTable: 'settings',
+  remoteTable: 'user_settings',
+  keyColumns: ['key'],
+  localColumns: ['key', 'value', 'updated_at'],
+  dateColumns: {'updated_at'},
+  modifiedExpression: 'updated_at',
+  localWhere:
+      "key IN ('theme', 'app_language', 'app_language_explicit', 'theme_time_of_day_enabled', "
+      "'notifications_enabled', "
+      "'notification_preferences', 'onboarding_completed', "
+      "'permission_education_seen', 'permission_education_seen_v2', "
+      "'home_location')",
+);
+
 const syncEntitySpecs = <SyncEntitySpec>[
   SyncEntitySpec(
     entity: 'category',
@@ -386,21 +415,7 @@ const syncEntitySpecs = <SyncEntitySpec>[
     jsonColumns: {'message_args'},
     modifiedExpression: 'updated_at',
   ),
-  SyncEntitySpec(
-    entity: 'user_setting',
-    localTable: 'settings',
-    remoteTable: 'user_settings',
-    keyColumns: ['key'],
-    localColumns: ['key', 'value', 'updated_at'],
-    dateColumns: {'updated_at'},
-    modifiedExpression: 'updated_at',
-    localWhere:
-        "key IN ('theme', 'app_language', 'app_language_explicit', 'theme_time_of_day_enabled', "
-        "'notifications_enabled', "
-        "'notification_preferences', 'onboarding_completed', "
-        "'permission_education_seen', 'permission_education_seen_v2', "
-        "'home_location')",
-  ),
+  userSettingSyncSpec,
   SyncEntitySpec(
     entity: 'streak',
     localTable: 'streaks',
