@@ -4,7 +4,13 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
-## 1.4.3 (Build 28) — 2026-08-07
+## 1.4.4 (Build 29) — 2026-08-07
+
+### Fixed and Improved
+
+- **Complete Maintenance Task & Task Creation Remediation**: End-to-end remediation of task creation and task completion RPCs, widget test provider identity overrides, operation journaling fallback, and notification inbox reconciliation. Fully verified by Flutter test suite (383/383 passing) and Supabase pgTAP database test suite (252/252 passing).
+
+## 1.4.3 (Build 28) — 2026-08-06
 
 ### Improved
 
@@ -12,7 +18,6 @@ The current application version is defined only in `pubspec.yaml`. Released vers
 - Responsive search placeholder text and control sizing based on exact device width.
 - Replaced the external notification badge with an inline 8px dot inside the bell icon button.
 - Replaced the legacy points pill with a compact squircle tile featuring a solid emerald star badge.
-- **Complete Maintenance Task & Task Creation Remediation**: End-to-end remediation of task creation and task completion RPCs, widget test provider identity overrides, operation journaling fallback, and notification inbox reconciliation. Fully verified by Flutter test suite (383/383 passing) and Supabase pgTAP database test suite (252/252 passing).
 
 ## 1.4.2 (Build 27) — 2026-08-06
 
