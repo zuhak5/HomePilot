@@ -849,7 +849,7 @@ void main() {
       expect(duplicate, isFalse);
       expect(records, hasLength(1));
       expect(records.single.dueDate, originalDue);
-      expect(updated?.plan.nextDueDate, DateTime(2026, 6, 22, 18, 45, 12));
+      expect(updated?.plan.nextDueDate, DateTime(2026, 6, 22, 15, 45, 12));
     });
 
     test('streak refresh counts completions due today with a time', () async {

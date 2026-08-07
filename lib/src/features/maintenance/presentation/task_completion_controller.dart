@@ -66,6 +66,13 @@ class TaskCompletionController extends ValueNotifier<TaskCompletionState> {
     String? notes,
     DateTime? expectedNextDueDate,
   }) async {
+    if (value.phase == TaskCompletionPhase.committingLocal ||
+        value.phase == TaskCompletionPhase.reconcilingReminder) {
+      return value.result ??
+          const LocalMaintenanceCompletionResult(
+            status: LocalMaintenanceCompletionStatus.occurrenceChanged,
+          );
+    }
     value = const TaskCompletionState(
       phase: TaskCompletionPhase.committingLocal,
     );

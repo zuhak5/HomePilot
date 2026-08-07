@@ -107,7 +107,7 @@ Device clocks are not a sole source of truth for global ordering. Prefer server 
 
 ## Maintenance completion
 
-Maintenance completion affects history, recurrence, due state, reminders, statistics, and potentially multiple devices. Completion operations require stable idempotency keys. If the server rejects or resolves a duplicate, local reminder and recurrence state must reconcile to the accepted cloud result rather than advance permanently from an unaccepted local assumption.
+Maintenance completion affects history, recurrence, due state, reminders, statistics, and potentially multiple devices. Completion operations require stable idempotency keys. Maintenance completion timestamps (`completedAt`, `expectedNextDueDate`, `previousDueDate`, `nextDueDate`) MUST be canonicalized to whole-second UTC precision (`date_trunc('second', ...)` in SQL, `canonicalSyncSecond` in Dart) across Drift SQLite, outbox JSON payloads, and Supabase Postgres to eliminate sub-second precision mismatch rejections. If the server rejects or resolves a duplicate, local reminder and recurrence state must reconcile to the accepted cloud result rather than advance permanently from an unaccepted local assumption.
 
 ## Media synchronization
 

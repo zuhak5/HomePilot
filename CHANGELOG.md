@@ -4,6 +4,16 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.7 — 2026-08-08
+
+### Fixed and Improved
+
+- **Recurring Maintenance Completion Precision & Reconciliation**: Fixed recurring task completion rollback by standardizing protocol timestamps to whole-second UTC precision across Flutter, Drift/SQLite, outbox payloads, and Supabase.
+- **Supabase RPC Migration**: Applied migration `20260807223000` to canonicalize occurrence timestamps in `complete_maintenance_task`, self-healing existing legacy cloud plans with sub-second precision.
+- **Dependency & Ordering Defense**: Enforced topological readiness in `LocalSyncStore.pendingMutations()` so dependent completion operations are held in outbox until predecessor operations resolve.
+- **Reconciliation & Shielding**: Protected optimistic local plan state during rejection or remote winner reconciliation, extended `pendingChangedAt` for composite plan pull shielding, and added single-flight controller entry guards.
+- **Synced Undo State Guard**: Restricted local Undo to unacknowledged outbox operations to prevent client/cloud data desynchronization.
+
 ## 1.4.6 (Build 32) — 2026-08-07
 
 ### Fixed and Improved

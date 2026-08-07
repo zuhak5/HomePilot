@@ -2097,14 +2097,28 @@ void main() {
                 ..where((row) => row.id.equals('multiple-maintenance-plan')))
               .getSingle();
 
-      final pending = (await store.pendingMutations())
-          .where((mutation) => mutation.entity == 'maintenance_completion')
+      final outboxRows = (await db.select(db.syncOutbox).get())
+          .where((row) => row.entity == 'maintenance_completion')
           .toList(growable: false);
 
-      expect(pending, hasLength(2));
+      expect(outboxRows, hasLength(2));
 
-      final firstMutation = pending.first;
-      final secondMutation = pending.last;
+      final firstMutation = LocalSyncMutation(
+        entity: outboxRows.first.entity,
+        recordKey: outboxRows.first.recordKey,
+        operation: outboxRows.first.operation,
+        changedAt: outboxRows.first.changedAt,
+        payloadJson: outboxRows.first.payloadJson,
+        attempts: 0,
+      );
+      final secondMutation = LocalSyncMutation(
+        entity: outboxRows.last.entity,
+        recordKey: outboxRows.last.recordKey,
+        operation: outboxRows.last.operation,
+        changedAt: outboxRows.last.changedAt,
+        payloadJson: outboxRows.last.payloadJson,
+        attempts: 0,
+      );
       expect(firstMutation.payloadJson, isNotNull);
 
       final account = await store.account();

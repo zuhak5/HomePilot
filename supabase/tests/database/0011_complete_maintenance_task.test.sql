@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(42);
+select plan(46);
 
 select has_function(
   'public',
@@ -948,6 +948,163 @@ select is(
   ),
   '2026-11-01 00:00:00+00'::timestamptz,
   'the losing race operation never advances recurrence twice'
+);
+
+-- Fractional timestamp and legacy cloud plan compatibility tests
+insert into public.maintenance_plans (
+  id,
+  user_id,
+  asset_id,
+  title,
+  recurrence_interval,
+  recurrence_unit,
+  priority,
+  next_due_date,
+  reminder_days_before,
+  health_group,
+  created_at,
+  updated_at,
+  revision,
+  is_enabled
+) values (
+  'fractional-plan',
+  '33333333-3333-3333-3333-333333333333',
+  'rpc-asset',
+  'Fractional Test Task',
+  1,
+  'months',
+  'high',
+  '2026-08-08T18:13:27.842731Z'::timestamptz,
+  0,
+  'appliances',
+  '2026-06-01T00:00:00Z'::timestamptz,
+  '2026-06-01T00:00:00Z'::timestamptz,
+  1,
+  true
+);
+
+create temp table rpc_fractional_result as
+select public.complete_maintenance_task(
+  jsonb_build_object(
+    'version', 2,
+    'operation_id', 'frac-op-1',
+    'plan_id', 'fractional-plan',
+    'expected_plan_revision', 1,
+    'expected_next_due_date', '2026-08-08T18:13:27.000Z',
+    'plan', jsonb_build_object(
+      'id', 'fractional-plan',
+      'asset_id', 'rpc-asset',
+      'title', 'Fractional Test Task',
+      'recurrence_interval', 1,
+      'recurrence_unit', 'months',
+      'priority', 'high',
+      'next_due_date', '2026-09-08T18:13:27.000Z',
+      'reminder_days_before', 0,
+      'health_group', 'appliances',
+      'is_enabled', true,
+      'created_at', '2026-06-01T00:00:00.000Z'
+    ),
+    'record', jsonb_build_object(
+      'id', 'frac-rec-1',
+      'plan_id', 'fractional-plan',
+      'due_date', '2026-08-08T18:13:27.000Z',
+      'completed_at', '2026-08-08T18:13:27.842Z'
+    )
+  ),
+  'frac-device-1'
+) as result;
+
+select is(
+  (select result ->> 'status' from rpc_fractional_result),
+  'applied',
+  'RPC accepts canonical whole-second completion against legacy fractional cloud plan'
+);
+
+select is(
+  (
+    select next_due_date
+    from public.maintenance_plans
+    where id = 'fractional-plan'
+  ),
+  '2026-09-08 18:13:27+00'::timestamptz,
+  'successful completion self-heals next_due_date to whole-second precision'
+);
+
+-- Sequential completion for next occurrence
+create temp table rpc_fractional_seq_result as
+select public.complete_maintenance_task(
+  jsonb_build_object(
+    'version', 2,
+    'operation_id', 'frac-op-2',
+    'plan_id', 'fractional-plan',
+    'depends_on_operation_id', 'frac-op-1',
+    'expected_plan_revision', 2,
+    'expected_next_due_date', '2026-09-08T18:13:27.000Z',
+    'plan', jsonb_build_object(
+      'id', 'fractional-plan',
+      'asset_id', 'rpc-asset',
+      'title', 'Fractional Test Task',
+      'recurrence_interval', 1,
+      'recurrence_unit', 'months',
+      'priority', 'high',
+      'next_due_date', '2026-10-08T18:13:27.000Z',
+      'reminder_days_before', 0,
+      'health_group', 'appliances',
+      'is_enabled', true,
+      'created_at', '2026-06-01T00:00:00.000Z'
+    ),
+    'record', jsonb_build_object(
+      'id', 'frac-rec-2',
+      'plan_id', 'fractional-plan',
+      'due_date', '2026-09-08T18:13:27.000Z',
+      'completed_at', '2026-09-08T18:13:27.999Z'
+    )
+  ),
+  'frac-device-1'
+) as result;
+
+select is(
+  (select result ->> 'status' from rpc_fractional_seq_result),
+  'applied',
+  'sequential completion for next occurrence succeeds cleanly'
+);
+
+-- Remote winner precision test
+create temp table rpc_fractional_winner_result as
+select public.complete_maintenance_task(
+  jsonb_build_object(
+    'version', 2,
+    'operation_id', 'frac-op-winner-b',
+    'plan_id', 'fractional-plan',
+    'expected_plan_revision', 2,
+    'expected_next_due_date', '2026-09-08T18:13:27.000Z',
+    'plan', jsonb_build_object(
+      'id', 'fractional-plan',
+      'asset_id', 'rpc-asset',
+      'title', 'Fractional Test Task',
+      'recurrence_interval', 1,
+      'recurrence_unit', 'months',
+      'priority', 'high',
+      'next_due_date', '2026-10-08T18:13:27.000Z',
+      'reminder_days_before', 0,
+      'health_group', 'appliances',
+      'is_enabled', true,
+      'created_at', '2026-06-01T00:00:00.000Z'
+    ),
+    'record', jsonb_build_object(
+      'id', 'frac-rec-winner-b',
+      'plan_id', 'fractional-plan',
+      'due_date', '2026-09-08T18:13:27.000Z',
+      'completed_at', '2026-09-08T18:13:27.000Z'
+    )
+  ),
+  'frac-device-2'
+) as result;
+
+select is(
+  (select result ->> 'conflict_reason' from rpc_fractional_winner_result),
+  'occurrence_completed_elsewhere',
+  'remote winner is recognized even when comparing whole-second vs stored timestamps'
 );
 
 set local role authenticated;

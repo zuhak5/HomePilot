@@ -1008,6 +1008,9 @@ WHERE next_attempt_at IS NULL OR next_attempt_at <= ?
 
   Future<List<LocalSyncMutation>> pendingMutations({int limit = 200}) async {
     final now = DateTime.now();
+    final allOutboxRows = await db.select(db.syncOutbox).get();
+    final allOutboxKeys = {for (final row in allOutboxRows) row.recordKey};
+
     final query = db.select(db.syncOutbox)
       ..where(
         (row) =>
@@ -1018,7 +1021,7 @@ WHERE next_attempt_at IS NULL OR next_attempt_at <= ?
       ..orderBy([(row) => OrderingTerm.asc(row.changedAt)])
       ..limit(limit);
     final rows = await query.get();
-    final mutations = [
+    final rawMutations = [
       for (final row in rows)
         LocalSyncMutation(
           entity: row.entity,
@@ -1035,17 +1038,27 @@ WHERE next_attempt_at IS NULL OR next_attempt_at <= ?
           nextRetryAt: row.nextAttemptAt,
         ),
     ];
+
+    final mutations = <LocalSyncMutation>[];
+    for (final mutation in rawMutations) {
+      if (mutation.entity == 'maintenance_completion' && mutation.payloadJson != null) {
+        try {
+          final decoded = jsonDecode(mutation.payloadJson!) as Map<String, dynamic>;
+          final dependsOn = decoded['depends_on_operation_id'] as String?;
+          if (dependsOn != null && dependsOn.isNotEmpty && allOutboxKeys.contains(dependsOn)) {
+            continue;
+          }
+        } catch (_) {}
+      }
+      mutations.add(mutation);
+    }
+
     final dependencyOrder = {
       for (var index = 0; index < syncEntitySpecs.length; index++)
         syncEntitySpecs[index].entity: index,
       profileSyncSpec.entity: syncEntitySpecs.length,
     };
 
-    // A completion RPC can create or update its maintenance plan itself.
-    // Give it the same dependency rank as a normal plan mutation, then use
-    // changedAt to preserve local operation order. On equal timestamps, the
-    // composite operation runs first and its covered generic plan row can be
-    // acknowledged without issuing a second cloud request.
     final maintenancePlanOrder = dependencyOrder['maintenance_plan'];
     if (maintenancePlanOrder != null) {
       dependencyOrder['maintenance_completion'] = maintenancePlanOrder;
@@ -1843,9 +1856,33 @@ ON CONFLICT(key) DO UPDATE SET
         db.maintenancePlans,
       )..where((row) => row.id.equals(plan.recordKey))).getSingleOrNull();
 
+      final otherPendingRows = await (db.select(db.syncOutbox)..where(
+        (row) =>
+            row.recordKey.equals(mutation.recordKey).not() &
+            (row.entity.equals('maintenance_plan') | row.entity.equals('maintenance_completion')),
+      )).get();
+      var hasLaterPendingPlanMutation = false;
+      for (final row in otherPendingRows) {
+        if (row.entity == 'maintenance_plan' && row.recordKey == plan.recordKey) {
+          hasLaterPendingPlanMutation = true;
+          break;
+        }
+        if (row.entity == 'maintenance_completion' && row.payloadJson != null) {
+          try {
+            final decoded = jsonDecode(row.payloadJson!) as Map<String, dynamic>;
+            final compPlanId = decoded['plan_id'] as String? ??
+                (decoded['plan'] as Map<String, dynamic>?)?['id'] as String?;
+            if (compPlanId == plan.recordKey) {
+              hasLaterPendingPlanMutation = true;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+
       final preserveNewerLocalPlan =
           currentPlan != null &&
-          currentPlan.updatedAt.isAfter(mutation.changedAt);
+          (currentPlan.updatedAt.isAfter(mutation.changedAt) || hasLaterPendingPlanMutation);
 
       await applyRemoteRecords([if (!preserveNewerLocalPlan) plan, record]);
 

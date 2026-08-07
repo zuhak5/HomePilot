@@ -1692,6 +1692,18 @@ class DriftMaintenanceRepository
     return result.isApplied;
   }
 
+DateTime canonicalSyncSecond(DateTime value) {
+  final utc = value.toUtc();
+  final micros =
+      (utc.microsecondsSinceEpoch ~/ Duration.microsecondsPerSecond) *
+      Duration.microsecondsPerSecond;
+
+  return DateTime.fromMicrosecondsSinceEpoch(
+    micros,
+    isUtc: true,
+  );
+}
+
   @override
   Future<LocalMaintenanceCompletionResult> completePlanResult(
     String planId, {
@@ -1713,25 +1725,32 @@ class DriftMaintenanceRepository
           status: LocalMaintenanceCompletionStatus.planInactive,
         );
       }
-      if (expectedNextDueDate != null &&
-          !plan.nextDueDate.isAtSameMomentAs(expectedNextDueDate)) {
+      final canonicalExpectedNextDue = expectedNextDueDate != null
+          ? canonicalSyncSecond(expectedNextDueDate)
+          : null;
+      final canonicalPlanNextDue = canonicalSyncSecond(plan.nextDueDate);
+
+      if (canonicalExpectedNextDue != null &&
+          !canonicalPlanNextDue.isAtSameMomentAs(canonicalExpectedNextDue)) {
         return const LocalMaintenanceCompletionResult(
           status: LocalMaintenanceCompletionStatus.occurrenceChanged,
         );
       }
 
-      final completed = completedAt ?? _now();
-      final previousDueDate = plan.nextDueDate;
-      final nextDue = _recurrenceEngine.nextDueDate(
-        completed,
-        domain.RecurrenceRule(
-          interval: plan.recurrenceInterval,
-          unit: _recurrenceUnit(plan.recurrenceUnit),
+      final completed = canonicalSyncSecond(completedAt ?? _now());
+      final previousDueDate = canonicalPlanNextDue;
+      final nextDue = canonicalSyncSecond(
+        _recurrenceEngine.nextDueDate(
+          completed,
+          domain.RecurrenceRule(
+            interval: plan.recurrenceInterval,
+            unit: _recurrenceUnit(plan.recurrenceUnit),
+          ),
         ),
       );
       final completionId = _uuid.v7();
       final completionNotes = _blankToNull(notes);
-      final planUpdatedAt = _now();
+      final planUpdatedAt = canonicalSyncSecond(_now());
 
       // Identify unresolved predecessor for same plan for CT-003 causal ordering
       final pendingCompletions =
@@ -1862,28 +1881,16 @@ class DriftMaintenanceRepository
         },
       });
 
-      await (db.delete(db.syncOutbox)..where(
-            (row) =>
-                row.entity.equals('maintenance_plan') &
-                row.recordKey.equals(planId),
-          ))
-          .go();
-
-      await db
-          .into(db.syncOutbox)
-          .insertOnConflictUpdate(
-            SyncOutboxCompanion.insert(
-              entity: 'maintenance_completion',
-              recordKey: completionId,
-              operation: 'execute',
-              payloadJson: Value(payload),
-              userId: Value(syncAccount?.boundUserId),
-              changedAt: Value(planUpdatedAt),
-              createdAt: Value(planUpdatedAt),
-              state: const Value('pending'),
-              attempts: const Value(0),
-            ),
-          );
+      await (db.into(db.syncOutbox)).insert(
+        SyncOutboxCompanion.insert(
+          entity: 'maintenance_completion',
+          recordKey: completionId,
+          operation: 'execute',
+          changedAt: Value(planUpdatedAt),
+          payloadJson: Value(payload),
+          userId: Value(syncAccount?.boundUserId),
+        ),
+      );
 
       return LocalMaintenanceCompletionResult(
         status: LocalMaintenanceCompletionStatus.applied,
@@ -1908,25 +1915,29 @@ class DriftMaintenanceRepository
     if (latestRecord == null) {
       return;
     }
+    final canonicalPreviousDue = canonicalSyncSecond(previousDueDate);
     await db.transaction(() async {
-      await (db.delete(db.syncOutbox)..where(
+      final outboxDeleted = await (db.delete(db.syncOutbox)..where(
             (row) =>
                 row.entity.equals('maintenance_completion') &
                 row.recordKey.equals(latestRecord.id),
           ))
           .go();
-      await (db.delete(
-        db.maintenanceRecords,
-      )..where((record) => record.id.equals(latestRecord.id))).go();
-      await (db.update(
-        db.maintenancePlans,
-      )..where((plan) => plan.id.equals(planId))).write(
-        MaintenancePlansCompanion(
-          nextDueDate: Value(previousDueDate),
-          updatedAt: Value(_now()),
-        ),
-      );
-      await _markPlanInboxRead(planId);
+      // Only undo local state if outbox mutation was present (unacknowledged/pending sync).
+      if (outboxDeleted > 0) {
+        await (db.delete(
+          db.maintenanceRecords,
+        )..where((record) => record.id.equals(latestRecord.id))).go();
+        await (db.update(
+          db.maintenancePlans,
+        )..where((plan) => plan.id.equals(planId))).write(
+          MaintenancePlansCompanion(
+            nextDueDate: Value(canonicalPreviousDue),
+            updatedAt: Value(canonicalSyncSecond(_now())),
+          ),
+        );
+        await _markPlanInboxRead(planId);
+      }
     });
   }
 
