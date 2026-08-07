@@ -4,6 +4,13 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.5 (Build 31) — 2026-08-07
+
+### Fixed and Improved
+
+- **Startup Cloud Restore Timeout Enforcement**: Wrapped `SyncCoordinator.enable()` during `cloud_restore` with `startupRestoreTimeoutProvider` (140s), preventing indefinite UI hangs on startup.
+- **Overdue Task Completion & Payload Nullability Fix**: Fully deployed updated `complete_maintenance_task` RPC validation rules to live Supabase (`iajvkvvvhwjdiuaufymh`), ensuring task completion and due date advancement persist for all maintenance tasks.
+
 ## 1.4.4 (Build 30) — 2026-08-07
 
 ### Fixed and Improved

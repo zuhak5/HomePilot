@@ -1344,14 +1344,31 @@ class StartupBootstrapController {
       'startup_step_start_cloud_restore',
       fields: {'attempt': generation},
     );
+    final cloudRestoreTimeout = _ref.read(startupRestoreTimeoutProvider);
     try {
-      await repository.enable();
+      await repository.enable().timeout(cloudRestoreTimeout);
       AppLogger.info(
         'startup_step_completed_cloud_restore',
         fields: {
           'attempt': generation,
           'elapsed_ms': stopwatch.elapsedMilliseconds,
         },
+      );
+    } on TimeoutException catch (error) {
+      AppLogger.warning(
+        'startup_step_timeout_cloud_restore',
+        error: error,
+        fields: {
+          'attempt': generation,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+          'timeout_ms': cloudRestoreTimeout.inMilliseconds,
+        },
+      );
+      throw StartupStepException(
+        stage: InitialHydrationStage.connecting,
+        kind: StartupFailureKind.timedOut,
+        operation: 'cloud_restore',
+        cause: TimeoutException('Cloud restore timed out.', cloudRestoreTimeout),
       );
     } on Object catch (error) {
       AppLogger.warning(
