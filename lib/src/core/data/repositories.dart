@@ -1692,17 +1692,14 @@ class DriftMaintenanceRepository
     return result.isApplied;
   }
 
-DateTime canonicalSyncSecond(DateTime value) {
-  final utc = value.toUtc();
-  final micros =
-      (utc.microsecondsSinceEpoch ~/ Duration.microsecondsPerSecond) *
-      Duration.microsecondsPerSecond;
+  DateTime canonicalSyncSecond(DateTime value) {
+    final utc = value.toUtc();
+    final micros =
+        (utc.microsecondsSinceEpoch ~/ Duration.microsecondsPerSecond) *
+        Duration.microsecondsPerSecond;
 
-  return DateTime.fromMicrosecondsSinceEpoch(
-    micros,
-    isUtc: true,
-  );
-}
+    return DateTime.fromMicrosecondsSinceEpoch(micros, isUtc: true);
+  }
 
   @override
   Future<LocalMaintenanceCompletionResult> completePlanResult(
@@ -1917,12 +1914,13 @@ DateTime canonicalSyncSecond(DateTime value) {
     }
     final canonicalPreviousDue = canonicalSyncSecond(previousDueDate);
     await db.transaction(() async {
-      final outboxDeleted = await (db.delete(db.syncOutbox)..where(
-            (row) =>
-                row.entity.equals('maintenance_completion') &
-                row.recordKey.equals(latestRecord.id),
-          ))
-          .go();
+      final outboxDeleted =
+          await (db.delete(db.syncOutbox)..where(
+                (row) =>
+                    row.entity.equals('maintenance_completion') &
+                    row.recordKey.equals(latestRecord.id),
+              ))
+              .go();
       // Only undo local state if outbox mutation was present (unacknowledged/pending sync).
       if (outboxDeleted > 0) {
         await (db.delete(

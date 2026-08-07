@@ -1368,7 +1368,10 @@ class StartupBootstrapController {
         stage: InitialHydrationStage.connecting,
         kind: StartupFailureKind.timedOut,
         operation: 'cloud_restore',
-        cause: TimeoutException('Cloud restore timed out.', cloudRestoreTimeout),
+        cause: TimeoutException(
+          'Cloud restore timed out.',
+          cloudRestoreTimeout,
+        ),
       );
     } on Object catch (error) {
       AppLogger.warning(

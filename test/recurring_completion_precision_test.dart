@@ -45,10 +45,7 @@ void main() {
     final planId = await maintenance.savePlan(
       assetId: assetId,
       title: 'Filter change',
-      recurrence: const RecurrenceRule(
-        interval: 1,
-        unit: RecurrenceUnit.days,
-      ),
+      recurrence: const RecurrenceRule(interval: 1, unit: RecurrenceUnit.days),
       priority: PriorityLevel.medium,
       nextDueDate: originalDue,
       healthGroup: HealthGroup.appliances,
@@ -91,7 +88,9 @@ void main() {
 
     // Inspect queued outbox mutation
     final outboxRows = await db.select(db.syncOutbox).get();
-    final completionOutboxRows = outboxRows.where((row) => row.entity == 'maintenance_completion').toList();
+    final completionOutboxRows = outboxRows
+        .where((row) => row.entity == 'maintenance_completion')
+        .toList();
     expect(completionOutboxRows, hasLength(1));
 
     final outboxRow = completionOutboxRows.single;
@@ -103,12 +102,22 @@ void main() {
 
     final payloadCompletedAt = payloadRecord['completed_at'] as String;
     final payloadNextDueDate = payloadPlan['next_due_date'] as String;
-    final payloadExpectedNextDueDate = payload['expected_next_due_date'] as String;
+    final payloadExpectedNextDueDate =
+        payload['expected_next_due_date'] as String;
 
     // Outbox payload dates must equal stored Drift dates byte-for-byte
-    expect(payloadCompletedAt, equals(record.completedAt.toUtc().toIso8601String()));
-    expect(payloadNextDueDate, equals(plan.nextDueDate.toUtc().toIso8601String()));
-    expect(payloadExpectedNextDueDate, equals(originalDue.toUtc().toIso8601String()));
+    expect(
+      payloadCompletedAt,
+      equals(record.completedAt.toUtc().toIso8601String()),
+    );
+    expect(
+      payloadNextDueDate,
+      equals(plan.nextDueDate.toUtc().toIso8601String()),
+    );
+    expect(
+      payloadExpectedNextDueDate,
+      equals(originalDue.toUtc().toIso8601String()),
+    );
 
     expect(payloadCompletedAt, endsWith('.000Z'));
     expect(payloadNextDueDate, endsWith('.000Z'));

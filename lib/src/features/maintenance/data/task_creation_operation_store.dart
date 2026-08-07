@@ -6,7 +6,7 @@ import '../domain/task_creation.dart';
 
 class TaskCreationOperationStore {
   TaskCreationOperationStore({FlutterSecureStorage? storage})
-      : _storage = storage;
+    : _storage = storage;
 
   final FlutterSecureStorage? _storage;
   final Map<String, String> _inMemoryFallback = {};

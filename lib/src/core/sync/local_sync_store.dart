@@ -1041,11 +1041,15 @@ WHERE next_attempt_at IS NULL OR next_attempt_at <= ?
 
     final mutations = <LocalSyncMutation>[];
     for (final mutation in rawMutations) {
-      if (mutation.entity == 'maintenance_completion' && mutation.payloadJson != null) {
+      if (mutation.entity == 'maintenance_completion' &&
+          mutation.payloadJson != null) {
         try {
-          final decoded = jsonDecode(mutation.payloadJson!) as Map<String, dynamic>;
+          final decoded =
+              jsonDecode(mutation.payloadJson!) as Map<String, dynamic>;
           final dependsOn = decoded['depends_on_operation_id'] as String?;
-          if (dependsOn != null && dependsOn.isNotEmpty && allOutboxKeys.contains(dependsOn)) {
+          if (dependsOn != null &&
+              dependsOn.isNotEmpty &&
+              allOutboxKeys.contains(dependsOn)) {
             continue;
           }
         } catch (_) {}
@@ -1856,21 +1860,27 @@ ON CONFLICT(key) DO UPDATE SET
         db.maintenancePlans,
       )..where((row) => row.id.equals(plan.recordKey))).getSingleOrNull();
 
-      final otherPendingRows = await (db.select(db.syncOutbox)..where(
-        (row) =>
-            row.recordKey.equals(mutation.recordKey).not() &
-            (row.entity.equals('maintenance_plan') | row.entity.equals('maintenance_completion')),
-      )).get();
+      final otherPendingRows =
+          await (db.select(db.syncOutbox)..where(
+                (row) =>
+                    row.recordKey.equals(mutation.recordKey).not() &
+                    (row.entity.equals('maintenance_plan') |
+                        row.entity.equals('maintenance_completion')),
+              ))
+              .get();
       var hasLaterPendingPlanMutation = false;
       for (final row in otherPendingRows) {
-        if (row.entity == 'maintenance_plan' && row.recordKey == plan.recordKey) {
+        if (row.entity == 'maintenance_plan' &&
+            row.recordKey == plan.recordKey) {
           hasLaterPendingPlanMutation = true;
           break;
         }
         if (row.entity == 'maintenance_completion' && row.payloadJson != null) {
           try {
-            final decoded = jsonDecode(row.payloadJson!) as Map<String, dynamic>;
-            final compPlanId = decoded['plan_id'] as String? ??
+            final decoded =
+                jsonDecode(row.payloadJson!) as Map<String, dynamic>;
+            final compPlanId =
+                decoded['plan_id'] as String? ??
                 (decoded['plan'] as Map<String, dynamic>?)?['id'] as String?;
             if (compPlanId == plan.recordKey) {
               hasLaterPendingPlanMutation = true;
@@ -1882,7 +1892,8 @@ ON CONFLICT(key) DO UPDATE SET
 
       final preserveNewerLocalPlan =
           currentPlan != null &&
-          (currentPlan.updatedAt.isAfter(mutation.changedAt) || hasLaterPendingPlanMutation);
+          (currentPlan.updatedAt.isAfter(mutation.changedAt) ||
+              hasLaterPendingPlanMutation);
 
       await applyRemoteRecords([if (!preserveNewerLocalPlan) plan, record]);
 
