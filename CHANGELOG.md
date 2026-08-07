@@ -4,6 +4,12 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.4 (Build 30) — 2026-08-07
+
+### Fixed and Improved
+
+- **Overdue Task Completion & Payload Nullability Fix**: Fixed `complete_maintenance_task` RPC validation rules on Supabase to correctly accept overdue task completions (`plan_next_due_date <= record_due_date` instead of `record_completed_at`) and safely coalesce unconfigured `reminder_days_before` values. Fully deployed to live Supabase (`iajvkvvvhwjdiuaufymh`) and verified.
+
 ## 1.4.4 (Build 29) — 2026-08-07
 
 ### Fixed and Improved

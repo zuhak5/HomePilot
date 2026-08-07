@@ -115,8 +115,10 @@ begin
     end;
     plan_recurrence_interval :=
       nullif(plan_payload ->> 'recurrence_interval', '')::integer;
-    plan_reminder_days_before :=
-      nullif(plan_payload ->> 'reminder_days_before', '')::integer;
+    plan_reminder_days_before := coalesce(
+      nullif(plan_payload ->> 'reminder_days_before', '')::integer,
+      0
+    );
     plan_is_enabled :=
       nullif(plan_payload ->> 'is_enabled', '')::boolean;
   exception
@@ -139,10 +141,9 @@ begin
       or plan_next_due_date is null
       or plan_created_at is null
       or plan_recurrence_interval is null
-      or plan_reminder_days_before is null
       or plan_is_enabled is null
       or record_due_date is distinct from expected_next_due_date
-      or plan_next_due_date <= record_completed_at
+      or plan_next_due_date <= record_due_date
       or plan_recurrence_interval <= 0
       or plan_reminder_days_before < 0 then
     return jsonb_build_object(
