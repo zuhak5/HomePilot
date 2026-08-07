@@ -434,12 +434,18 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
         for (final entry in keyValues.entries) {
           deleteQuery = deleteQuery.eq(entry.key, entry.value);
         }
-        final deleted = await _withDataTimeout(
-          () async => deleteQuery
-              .eq('revision', expectedRevision)
-              .select(record.spec.selectClause)
-              .maybeSingle(),
-        );
+        Map<String, dynamic>? deleted;
+        try {
+          deleted = await _withDataTimeout(
+            () async => deleteQuery
+                .eq('revision', expectedRevision)
+                .select(record.spec.selectClause)
+                .maybeSingle(),
+          );
+        } on PostgrestException catch (error) {
+          if (error.code != 'PGRST116') rethrow;
+          deleted = null;
+        }
         if (deleted != null) {
           final cleanupPath = _remoteMediaPath(
             record.spec,
@@ -506,12 +512,18 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
       for (final entry in keyValues.entries) {
         query = query.eq(entry.key, entry.value);
       }
-      final response = await _withDataTimeout(
-        () async => query
-            .eq('revision', expectedRevision)
-            .select(record.spec.selectClause)
-            .maybeSingle(),
-      );
+      Map<String, dynamic>? response;
+      try {
+        response = await _withDataTimeout(
+          () async => query
+              .eq('revision', expectedRevision)
+              .select(record.spec.selectClause)
+              .maybeSingle(),
+        );
+      } on PostgrestException catch (error) {
+        if (error.code != 'PGRST116') rethrow;
+        response = null;
+      }
       if (response == null) {
         return RemoteWriteResult.conflict(
           await fetch(

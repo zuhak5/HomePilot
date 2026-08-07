@@ -94,7 +94,9 @@ class SupabaseFailure implements Exception {
               'This maintenance completion conflicts with newer cloud data.',
         );
       }
-      if (error.code == '23505' || error.code == '40001') {
+      if (error.code == '23505' ||
+          error.code == '40001' ||
+          error.code == 'PGRST116') {
         return const SupabaseFailure(
           kind: SupabaseFailureKind.conflict,
           message: 'The cloud record changed on another device.',

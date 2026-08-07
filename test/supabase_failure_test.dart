@@ -67,4 +67,18 @@ void main() {
     expect(failure.kind, SupabaseFailureKind.conflict);
     expect(failure.retryable, isTrue);
   });
+
+  test('maps PGRST116 (0 rows returned on update/delete) to conflict', () {
+    final failure = SupabaseFailure.from(
+      const PostgrestException(
+        message: 'JSON object requested, multiple (or no) rows returned',
+        code: 'PGRST116',
+        details: 'The result contains 0 rows',
+        hint: null,
+      ),
+    );
+
+    expect(failure.kind, SupabaseFailureKind.conflict);
+    expect(failure.retryable, isTrue);
+  });
 }
