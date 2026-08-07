@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -1574,53 +1575,55 @@ class DriftMaintenanceRepository
     }
     final planId = id ?? _uuid.v7();
     final now = _now();
-    final existingPlan = await (db.select(
-      db.maintenancePlans,
-    )..where((plan) => plan.id.equals(planId))).getSingleOrNull();
-    if (existingPlan == null) {
-      await db
-          .into(db.maintenancePlans)
-          .insert(
-            MaintenancePlansCompanion.insert(
-              id: planId,
-              assetId: cleanAssetId,
-              title: cleanTitle,
-              instructions: Value(_blankToNull(instructions)),
-              recurrenceInterval: recurrence.interval,
-              recurrenceUnit: recurrence.unit.name,
-              priority: priority.name,
-              nextDueDate: nextDueDate,
-              reminderDaysBefore: Value(reminderDaysBefore),
-              healthGroup: healthGroup.name,
-              createdAt: Value(now),
-              updatedAt: Value(now),
-            ),
-          );
-      if (metadata != null) {
-        await _savePlanMetadata(planId, metadata, now);
-      }
-    } else {
-      await (db.update(
+    await db.transaction(() async {
+      final existingPlan = await (db.select(
         db.maintenancePlans,
-      )..where((plan) => plan.id.equals(planId))).write(
-        MaintenancePlansCompanion(
-          assetId: Value(cleanAssetId),
-          title: Value(cleanTitle),
-          instructions: Value(_blankToNull(instructions)),
-          recurrenceInterval: Value(recurrence.interval),
-          recurrenceUnit: Value(recurrence.unit.name),
-          priority: Value(priority.name),
-          nextDueDate: Value(nextDueDate),
-          reminderDaysBefore: Value(reminderDaysBefore),
-          healthGroup: Value(healthGroup.name),
-          updatedAt: Value(now),
-        ),
-      );
-      if (metadata != null) {
-        await _savePlanMetadata(planId, metadata, now);
+      )..where((plan) => plan.id.equals(planId))).getSingleOrNull();
+      if (existingPlan == null) {
+        await db
+            .into(db.maintenancePlans)
+            .insert(
+              MaintenancePlansCompanion.insert(
+                id: planId,
+                assetId: cleanAssetId,
+                title: cleanTitle,
+                instructions: Value(_blankToNull(instructions)),
+                recurrenceInterval: recurrence.interval,
+                recurrenceUnit: recurrence.unit.name,
+                priority: priority.name,
+                nextDueDate: nextDueDate,
+                reminderDaysBefore: Value(reminderDaysBefore),
+                healthGroup: healthGroup.name,
+                createdAt: Value(now),
+                updatedAt: Value(now),
+              ),
+            );
+        if (metadata != null) {
+          await _savePlanMetadata(planId, metadata, now);
+        }
+      } else {
+        await (db.update(
+          db.maintenancePlans,
+        )..where((plan) => plan.id.equals(planId))).write(
+          MaintenancePlansCompanion(
+            assetId: Value(cleanAssetId),
+            title: Value(cleanTitle),
+            instructions: Value(_blankToNull(instructions)),
+            recurrenceInterval: Value(recurrence.interval),
+            recurrenceUnit: Value(recurrence.unit.name),
+            priority: Value(priority.name),
+            nextDueDate: Value(nextDueDate),
+            reminderDaysBefore: Value(reminderDaysBefore),
+            healthGroup: Value(healthGroup.name),
+            updatedAt: Value(now),
+          ),
+        );
+        if (metadata != null) {
+          await _savePlanMetadata(planId, metadata, now);
+        }
+        await _markPlanInboxRead(planId);
       }
-      await _markPlanInboxRead(planId);
-    }
+    });
     return planId;
   }
 
@@ -1679,22 +1682,42 @@ class DriftMaintenanceRepository
     DateTime? completedAt,
     String? notes,
     DateTime? expectedNextDueDate,
+  }) async {
+    final result = await completePlanResult(
+      planId,
+      completedAt: completedAt,
+      notes: notes,
+      expectedNextDueDate: expectedNextDueDate,
+    );
+    return result.isApplied;
+  }
+
+  @override
+  Future<LocalMaintenanceCompletionResult> completePlanResult(
+    String planId, {
+    DateTime? completedAt,
+    String? notes,
+    DateTime? expectedNextDueDate,
   }) {
     return db.transaction(() async {
-      final plan =
-          await (db.select(db.maintenancePlans)..where(
-                (row) =>
-                    row.id.equals(planId) &
-                    row.archivedAt.isNull() &
-                    row.isEnabled.equals(true),
-              ))
-              .getSingleOrNull();
+      final plan = await (db.select(
+        db.maintenancePlans,
+      )..where((row) => row.id.equals(planId))).getSingleOrNull();
       if (plan == null) {
-        return false;
+        return const LocalMaintenanceCompletionResult(
+          status: LocalMaintenanceCompletionStatus.planUnavailable,
+        );
+      }
+      if (plan.archivedAt != null || !plan.isEnabled) {
+        return const LocalMaintenanceCompletionResult(
+          status: LocalMaintenanceCompletionStatus.planInactive,
+        );
       }
       if (expectedNextDueDate != null &&
           !plan.nextDueDate.isAtSameMomentAs(expectedNextDueDate)) {
-        return false;
+        return const LocalMaintenanceCompletionResult(
+          status: LocalMaintenanceCompletionStatus.occurrenceChanged,
+        );
       }
 
       final completed = completedAt ?? _now();
@@ -1709,6 +1732,29 @@ class DriftMaintenanceRepository
       final completionId = _uuid.v7();
       final completionNotes = _blankToNull(notes);
       final planUpdatedAt = _now();
+
+      // Identify unresolved predecessor for same plan for CT-003 causal ordering
+      final pendingCompletions =
+          await (db.select(db.syncOutbox)
+                ..where((row) => row.entity.equals('maintenance_completion'))
+                ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]))
+              .get();
+      String? predecessorId;
+      for (final comp in pendingCompletions) {
+        final payloadJson = comp.payloadJson;
+        if (payloadJson == null) continue;
+        try {
+          final decoded = jsonDecode(payloadJson) as Map<String, dynamic>;
+          final compPlanId =
+              decoded['plan_id'] as String? ??
+              (decoded['plan'] as Map<String, dynamic>?)?['id'] as String?;
+          if (compPlanId == planId) {
+            predecessorId = comp.recordKey;
+            break;
+          }
+        } catch (_) {}
+      }
+
       final planShadow =
           await (db.select(db.syncShadows)..where(
                 (row) =>
@@ -1720,9 +1766,6 @@ class DriftMaintenanceRepository
         db.syncAccount,
       )..where((row) => row.id.equals(1))).getSingleOrNull();
 
-      // The plan update and completion record are represented remotely by one
-      // composite mutation. Suppress their generic trigger-generated outbox
-      // rows while keeping both local writes in this transaction.
       await (db.update(db.syncRuntime)..where((row) => row.id.equals(1))).write(
         const SyncRuntimeCompanion(suppressOutbox: Value(true)),
       );
@@ -1752,13 +1795,28 @@ class DriftMaintenanceRepository
             .write(const SyncRuntimeCompanion(suppressOutbox: Value(false)));
       }
 
-      // Inbox read state remains a normal independent synchronization item.
       await _markPlanInboxRead(planId);
 
+      // CT-004 & CT-005: Upsert durable notification reconciliation request
+      await db
+          .into(db.notificationReconciliationRequests)
+          .insertOnConflictUpdate(
+            NotificationReconciliationRequestsCompanion.insert(
+              scopeKey: 'plan:$planId',
+              planId: Value(planId),
+              reason: 'local_completion',
+              createdAt: Value(planUpdatedAt),
+              updatedAt: Value(planUpdatedAt),
+            ),
+          );
+
+      // Payload v2 with depends_on_operation_id for CT-003 causal ordering
       final payload = jsonEncode({
-        'version': 1,
+        'version': 2,
         'operation_id': completionId,
         'idempotency_key': completionId,
+        'plan_id': planId,
+        'depends_on_operation_id': predecessorId,
         'expected_plan_revision': planShadow?.remoteRevision,
         'expected_next_due_date': previousDueDate.toUtc().toIso8601String(),
         'preimage': {
@@ -1804,11 +1862,6 @@ class DriftMaintenanceRepository
         },
       });
 
-      // The composite payload contains the full post-completion plan state.
-      // It therefore supersedes any generic plan mutation that was already
-      // queued before this completion, including a newly created offline plan.
-      // A later edit occurs after this transaction and creates a new generic
-      // mutation with its own newer changedAt value.
       await (db.delete(db.syncOutbox)..where(
             (row) =>
                 row.entity.equals('maintenance_plan') &
@@ -1832,7 +1885,12 @@ class DriftMaintenanceRepository
             ),
           );
 
-      return true;
+      return LocalMaintenanceCompletionResult(
+        status: LocalMaintenanceCompletionStatus.applied,
+        operationId: completionId,
+        previousDueDate: previousDueDate,
+        nextDueDate: nextDue,
+      );
     });
   }
 
@@ -3542,3 +3600,7 @@ extension<T> on Iterable<T> {
     return null;
   }
 }
+
+final maintenanceRepositoryProvider = Provider<MaintenanceRepository>(
+  (ref) => DriftMaintenanceRepository(ref.watch(databaseProvider)),
+);

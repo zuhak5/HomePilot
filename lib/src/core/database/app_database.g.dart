@@ -12888,6 +12888,658 @@ class SyncAccountCompanion extends UpdateCompanion<SyncAccountData> {
   }
 }
 
+class $NotificationReconciliationRequestsTable
+    extends NotificationReconciliationRequests
+    with
+        TableInfo<
+          $NotificationReconciliationRequestsTable,
+          NotificationReconciliationRequestRow
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NotificationReconciliationRequestsTable(
+    this.attachedDatabase, [
+    this._alias,
+  ]);
+  static const VerificationMeta _scopeKeyMeta = const VerificationMeta(
+    'scopeKey',
+  );
+  @override
+  late final GeneratedColumn<String> scopeKey = GeneratedColumn<String>(
+    'scope_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
+  @override
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
+    'plan_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _reasonMeta = const VerificationMeta('reason');
+  @override
+  late final GeneratedColumn<String> reason = GeneratedColumn<String>(
+    'reason',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _attemptsMeta = const VerificationMeta(
+    'attempts',
+  );
+  @override
+  late final GeneratedColumn<int> attempts = GeneratedColumn<int>(
+    'attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _nextAttemptAtMeta = const VerificationMeta(
+    'nextAttemptAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> nextAttemptAt =
+      GeneratedColumn<DateTime>(
+        'next_attempt_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _lastErrorCodeMeta = const VerificationMeta(
+    'lastErrorCode',
+  );
+  @override
+  late final GeneratedColumn<String> lastErrorCode = GeneratedColumn<String>(
+    'last_error_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _lastErrorMessageMeta = const VerificationMeta(
+    'lastErrorMessage',
+  );
+  @override
+  late final GeneratedColumn<String> lastErrorMessage = GeneratedColumn<String>(
+    'last_error_message',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _requiresFullRebuildMeta =
+      const VerificationMeta('requiresFullRebuild');
+  @override
+  late final GeneratedColumn<bool> requiresFullRebuild = GeneratedColumn<bool>(
+    'requires_full_rebuild',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("requires_full_rebuild" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    scopeKey,
+    planId,
+    reason,
+    createdAt,
+    updatedAt,
+    attempts,
+    nextAttemptAt,
+    lastErrorCode,
+    lastErrorMessage,
+    requiresFullRebuild,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'notification_reconciliation_requests';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<NotificationReconciliationRequestRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('scope_key')) {
+      context.handle(
+        _scopeKeyMeta,
+        scopeKey.isAcceptableOrUnknown(data['scope_key']!, _scopeKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_scopeKeyMeta);
+    }
+    if (data.containsKey('plan_id')) {
+      context.handle(
+        _planIdMeta,
+        planId.isAcceptableOrUnknown(data['plan_id']!, _planIdMeta),
+      );
+    }
+    if (data.containsKey('reason')) {
+      context.handle(
+        _reasonMeta,
+        reason.isAcceptableOrUnknown(data['reason']!, _reasonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_reasonMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('attempts')) {
+      context.handle(
+        _attemptsMeta,
+        attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
+      );
+    }
+    if (data.containsKey('next_attempt_at')) {
+      context.handle(
+        _nextAttemptAtMeta,
+        nextAttemptAt.isAcceptableOrUnknown(
+          data['next_attempt_at']!,
+          _nextAttemptAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_error_code')) {
+      context.handle(
+        _lastErrorCodeMeta,
+        lastErrorCode.isAcceptableOrUnknown(
+          data['last_error_code']!,
+          _lastErrorCodeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_error_message')) {
+      context.handle(
+        _lastErrorMessageMeta,
+        lastErrorMessage.isAcceptableOrUnknown(
+          data['last_error_message']!,
+          _lastErrorMessageMeta,
+        ),
+      );
+    }
+    if (data.containsKey('requires_full_rebuild')) {
+      context.handle(
+        _requiresFullRebuildMeta,
+        requiresFullRebuild.isAcceptableOrUnknown(
+          data['requires_full_rebuild']!,
+          _requiresFullRebuildMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {scopeKey};
+  @override
+  NotificationReconciliationRequestRow map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return NotificationReconciliationRequestRow(
+      scopeKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}scope_key'],
+      )!,
+      planId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_id'],
+      ),
+      reason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reason'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      attempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempts'],
+      )!,
+      nextAttemptAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}next_attempt_at'],
+      ),
+      lastErrorCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error_code'],
+      ),
+      lastErrorMessage: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error_message'],
+      ),
+      requiresFullRebuild: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}requires_full_rebuild'],
+      )!,
+    );
+  }
+
+  @override
+  $NotificationReconciliationRequestsTable createAlias(String alias) {
+    return $NotificationReconciliationRequestsTable(attachedDatabase, alias);
+  }
+}
+
+class NotificationReconciliationRequestRow extends DataClass
+    implements Insertable<NotificationReconciliationRequestRow> {
+  final String scopeKey;
+  final String? planId;
+  final String reason;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final int attempts;
+  final DateTime? nextAttemptAt;
+  final String? lastErrorCode;
+  final String? lastErrorMessage;
+  final bool requiresFullRebuild;
+  const NotificationReconciliationRequestRow({
+    required this.scopeKey,
+    this.planId,
+    required this.reason,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.attempts,
+    this.nextAttemptAt,
+    this.lastErrorCode,
+    this.lastErrorMessage,
+    required this.requiresFullRebuild,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['scope_key'] = Variable<String>(scopeKey);
+    if (!nullToAbsent || planId != null) {
+      map['plan_id'] = Variable<String>(planId);
+    }
+    map['reason'] = Variable<String>(reason);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    map['attempts'] = Variable<int>(attempts);
+    if (!nullToAbsent || nextAttemptAt != null) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt);
+    }
+    if (!nullToAbsent || lastErrorCode != null) {
+      map['last_error_code'] = Variable<String>(lastErrorCode);
+    }
+    if (!nullToAbsent || lastErrorMessage != null) {
+      map['last_error_message'] = Variable<String>(lastErrorMessage);
+    }
+    map['requires_full_rebuild'] = Variable<bool>(requiresFullRebuild);
+    return map;
+  }
+
+  NotificationReconciliationRequestsCompanion toCompanion(bool nullToAbsent) {
+    return NotificationReconciliationRequestsCompanion(
+      scopeKey: Value(scopeKey),
+      planId: planId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(planId),
+      reason: Value(reason),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      attempts: Value(attempts),
+      nextAttemptAt: nextAttemptAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(nextAttemptAt),
+      lastErrorCode: lastErrorCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastErrorCode),
+      lastErrorMessage: lastErrorMessage == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastErrorMessage),
+      requiresFullRebuild: Value(requiresFullRebuild),
+    );
+  }
+
+  factory NotificationReconciliationRequestRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return NotificationReconciliationRequestRow(
+      scopeKey: serializer.fromJson<String>(json['scopeKey']),
+      planId: serializer.fromJson<String?>(json['planId']),
+      reason: serializer.fromJson<String>(json['reason']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      attempts: serializer.fromJson<int>(json['attempts']),
+      nextAttemptAt: serializer.fromJson<DateTime?>(json['nextAttemptAt']),
+      lastErrorCode: serializer.fromJson<String?>(json['lastErrorCode']),
+      lastErrorMessage: serializer.fromJson<String?>(json['lastErrorMessage']),
+      requiresFullRebuild: serializer.fromJson<bool>(
+        json['requiresFullRebuild'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'scopeKey': serializer.toJson<String>(scopeKey),
+      'planId': serializer.toJson<String?>(planId),
+      'reason': serializer.toJson<String>(reason),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'attempts': serializer.toJson<int>(attempts),
+      'nextAttemptAt': serializer.toJson<DateTime?>(nextAttemptAt),
+      'lastErrorCode': serializer.toJson<String?>(lastErrorCode),
+      'lastErrorMessage': serializer.toJson<String?>(lastErrorMessage),
+      'requiresFullRebuild': serializer.toJson<bool>(requiresFullRebuild),
+    };
+  }
+
+  NotificationReconciliationRequestRow copyWith({
+    String? scopeKey,
+    Value<String?> planId = const Value.absent(),
+    String? reason,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    int? attempts,
+    Value<DateTime?> nextAttemptAt = const Value.absent(),
+    Value<String?> lastErrorCode = const Value.absent(),
+    Value<String?> lastErrorMessage = const Value.absent(),
+    bool? requiresFullRebuild,
+  }) => NotificationReconciliationRequestRow(
+    scopeKey: scopeKey ?? this.scopeKey,
+    planId: planId.present ? planId.value : this.planId,
+    reason: reason ?? this.reason,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    attempts: attempts ?? this.attempts,
+    nextAttemptAt: nextAttemptAt.present
+        ? nextAttemptAt.value
+        : this.nextAttemptAt,
+    lastErrorCode: lastErrorCode.present
+        ? lastErrorCode.value
+        : this.lastErrorCode,
+    lastErrorMessage: lastErrorMessage.present
+        ? lastErrorMessage.value
+        : this.lastErrorMessage,
+    requiresFullRebuild: requiresFullRebuild ?? this.requiresFullRebuild,
+  );
+  NotificationReconciliationRequestRow copyWithCompanion(
+    NotificationReconciliationRequestsCompanion data,
+  ) {
+    return NotificationReconciliationRequestRow(
+      scopeKey: data.scopeKey.present ? data.scopeKey.value : this.scopeKey,
+      planId: data.planId.present ? data.planId.value : this.planId,
+      reason: data.reason.present ? data.reason.value : this.reason,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      nextAttemptAt: data.nextAttemptAt.present
+          ? data.nextAttemptAt.value
+          : this.nextAttemptAt,
+      lastErrorCode: data.lastErrorCode.present
+          ? data.lastErrorCode.value
+          : this.lastErrorCode,
+      lastErrorMessage: data.lastErrorMessage.present
+          ? data.lastErrorMessage.value
+          : this.lastErrorMessage,
+      requiresFullRebuild: data.requiresFullRebuild.present
+          ? data.requiresFullRebuild.value
+          : this.requiresFullRebuild,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NotificationReconciliationRequestRow(')
+          ..write('scopeKey: $scopeKey, ')
+          ..write('planId: $planId, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('lastErrorCode: $lastErrorCode, ')
+          ..write('lastErrorMessage: $lastErrorMessage, ')
+          ..write('requiresFullRebuild: $requiresFullRebuild')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    scopeKey,
+    planId,
+    reason,
+    createdAt,
+    updatedAt,
+    attempts,
+    nextAttemptAt,
+    lastErrorCode,
+    lastErrorMessage,
+    requiresFullRebuild,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is NotificationReconciliationRequestRow &&
+          other.scopeKey == this.scopeKey &&
+          other.planId == this.planId &&
+          other.reason == this.reason &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.attempts == this.attempts &&
+          other.nextAttemptAt == this.nextAttemptAt &&
+          other.lastErrorCode == this.lastErrorCode &&
+          other.lastErrorMessage == this.lastErrorMessage &&
+          other.requiresFullRebuild == this.requiresFullRebuild);
+}
+
+class NotificationReconciliationRequestsCompanion
+    extends UpdateCompanion<NotificationReconciliationRequestRow> {
+  final Value<String> scopeKey;
+  final Value<String?> planId;
+  final Value<String> reason;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> attempts;
+  final Value<DateTime?> nextAttemptAt;
+  final Value<String?> lastErrorCode;
+  final Value<String?> lastErrorMessage;
+  final Value<bool> requiresFullRebuild;
+  final Value<int> rowid;
+  const NotificationReconciliationRequestsCompanion({
+    this.scopeKey = const Value.absent(),
+    this.planId = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.lastErrorCode = const Value.absent(),
+    this.lastErrorMessage = const Value.absent(),
+    this.requiresFullRebuild = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NotificationReconciliationRequestsCompanion.insert({
+    required String scopeKey,
+    this.planId = const Value.absent(),
+    required String reason,
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.lastErrorCode = const Value.absent(),
+    this.lastErrorMessage = const Value.absent(),
+    this.requiresFullRebuild = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : scopeKey = Value(scopeKey),
+       reason = Value(reason);
+  static Insertable<NotificationReconciliationRequestRow> custom({
+    Expression<String>? scopeKey,
+    Expression<String>? planId,
+    Expression<String>? reason,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? attempts,
+    Expression<DateTime>? nextAttemptAt,
+    Expression<String>? lastErrorCode,
+    Expression<String>? lastErrorMessage,
+    Expression<bool>? requiresFullRebuild,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (scopeKey != null) 'scope_key': scopeKey,
+      if (planId != null) 'plan_id': planId,
+      if (reason != null) 'reason': reason,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (attempts != null) 'attempts': attempts,
+      if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
+      if (lastErrorCode != null) 'last_error_code': lastErrorCode,
+      if (lastErrorMessage != null) 'last_error_message': lastErrorMessage,
+      if (requiresFullRebuild != null)
+        'requires_full_rebuild': requiresFullRebuild,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NotificationReconciliationRequestsCompanion copyWith({
+    Value<String>? scopeKey,
+    Value<String?>? planId,
+    Value<String>? reason,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? attempts,
+    Value<DateTime?>? nextAttemptAt,
+    Value<String?>? lastErrorCode,
+    Value<String?>? lastErrorMessage,
+    Value<bool>? requiresFullRebuild,
+    Value<int>? rowid,
+  }) {
+    return NotificationReconciliationRequestsCompanion(
+      scopeKey: scopeKey ?? this.scopeKey,
+      planId: planId ?? this.planId,
+      reason: reason ?? this.reason,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      attempts: attempts ?? this.attempts,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      lastErrorCode: lastErrorCode ?? this.lastErrorCode,
+      lastErrorMessage: lastErrorMessage ?? this.lastErrorMessage,
+      requiresFullRebuild: requiresFullRebuild ?? this.requiresFullRebuild,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (scopeKey.present) {
+      map['scope_key'] = Variable<String>(scopeKey.value);
+    }
+    if (planId.present) {
+      map['plan_id'] = Variable<String>(planId.value);
+    }
+    if (reason.present) {
+      map['reason'] = Variable<String>(reason.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (attempts.present) {
+      map['attempts'] = Variable<int>(attempts.value);
+    }
+    if (nextAttemptAt.present) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt.value);
+    }
+    if (lastErrorCode.present) {
+      map['last_error_code'] = Variable<String>(lastErrorCode.value);
+    }
+    if (lastErrorMessage.present) {
+      map['last_error_message'] = Variable<String>(lastErrorMessage.value);
+    }
+    if (requiresFullRebuild.present) {
+      map['requires_full_rebuild'] = Variable<bool>(requiresFullRebuild.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NotificationReconciliationRequestsCompanion(')
+          ..write('scopeKey: $scopeKey, ')
+          ..write('planId: $planId, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('lastErrorCode: $lastErrorCode, ')
+          ..write('lastErrorMessage: $lastErrorMessage, ')
+          ..write('requiresFullRebuild: $requiresFullRebuild, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -12931,6 +13583,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $SyncAccountTable syncAccount = $SyncAccountTable(this);
+  late final $NotificationReconciliationRequestsTable
+  notificationReconciliationRequests = $NotificationReconciliationRequestsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -12961,6 +13617,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     syncRuntime,
     syncMediaCleanup,
     syncAccount,
+    notificationReconciliationRequests,
   ];
 }
 
@@ -22688,6 +23345,328 @@ typedef $$SyncAccountTableProcessedTableManager =
       SyncAccountData,
       PrefetchHooks Function()
     >;
+typedef $$NotificationReconciliationRequestsTableCreateCompanionBuilder =
+    NotificationReconciliationRequestsCompanion Function({
+      required String scopeKey,
+      Value<String?> planId,
+      required String reason,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> attempts,
+      Value<DateTime?> nextAttemptAt,
+      Value<String?> lastErrorCode,
+      Value<String?> lastErrorMessage,
+      Value<bool> requiresFullRebuild,
+      Value<int> rowid,
+    });
+typedef $$NotificationReconciliationRequestsTableUpdateCompanionBuilder =
+    NotificationReconciliationRequestsCompanion Function({
+      Value<String> scopeKey,
+      Value<String?> planId,
+      Value<String> reason,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> attempts,
+      Value<DateTime?> nextAttemptAt,
+      Value<String?> lastErrorCode,
+      Value<String?> lastErrorMessage,
+      Value<bool> requiresFullRebuild,
+      Value<int> rowid,
+    });
+
+class $$NotificationReconciliationRequestsTableFilterComposer
+    extends Composer<_$AppDatabase, $NotificationReconciliationRequestsTable> {
+  $$NotificationReconciliationRequestsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get scopeKey => $composableBuilder(
+    column: $table.scopeKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get planId => $composableBuilder(
+    column: $table.planId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastErrorCode => $composableBuilder(
+    column: $table.lastErrorCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastErrorMessage => $composableBuilder(
+    column: $table.lastErrorMessage,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get requiresFullRebuild => $composableBuilder(
+    column: $table.requiresFullRebuild,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$NotificationReconciliationRequestsTableOrderingComposer
+    extends Composer<_$AppDatabase, $NotificationReconciliationRequestsTable> {
+  $$NotificationReconciliationRequestsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get scopeKey => $composableBuilder(
+    column: $table.scopeKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get planId => $composableBuilder(
+    column: $table.planId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastErrorCode => $composableBuilder(
+    column: $table.lastErrorCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastErrorMessage => $composableBuilder(
+    column: $table.lastErrorMessage,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get requiresFullRebuild => $composableBuilder(
+    column: $table.requiresFullRebuild,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$NotificationReconciliationRequestsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NotificationReconciliationRequestsTable> {
+  $$NotificationReconciliationRequestsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get scopeKey =>
+      $composableBuilder(column: $table.scopeKey, builder: (column) => column);
+
+  GeneratedColumn<String> get planId =>
+      $composableBuilder(column: $table.planId, builder: (column) => column);
+
+  GeneratedColumn<String> get reason =>
+      $composableBuilder(column: $table.reason, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get attempts =>
+      $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get lastErrorCode => $composableBuilder(
+    column: $table.lastErrorCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get lastErrorMessage => $composableBuilder(
+    column: $table.lastErrorMessage,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get requiresFullRebuild => $composableBuilder(
+    column: $table.requiresFullRebuild,
+    builder: (column) => column,
+  );
+}
+
+class $$NotificationReconciliationRequestsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $NotificationReconciliationRequestsTable,
+          NotificationReconciliationRequestRow,
+          $$NotificationReconciliationRequestsTableFilterComposer,
+          $$NotificationReconciliationRequestsTableOrderingComposer,
+          $$NotificationReconciliationRequestsTableAnnotationComposer,
+          $$NotificationReconciliationRequestsTableCreateCompanionBuilder,
+          $$NotificationReconciliationRequestsTableUpdateCompanionBuilder,
+          (
+            NotificationReconciliationRequestRow,
+            BaseReferences<
+              _$AppDatabase,
+              $NotificationReconciliationRequestsTable,
+              NotificationReconciliationRequestRow
+            >,
+          ),
+          NotificationReconciliationRequestRow,
+          PrefetchHooks Function()
+        > {
+  $$NotificationReconciliationRequestsTableTableManager(
+    _$AppDatabase db,
+    $NotificationReconciliationRequestsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NotificationReconciliationRequestsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$NotificationReconciliationRequestsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$NotificationReconciliationRequestsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> scopeKey = const Value.absent(),
+                Value<String?> planId = const Value.absent(),
+                Value<String> reason = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<String?> lastErrorCode = const Value.absent(),
+                Value<String?> lastErrorMessage = const Value.absent(),
+                Value<bool> requiresFullRebuild = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => NotificationReconciliationRequestsCompanion(
+                scopeKey: scopeKey,
+                planId: planId,
+                reason: reason,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
+                lastErrorCode: lastErrorCode,
+                lastErrorMessage: lastErrorMessage,
+                requiresFullRebuild: requiresFullRebuild,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String scopeKey,
+                Value<String?> planId = const Value.absent(),
+                required String reason,
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<String?> lastErrorCode = const Value.absent(),
+                Value<String?> lastErrorMessage = const Value.absent(),
+                Value<bool> requiresFullRebuild = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => NotificationReconciliationRequestsCompanion.insert(
+                scopeKey: scopeKey,
+                planId: planId,
+                reason: reason,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
+                lastErrorCode: lastErrorCode,
+                lastErrorMessage: lastErrorMessage,
+                requiresFullRebuild: requiresFullRebuild,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$NotificationReconciliationRequestsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $NotificationReconciliationRequestsTable,
+      NotificationReconciliationRequestRow,
+      $$NotificationReconciliationRequestsTableFilterComposer,
+      $$NotificationReconciliationRequestsTableOrderingComposer,
+      $$NotificationReconciliationRequestsTableAnnotationComposer,
+      $$NotificationReconciliationRequestsTableCreateCompanionBuilder,
+      $$NotificationReconciliationRequestsTableUpdateCompanionBuilder,
+      (
+        NotificationReconciliationRequestRow,
+        BaseReferences<
+          _$AppDatabase,
+          $NotificationReconciliationRequestsTable,
+          NotificationReconciliationRequestRow
+        >,
+      ),
+      NotificationReconciliationRequestRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -22747,4 +23726,10 @@ class $AppDatabaseManager {
       $$SyncMediaCleanupTableTableManager(_db, _db.syncMediaCleanup);
   $$SyncAccountTableTableManager get syncAccount =>
       $$SyncAccountTableTableManager(_db, _db.syncAccount);
+  $$NotificationReconciliationRequestsTableTableManager
+  get notificationReconciliationRequests =>
+      $$NotificationReconciliationRequestsTableTableManager(
+        _db,
+        _db.notificationReconciliationRequests,
+      );
 }

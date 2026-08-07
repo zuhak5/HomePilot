@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set search_path = public, extensions, pg_catalog;
 
-select extensions.plan(65);
+select extensions.plan(68);
 
 select extensions.has_table('public', 'point_wallets', 'point wallet table exists');
 select extensions.has_table('public', 'point_transactions', 'point ledger table exists');
@@ -769,6 +769,97 @@ select extensions.throws_ok(
   '42501',
   null,
   'clients cannot update their wallet through the Data API role'
+);
+
+-- CTC-001 & CTC-004 & CTR-003 tests
+set local role postgres;
+update public.point_wallets
+set balance = 1000
+where user_id = '44444444-4444-4444-4444-444444444444';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-4444-444444444444', true);
+
+select extensions.is(
+  (
+    public.create_task_with_point_debit(
+      jsonb_build_object(
+        'operation_id', '44444444-0000-0000-0000-000000000088',
+        'plan', jsonb_build_object(
+          'id', 'ctc-001-metadata-task',
+          'asset_id', 'points-general-asset',
+          'title', 'Task with metadata',
+          'recurrence_interval', 1,
+          'recurrence_unit', 'days',
+          'priority', 'medium',
+          'next_due_date', now() + interval '1 day',
+          'health_group', 'other'
+        ),
+        'metadata', jsonb_build_object(
+          'task_type', 'inspection',
+          'required_materials', jsonb_build_array('Wrench', 'Screwdriver')
+        )
+      )
+    )->>'task_id'
+  ),
+  'ctc-001-metadata-task',
+  'create_task_with_point_debit handles metadata subquery without 42702 error (CTC-001)'
+);
+
+select extensions.throws_ok(
+  $$
+    with auth_setup as (
+      select set_config('request.jwt.claim.sub', '44444444-4444-4444-4444-444444444444', true)
+    )
+    select public.create_task_with_point_debit(
+      jsonb_build_object(
+        'operation_id', '44444444-0000-0000-0000-000000000088',
+        'plan', jsonb_build_object(
+          'id', 'different-task-id',
+          'asset_id', 'points-general-asset',
+          'title', 'Different task title',
+          'recurrence_interval', 1,
+          'recurrence_unit', 'days',
+          'priority', 'medium',
+          'next_due_date', now() + interval '1 day',
+          'health_group', 'other'
+        )
+      )
+    )
+    from auth_setup
+  $$,
+  '23505',
+  'OPERATION_ID_REUSED',
+  'reusing operation ID with a different payload is rejected (CTC-004)'
+);
+
+select extensions.throws_ok(
+  $$
+    with auth_setup as (
+      select set_config('request.jwt.claim.sub', '44444444-4444-4444-4444-444444444444', true)
+    )
+    select public.create_task_with_point_debit(
+      jsonb_build_object(
+        'operation_id', '44444444-0000-0000-0000-000000000089',
+        'plan', jsonb_build_object(
+          'id', 'ctr-003-invalid-meta-task',
+          'asset_id', 'points-general-asset',
+          'title', 'Invalid metadata task',
+          'recurrence_interval', 1,
+          'recurrence_unit', 'days',
+          'priority', 'medium',
+          'next_due_date', now() + interval '1 day',
+          'health_group', 'other'
+        ),
+        'metadata', jsonb_build_object(
+          'required_materials', 'not-an-array'
+        )
+      )
+    )
+    from auth_setup
+  $$,
+  '22023',
+  'INVALID_TASK_PAYLOAD',
+  'invalid non-array metadata fields are rejected (CTR-003)'
 );
 
 select * from extensions.finish();

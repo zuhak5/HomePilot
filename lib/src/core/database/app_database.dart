@@ -5,9 +5,17 @@ import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:sqlite3/common.dart';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../domain/models.dart';
 
 part 'app_database.g.dart';
+
+final databaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
 
 @DataClassName('AreaRow')
 class Areas extends Table {
@@ -331,6 +339,27 @@ class ReminderScheduleSnapshots extends Table {
   Set<Column<Object>> get primaryKey => {identity};
 }
 
+@DataClassName('NotificationReconciliationRequestRow')
+class NotificationReconciliationRequests extends Table {
+  @override
+  String get tableName => 'notification_reconciliation_requests';
+
+  TextColumn get scopeKey => text()();
+  TextColumn get planId => text().nullable()();
+  TextColumn get reason => text()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+  DateTimeColumn get nextAttemptAt => dateTime().nullable()();
+  TextColumn get lastErrorCode => text().nullable()();
+  TextColumn get lastErrorMessage => text().nullable()();
+  BoolColumn get requiresFullRebuild =>
+      boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {scopeKey};
+}
+
 class SyncCursors extends Table {
   @override
   String get tableName => 'sync_cursors';
@@ -452,6 +481,7 @@ class SyncAccount extends Table {
     SyncRuntime,
     SyncMediaCleanup,
     SyncAccount,
+    NotificationReconciliationRequests,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -460,7 +490,7 @@ class AppDatabase extends _$AppDatabase {
 
   static const databaseName = 'homepilot';
   static const databaseFileName = '$databaseName.sqlite';
-  static const currentSchemaVersion = 23;
+  static const currentSchemaVersion = 24;
   static const _sqliteBusyTimeoutMs = 8000;
   static const _startupRecoveryAttempts = 5;
 
@@ -579,6 +609,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 23) {
         await _upgradeToV23(m);
+      }
+      if (from < 24) {
+        await _upgradeToV24(m);
       }
     },
     beforeOpen: (details) async {
@@ -1082,6 +1115,10 @@ WHERE entity IN ('maintenance_session', 'maintenance_session_task')
         await m.addColumn(syncAccount, column);
       }
     }
+  }
+
+  Future<void> _upgradeToV24(Migrator m) async {
+    await m.createTable(notificationReconciliationRequests);
   }
 
   Future<void> _dropLegacyAiSyncTriggers() async {

@@ -38,6 +38,7 @@ import 'src/core/observability/sentry_bootstrap.dart';
 import 'src/core/observability/sentry_navigation.dart';
 import 'src/core/services/action_feedback_service.dart';
 import 'src/core/services/feedback_messenger.dart';
+export 'src/core/data/repositories.dart';
 import 'src/core/services/app_permission_coordinator.dart';
 import 'src/core/services/backup_service.dart';
 import 'src/core/services/diagnostic_export_service.dart';
@@ -63,6 +64,9 @@ import 'src/features/auth/presentation/account_screen.dart';
 import 'src/features/auth/presentation/authentication_gate.dart';
 import 'src/features/auth/presentation/auth_providers.dart';
 import 'src/features/monetization/monetization.dart';
+import 'src/features/maintenance/application/task_creation_controller.dart';
+import 'src/features/maintenance/domain/task_creation.dart';
+import 'src/features/maintenance/presentation/task_completion_controller.dart';
 import 'src/i18n/dynamic_text.dart';
 import 'src/core/utils/date_utils.dart' as hk_dates;
 import 'src/ui/app_theme.dart';
@@ -596,10 +600,6 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 
 final assetRepositoryProvider = Provider<AssetRepository>(
   (ref) => DriftAssetRepository(ref.watch(databaseProvider)),
-);
-
-final maintenanceRepositoryProvider = Provider<MaintenanceRepository>(
-  (ref) => DriftMaintenanceRepository(ref.watch(databaseProvider)),
 );
 
 final calendarRepositoryProvider = Provider<CalendarRepository>(
@@ -14401,6 +14401,15 @@ Future<bool> completeTaskWithFeedback(
   TaskItem task, {
   bool collectNotes = false,
 }) async {
+  final controllerNotifier = ref.read(
+    taskCompletionControllerProvider(task.plan.id),
+  );
+  if (collectNotes) {
+    if (!controllerNotifier.tryBeginNotesCollection()) {
+      return false;
+    }
+  }
+
   final dueTodayBefore = getTaskBuckets(
     ref.read(tasksProvider).value ?? const <TaskItem>[],
     DateTime.now(),
@@ -14415,6 +14424,7 @@ Future<bool> completeTaskWithFeedback(
       builder: (context) => CompleteTaskDialog(task: task),
     );
     if (notes == null) {
+      controllerNotifier.cancelNotesCollection();
       return false;
     }
     if (!context.mounted) {
@@ -14422,31 +14432,16 @@ Future<bool> completeTaskWithFeedback(
     }
   }
   final previousDueDate = task.plan.nextDueDate;
-  bool applied;
-  try {
-    applied = await ref
-        .read(maintenanceRepositoryProvider)
-        .completePlan(
-          task.plan.id,
-          notes: notes,
-          expectedNextDueDate: previousDueDate,
-        );
-  } catch (error) {
-    if (context.mounted) {
-      hk_ui.showToast(
-        context,
-        content: Text(
-          _failureMessage(context, error, fallback: AppFailureCode.taskUpdate),
-        ),
-        severity: hk_ui.HkToastSeverity.error,
-      );
-    }
-    return false;
-  }
+  final result = await controllerNotifier.complete(
+    completedAt: DateTime.now(),
+    notes: notes,
+    expectedNextDueDate: previousDueDate,
+  );
+
   if (!context.mounted) {
-    return applied;
+    return result.isApplied;
   }
-  if (!applied) {
+  if (!result.isApplied) {
     hk_ui.showToast(
       context,
       content: Text(context.l10n.thisTaskWasAlreadyUpdated),
@@ -14454,7 +14449,9 @@ Future<bool> completeTaskWithFeedback(
     );
     return false;
   }
-  await ref.read(streakServiceProvider).refresh(DateTime.now());
+  try {
+    await ref.read(streakServiceProvider).refresh(DateTime.now());
+  } catch (_) {}
   if (!context.mounted) {
     return true;
   }
@@ -14473,8 +14470,10 @@ Future<bool> completeTaskWithFeedback(
         await ref
             .read(maintenanceRepositoryProvider)
             .undoLastCompletion(task.plan.id, previousDueDate);
-        await ref.read(streakServiceProvider).refresh(DateTime.now());
-        await refreshNotificationSchedules(ref);
+        try {
+          await ref.read(streakServiceProvider).refresh(DateTime.now());
+          await refreshNotificationSchedules(ref);
+        } catch (_) {}
         if (context.mounted) {
           hk_ui.showToast(
             context,
@@ -14495,7 +14494,9 @@ Future<bool> completeTaskWithFeedback(
     },
   );
   if (completesFinalDueToday) {
-    await _offerDailyCompletionReward(context, ref);
+    try {
+      await _offerDailyCompletionReward(context, ref);
+    } catch (_) {}
   } else if (context.mounted) {
     final config =
         ref.read(monetizationConfigProvider).value ??
@@ -17804,54 +17805,80 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
     try {
       final isCreating = widget.task == null;
       final planId = widget.task?.plan.id ?? (_creationPlanId ??= _uuid.v7());
-      PointDebitResult? debitResult;
+      final operationId = _creationOperationId ??= _uuid.v7();
+
       if (isCreating) {
-        final online = await ref
-            .read(syncConnectivityInstanceProvider)
-            .isOnline();
-        if (!online) {
-          await _saveOfflineDraft();
-          if (mounted) {
+        final monetizationRepo = ref.read(monetizationRepositoryProvider);
+        if (monetizationRepo != null) {
+          final online = await ref
+              .read(syncConnectivityInstanceProvider)
+              .isOnline();
+          if (!online) {
+            await _saveOfflineDraft();
+            if (mounted) {
+              hk_ui.showToast(
+                context,
+                content: Text(context.l10n.offlineTaskDraftMessage),
+              );
+            }
+            return;
+          }
+        }
+
+        final creationController = ref.read(taskCreationControllerProvider);
+        final accountScope =
+            ref.read(monetizationRepositoryProvider)?.currentUserId ?? 'local';
+
+        final existingOp = TaskCreationOperation(
+          operationId: operationId,
+          planId: planId,
+          accountScope: accountScope,
+          requestPayload: const <String, dynamic>{},
+          requestHash: '',
+          state: TaskCreationOperationState.submitting,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+
+        final success = await creationController.createNewTask(
+          assetId: assetId,
+          title: _titleController.text,
+          instructions: _instructionsController.text,
+          recurrence: RecurrenceRule(interval: interval, unit: _unit),
+          priority: _priority,
+          nextDueDate: _dueDate,
+          healthGroup: _healthGroup,
+          reminderDaysBefore: reminderDaysBefore,
+          metadata: metadata,
+          accountScope: accountScope,
+          existingOperation: existingOp,
+        );
+
+        if (!success) {
+          final state = creationController.value;
+          if (mounted && state.failure != null) {
+            if (_isInsufficientPointsError(state.failure!.message)) {
+              await showPointShortageDialog(
+                context,
+                ref,
+                attemptedAction: 'task',
+              );
+              return;
+            }
             hk_ui.showToast(
               context,
-              content: Text(context.l10n.offlineTaskDraftMessage),
+              content: Text(_failureMessage(context, state.failure!.message)),
+              severity: hk_ui.HkToastSeverity.error,
             );
           }
           return;
         }
-        final monetization = ref.read(monetizationRepositoryProvider);
-        if (monetization == null) {
-          throw StateError('Cloud points service is unavailable.');
-        }
-        debitResult = await monetization.createTask({
-          'operation_id': _creationOperationId ??= _uuid.v7(),
-          'plan': {
-            'id': planId,
-            'asset_id': assetId,
-            'title': _titleController.text.trim(),
-            'instructions': _instructionsController.text.trim(),
-            'recurrence_interval': interval,
-            'recurrence_unit': _unit.name,
-            'priority': _priority.name,
-            'next_due_date': _dueDate.toUtc().toIso8601String(),
-            'reminder_days_before': reminderDaysBefore,
-            'health_group': _healthGroup.name,
-            'is_enabled': true,
-          },
-          'metadata': metadata == null
-              ? const <String, dynamic>{}
-              : {
-                  'task_type': metadata.taskType,
-                  'location_label': metadata.locationLabel,
-                  'estimated_duration_minutes':
-                      metadata.estimatedDurationMinutes,
-                  'required_materials': metadata.requiredMaterials,
-                  'dependency_plan_ids': metadata.dependencyPlanIds,
-                  'reminder_recommendation': metadata.reminderRecommendation,
-                  'sort_order': metadata.sortOrder,
-                },
-        });
+
+        await ref
+            .read(offlineCreationDraftStoreProvider)
+            .clear(_offlineDraftKey);
       }
+
       await ref
           .read(maintenanceRepositoryProvider)
           .savePlan(
@@ -17866,30 +17893,7 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
             reminderDaysBefore: reminderDaysBefore,
             metadata: metadata,
           );
-      if (isCreating) {
-        await ref
-            .read(offlineCreationDraftStoreProvider)
-            .clear(_offlineDraftKey);
-        await ref
-            .read(localSyncStoreProvider)
-            ?.acknowledgeTaskCreationComposite(
-              planId: planId,
-              planJson: debitResult?.plan,
-              metadataJson: debitResult?.metadata,
-            );
-      }
-      if (debitResult?.charged == 1) {
-        unawaited(
-          ref
-              .read(monetizationRepositoryProvider)
-              ?.recordEvent('points_debited', {
-                'entity_type': 'task',
-                'entity_id': planId,
-                'cost': debitResult!.charged,
-                'new_balance': debitResult.balance,
-              }),
-        );
-      }
+
       await refreshNotificationSchedules(ref);
       if (mounted) {
         if (widget.task == null) {

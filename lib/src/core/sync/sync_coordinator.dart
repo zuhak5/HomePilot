@@ -1321,64 +1321,87 @@ class SyncCoordinator implements CloudSyncRepository {
       await _ensureActiveAccountScope(scope);
     }
 
-    if (result.acknowledged) {
-      await _acknowledgeMaintenanceCompletion(mutation, result);
-      return;
+    if (result.status == MaintenanceCompletionStatus.applied ||
+        result.status == MaintenanceCompletionStatus.alreadyApplied) {
+      if (result.plan != null && result.record != null) {
+        if (result.record!.recordKey == mutation.recordKey) {
+          await _localStore.markMaintenanceCompletionSucceeded(
+            mutation,
+            plan: result.plan!,
+            record: result.record!,
+          );
+          await _reconcileMaintenanceCompletionReminders(mutation);
+          return;
+        } else {
+          // Record ID mismatch -> another device won this occurrence
+          await _localStore.reconcileMaintenanceOccurrenceCompletedElsewhere(
+            mutation,
+            plan: result.plan!,
+            record: result.record!,
+          );
+          return;
+        }
+      }
     }
 
-    AppLogger.warning(
-      'sync_maintenance_completion_conflict_detected',
-      fields: {
-        'operation': _diagnosticId(mutation.operationId),
-        'retryable': result.retryable,
-      },
-    );
-
-    if (result.status == MaintenanceCompletionStatus.conflict &&
-        result.retryable &&
-        result.currentPlanRevision != null &&
-        result.plan != null) {
-      final recoveredPayload = _maintenancePayloadWithRevision(
-        payloadJson,
-        result.currentPlanRevision!,
-      );
-      await _localStore.markMaintenanceConflictRecovery(
-        mutation,
-        payloadJson: recoveredPayload,
-        errorCode: result.conflictReason ?? 'stale_plan_revision',
-        message: 'The current maintenance plan was fetched for one safe retry.',
-      );
-      AppLogger.info(
-        'sync_maintenance_completion_recovery_fetched',
-        fields: {
-          'operation': _diagnosticId(mutation.operationId),
-          'plan_revision': result.currentPlanRevision!,
-        },
-      );
-      await _localStore.markMutationInFlight(mutation, userId: userId);
-      AppLogger.info(
-        'sync_maintenance_completion_retry_attempted',
-        fields: {'operation': _diagnosticId(mutation.operationId), 'retry': 1},
-      );
-      final retried = await _remoteGateway.completeMaintenance(
-        payloadJson: recoveredPayload,
-        userId: userId,
-        deviceId: deviceId,
-      );
-      await _ensureActiveAccountScope(scope);
-      if (retried.acknowledged) {
-        await _acknowledgeMaintenanceCompletion(mutation, retried);
+    if (result.status == MaintenanceCompletionStatus.conflict) {
+      final reason = result.conflictReason ?? '';
+      if (reason == 'occurrence_completed_elsewhere' &&
+          result.plan != null &&
+          result.record != null) {
+        await _localStore.reconcileMaintenanceOccurrenceCompletedElsewhere(
+          mutation,
+          plan: result.plan!,
+          record: result.record!,
+        );
         return;
       }
-      result = retried;
-    }
 
-    if (result.acknowledged ||
-        (result.status == MaintenanceCompletionStatus.conflict &&
-            !result.retryable &&
-            result.plan != null)) {
-      await _acknowledgeMaintenanceCompletion(mutation, result);
-      return;
+      if (result.retryable &&
+          result.currentPlanRevision != null &&
+          result.plan != null) {
+        final recoveredPayload = _maintenancePayloadWithRevision(
+          payloadJson,
+          result.currentPlanRevision!,
+        );
+        await _localStore.markMaintenanceConflictRecovery(
+          mutation,
+          payloadJson: recoveredPayload,
+          errorCode: result.conflictReason ?? 'stale_plan_revision',
+          message:
+              'The current maintenance plan was fetched for one safe retry.',
+        );
+        final retried = await _remoteGateway.completeMaintenance(
+          payloadJson: recoveredPayload,
+          userId: userId,
+          deviceId: deviceId,
+        );
+        await _ensureActiveAccountScope(scope);
+        if (retried.status == MaintenanceCompletionStatus.applied ||
+            retried.status == MaintenanceCompletionStatus.alreadyApplied) {
+          if (retried.plan != null && retried.record != null) {
+            await _localStore.markMaintenanceCompletionSucceeded(
+              mutation,
+              plan: retried.plan!,
+              record: retried.record!,
+            );
+            await _reconcileMaintenanceCompletionReminders(mutation);
+            return;
+          }
+        }
+        result = retried;
+      }
+
+      if (result.plan != null) {
+        await _localStore.reconcileRejectedMaintenanceCompletion(
+          mutation,
+          errorCode: result.conflictReason ?? 'conflict',
+          message: _maintenanceConflictMessage(result),
+          plan: result.plan,
+        );
+        await _reconcileMaintenanceCompletionReminders(mutation);
+        return;
+      }
     }
 
     final message = _maintenanceConflictMessage(result);
@@ -1392,17 +1415,6 @@ class SyncCoordinator implements CloudSyncRepository {
     if (result.plan != null) {
       await _reconcileMaintenanceCompletionReminders(mutation);
     }
-    AppLogger.warning(
-      'sync_maintenance_completion_result',
-      fields: {
-        'operation': _diagnosticId(mutation.operationId),
-        'status': result.status.name,
-        'reason': result.conflictReason ?? 'none',
-        'retryable': result.retryable,
-        'current_revision': result.currentPlanRevision,
-        'attempt': mutation.attempts,
-      },
-    );
     throw SupabaseFailure(
       kind: result.status == MaintenanceCompletionStatus.unauthorized
           ? SupabaseFailureKind.permissionDenied
@@ -1410,37 +1422,6 @@ class SyncCoordinator implements CloudSyncRepository {
           ? SupabaseFailureKind.incompatibleSchema
           : SupabaseFailureKind.conflict,
       message: message,
-    );
-  }
-
-  Future<void> _acknowledgeMaintenanceCompletion(
-    LocalSyncMutation mutation,
-    MaintenanceCompletionResult result,
-  ) async {
-    final plan = result.plan;
-    final record = result.record;
-    if (plan != null && record != null) {
-      await _localStore.markMaintenanceCompletionSucceeded(
-        mutation,
-        plan: plan,
-        record: record,
-      );
-    } else {
-      await _localStore.markMutationSucceeded(mutation, plan);
-      if (record != null) {
-        await _localStore.applyRemoteRecords([record]);
-      }
-    }
-    if (plan != null) {
-      await _reconcileMaintenanceCompletionReminders(mutation);
-    }
-    AppLogger.info(
-      'sync_maintenance_completion_acknowledged',
-      fields: {
-        'operation': _diagnosticId(mutation.operationId),
-        'already_applied':
-            result.status == MaintenanceCompletionStatus.alreadyApplied,
-      },
     );
   }
 

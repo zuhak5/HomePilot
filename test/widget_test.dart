@@ -1562,10 +1562,9 @@ void main() {
       // (360 ≤ W ≤ 400), so the placeholder shortens to 'Search rooms, items…'.
       // At width 768+ it is in the large-mobile/desktop breakpoint (W > 400)
       // and shows the full string.
-      final expectedPlaceholder =
-          width == 390.0
-              ? 'Search rooms, items\u2026'
-              : 'Search rooms, items, tasks, notes';
+      final expectedPlaceholder = width == 390.0
+          ? 'Search rooms, items\u2026'
+          : 'Search rooms, items, tasks, notes';
       expect(find.text(expectedPlaceholder), findsOneWidget);
       for (final key in [
         'home-search-control',
@@ -3179,10 +3178,9 @@ void main() {
           expect(find.text("Let's make today productive"), findsNothing);
           // At screen width 320 the layout is compact (<360), placeholder is short.
           // At screen width 600 the layout is large (>400), full placeholder shown.
-          final expectedSearch =
-              width == 320.0
-                  ? 'Search\u2026'
-                  : 'Search rooms, items, tasks, notes';
+          final expectedSearch = width == 320.0
+              ? 'Search\u2026'
+              : 'Search rooms, items, tasks, notes';
           expect(find.text(expectedSearch), findsOneWidget);
           expect(
             find.descendant(of: points, matching: find.text('Points')),
@@ -6538,6 +6536,26 @@ class FakeMaintenanceRepository implements MaintenanceRepository {
     DateTime? expectedNextDueDate,
     String? notes,
   }) async => true;
+
+  @override
+  Future<LocalMaintenanceCompletionResult> completePlanResult(
+    String planId, {
+    DateTime? completedAt,
+    DateTime? expectedNextDueDate,
+    String? notes,
+  }) async {
+    final ok = await completePlan(
+      planId,
+      completedAt: completedAt,
+      expectedNextDueDate: expectedNextDueDate,
+      notes: notes,
+    );
+    return LocalMaintenanceCompletionResult(
+      status: ok
+          ? LocalMaintenanceCompletionStatus.applied
+          : LocalMaintenanceCompletionStatus.occurrenceChanged,
+    );
+  }
 
   @override
   Future<void> undoLastCompletion(

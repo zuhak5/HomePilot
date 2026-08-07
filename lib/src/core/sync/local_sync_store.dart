@@ -2038,7 +2038,7 @@ ON CONFLICT(key) DO UPDATE SET
     });
   }
 
-  Future<void> acknowledgeTaskCreationComposite({
+  Future<void> reconcileTaskCreationComposite({
     required String planId,
     Map<String, dynamic>? planJson,
     Map<String, dynamic>? metadataJson,
@@ -2051,25 +2051,156 @@ ON CONFLICT(key) DO UPDATE SET
       (s) => s.entity == 'maintenance_plan_metadata',
     );
     if (planJson != null) {
-      records.add(SyncRecord.fromRemote(planSpec, planJson));
+      final parsed = SyncRecord.fromRemote(planSpec, planJson);
+      if (parsed.recordKey == planId) {
+        records.add(parsed);
+      }
     }
     if (metadataJson != null && metadataJson.isNotEmpty) {
-      records.add(SyncRecord.fromRemote(metaSpec, metadataJson));
+      final parsedMeta = SyncRecord.fromRemote(metaSpec, metadataJson);
+      if (parsedMeta.recordKey == planId) {
+        records.add(parsedMeta);
+      }
     }
 
     await db.transaction(() async {
+      final currentPlan = await (db.select(
+        db.maintenancePlans,
+      )..where((row) => row.id.equals(planId))).getSingleOrNull();
+
+      final planOutbox =
+          await (db.select(db.syncOutbox)..where(
+                (row) =>
+                    row.entity.equals('maintenance_plan') &
+                    row.recordKey.equals(planId),
+              ))
+              .getSingleOrNull();
+
+      final preserveNewerLocalPlan = planOutbox != null && currentPlan != null;
+
       if (records.isNotEmpty) {
-        await applyRemoteRecords(records);
+        await applyRemoteRecords([
+          if (!preserveNewerLocalPlan)
+            ...records.where((r) => r.spec.entity == 'maintenance_plan'),
+          ...records.where((r) => r.spec.entity != 'maintenance_plan'),
+        ]);
+        if (preserveNewerLocalPlan) {
+          for (final canonical in records.where(
+            (r) => r.spec.entity == 'maintenance_plan',
+          )) {
+            await _saveShadow(canonical);
+          }
+        }
       }
+
+      if (!preserveNewerLocalPlan) {
+        await (db.delete(db.syncOutbox)..where(
+              (row) =>
+                  (row.entity.equals('maintenance_plan') &
+                      row.recordKey.equals(planId)) |
+                  (row.entity.equals('maintenance_plan_metadata') &
+                      row.recordKey.equals(planId)),
+            ))
+            .go();
+      }
+    });
+  }
+
+  Future<void> acknowledgeTaskCreationComposite({
+    required String planId,
+    Map<String, dynamic>? planJson,
+    Map<String, dynamic>? metadataJson,
+  }) {
+    return reconcileTaskCreationComposite(
+      planId: planId,
+      planJson: planJson,
+      metadataJson: metadataJson,
+    );
+  }
+
+  Future<void> reconcileMaintenanceOccurrenceCompletedElsewhere(
+    LocalSyncMutation mutation, {
+    required SyncRecord plan,
+    required SyncRecord record,
+  }) async {
+    await db.transaction(() async {
+      await (db.delete(
+        db.maintenanceRecords,
+      )..where((row) => row.id.equals(mutation.operationId))).go();
+      await applyRemoteRecords([plan, record]);
+
+      await db
+          .into(db.notificationReconciliationRequests)
+          .insertOnConflictUpdate(
+            NotificationReconciliationRequestsCompanion.insert(
+              scopeKey: 'plan:${plan.recordKey}',
+              planId: Value(plan.recordKey),
+              reason: 'occurrence_completed_elsewhere',
+              createdAt: Value(DateTime.now()),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+
       await (db.delete(db.syncOutbox)..where(
             (row) =>
-                (row.entity.equals('maintenance_plan') &
-                    row.recordKey.equals(planId)) |
-                (row.entity.equals('maintenance_plan_metadata') &
-                    row.recordKey.equals(planId)),
+                row.entity.equals(mutation.entity) &
+                row.recordKey.equals(mutation.recordKey),
           ))
           .go();
     });
+  }
+
+  Future<void> reconcileRejectedMaintenanceCompletion(
+    LocalSyncMutation mutation, {
+    required String errorCode,
+    required String message,
+    SyncRecord? plan,
+  }) async {
+    await db.transaction(() async {
+      await withOutboxSuppressed(() async {
+        await (db.delete(
+          db.maintenanceRecords,
+        )..where((row) => row.id.equals(mutation.operationId))).go();
+        if (plan != null) {
+          await applyRemoteRecords([plan]);
+        } else {
+          await _restoreRejectedMaintenanceCompletionPreimage(mutation);
+        }
+      });
+
+      final planId = plan?.recordKey ?? _extractPlanIdFromMutation(mutation);
+      if (planId != null) {
+        await db
+            .into(db.notificationReconciliationRequests)
+            .insertOnConflictUpdate(
+              NotificationReconciliationRequestsCompanion.insert(
+                scopeKey: 'plan:$planId',
+                planId: Value(planId),
+                reason: 'completion_rejected',
+                createdAt: Value(DateTime.now()),
+                updatedAt: Value(DateTime.now()),
+              ),
+            );
+      }
+
+      await (db.delete(db.syncOutbox)..where(
+            (row) =>
+                row.entity.equals(mutation.entity) &
+                row.recordKey.equals(mutation.recordKey),
+          ))
+          .go();
+    });
+  }
+
+  String? _extractPlanIdFromMutation(LocalSyncMutation mutation) {
+    if (mutation.payloadJson == null) return null;
+    try {
+      final decoded = jsonDecode(mutation.payloadJson!) as Map<String, dynamic>;
+      return decoded['plan_id'] as String? ??
+          (decoded['plan'] as Map<String, dynamic>?)?['id'] as String?;
+    } catch (_) {
+      return null;
+    }
   }
 
   bool validateUserSettingKey(String key) {

@@ -91,6 +91,29 @@ abstract interface class AssetRepository {
   Future<List<Tag>> listTagsForAsset(String assetId);
 }
 
+enum LocalMaintenanceCompletionStatus {
+  applied,
+  planUnavailable,
+  planInactive,
+  occurrenceChanged,
+}
+
+class LocalMaintenanceCompletionResult {
+  const LocalMaintenanceCompletionResult({
+    required this.status,
+    this.operationId,
+    this.previousDueDate,
+    this.nextDueDate,
+  });
+
+  final LocalMaintenanceCompletionStatus status;
+  final String? operationId;
+  final DateTime? previousDueDate;
+  final DateTime? nextDueDate;
+
+  bool get isApplied => status == LocalMaintenanceCompletionStatus.applied;
+}
+
 abstract interface class MaintenanceRepository {
   Stream<List<TaskItem>> watchTasks();
   Future<List<TaskItem>> listTasks();
@@ -117,6 +140,12 @@ abstract interface class MaintenanceRepository {
     TaskMetadata? metadata,
   });
   Future<bool> completePlan(
+    String planId, {
+    DateTime? completedAt,
+    String? notes,
+    DateTime? expectedNextDueDate,
+  });
+  Future<LocalMaintenanceCompletionResult> completePlanResult(
     String planId, {
     DateTime? completedAt,
     String? notes,
