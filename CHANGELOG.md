@@ -4,6 +4,12 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.6 (Build 32) — 2026-08-07
+
+### Fixed and Improved
+
+- **Maintenance Completion Payload V2 Support**: Fixed `complete_maintenance_task` RPC on Supabase to support version 2 operation payloads (`"version": 2`). The Flutter client sends payload v2 for causal ordering (`depends_on_operation_id`), but the RPC previously rejected version 2 payloads with `invalid_payload_version`, causing task completions to revert locally. Applied migration `20260807154500` to live Supabase (`iajvkvvvhwjdiuaufymh`).
+
 ## 1.4.5 (Build 31) — 2026-08-07
 
 ### Fixed and Improved
