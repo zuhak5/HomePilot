@@ -4,7 +4,7 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
-## 1.4.7 — 2026-08-08
+## 1.4.7 (Build 33) — 2026-08-08
 
 ### Fixed and Improved
 
