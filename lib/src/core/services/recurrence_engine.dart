@@ -17,7 +17,8 @@ class HomePilotRecurrenceEngine implements RecurrenceEngine {
       RecurrenceUnit.hours => completionDate.add(
         Duration(hours: rule.interval),
       ),
-      RecurrenceUnit.days => DateTime(
+      RecurrenceUnit.days => _createDateTime(
+        completionDate,
         completionDate.year,
         completionDate.month,
         completionDate.day + rule.interval,
@@ -27,7 +28,8 @@ class HomePilotRecurrenceEngine implements RecurrenceEngine {
         completionDate.millisecond,
         completionDate.microsecond,
       ),
-      RecurrenceUnit.weeks => DateTime(
+      RecurrenceUnit.weeks => _createDateTime(
+        completionDate,
         completionDate.year,
         completionDate.month,
         completionDate.day + (rule.interval * 7),
@@ -49,11 +51,22 @@ class HomePilotRecurrenceEngine implements RecurrenceEngine {
     final totalMonths = (value.year * 12) + (value.month - 1) + months;
     final year = totalMonths ~/ 12;
     final month = (totalMonths % 12) + 1;
-    final lastDayOfTargetMonth = DateTime(year, month + 1, 0).day;
+    final lastDayOfTargetMonth = _createDateTime(
+      value,
+      year,
+      month + 1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ).day;
     final day = value.day > lastDayOfTargetMonth
         ? lastDayOfTargetMonth
         : value.day;
-    return DateTime(
+    return _createDateTime(
+      value,
       year,
       month,
       day,
@@ -62,6 +75,41 @@ class HomePilotRecurrenceEngine implements RecurrenceEngine {
       value.second,
       value.millisecond,
       value.microsecond,
+    );
+  }
+
+  DateTime _createDateTime(
+    DateTime source,
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+    int millisecond,
+    int microsecond,
+  ) {
+    if (source.isUtc) {
+      return DateTime.utc(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millisecond,
+        microsecond,
+      );
+    }
+    return DateTime(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      millisecond,
+      microsecond,
     );
   }
 }

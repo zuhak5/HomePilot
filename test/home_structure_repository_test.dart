@@ -819,7 +819,7 @@ void main() {
         roomId: roomId,
       );
       final originalDue = DateTime(2026, 6, 15, 8, 30);
-      final completedAt = DateTime(2026, 6, 15, 18, 45, 12);
+      final completedAt = DateTime.utc(2026, 6, 15, 18, 45, 12);
       final planId = await maintenance.savePlan(
         assetId: assetId,
         title: 'Clean tank filter',
@@ -849,7 +849,10 @@ void main() {
       expect(duplicate, isFalse);
       expect(records, hasLength(1));
       expect(records.single.dueDate, originalDue);
-      expect(updated?.plan.nextDueDate, DateTime(2026, 6, 22, 15, 45, 12));
+      expect(
+        updated?.plan.nextDueDate.toUtc(),
+        DateTime.utc(2026, 6, 22, 18, 45, 12),
+      );
     });
 
     test('streak refresh counts completions due today with a time', () async {
