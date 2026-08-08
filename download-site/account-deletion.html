@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://*.supabase.co; form-action 'self' https://*.supabase.co; upgrade-insecure-requests">
   <meta name="theme-color" content="#111827">
-  <meta name="description" content="HomePilot Account & Data Deletion Request Page. Permanently delete your HomePilot cloud account and associated data without reinstalling the app.">
+  <meta name="description" content="HomePilot Account & Data Deletion Request Page. Permanently delete your HomePilot cloud account and associated synchronized data without reinstalling the app.">
   <meta name="color-scheme" content="light dark">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="referrer" content="no-referrer">
   <title>Account Deletion — HomePilot</title>
   <link rel="icon" href="assets/versiondeck-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -23,7 +24,8 @@
       </a>
       <nav class="topbar-actions" aria-label="Navigation">
         <a href="./">Releases</a>
-        <a href="https://github.com/zuhak5/HomePilot" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/zuhak5/HomePilot/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <a href="https://github.com/zuhak5/HomePilot/issues" target="_blank" rel="noopener noreferrer">Support</a>
       </nav>
     </div>
   </header>
@@ -31,45 +33,40 @@
   <main id="main" class="container deletion-container">
     <section class="card deletion-card">
       <h1>HomePilot Account &amp; Data Deletion</h1>
-      <p class="lead">
-        Request permanent deletion of your HomePilot cloud account and associated synchronized data.
-      </p>
+      <p class="lead">Permanently delete your HomePilot cloud account and associated synchronized data without reinstalling or opening the Android app.</p>
 
       <div class="info-box">
         <h2>What will be deleted?</h2>
         <ul>
-          <li><strong>Cloud Database Records:</strong> Your synchronized home structures, tasks, rooms, assets, and schedule configurations.</li>
-          <li><strong>Private Media Files:</strong> Photos and documents uploaded to your private cloud storage bucket.</li>
-          <li><strong>Account Binding:</strong> Your Google authentication association and user identity records.</li>
+          <li><strong>Cloud database records:</strong> synchronized home structures, tasks, rooms, assets, schedules, and account-scoped application data.</li>
+          <li><strong>Private media files:</strong> photos and documents stored under your private HomePilot user prefix.</li>
+          <li><strong>Authentication account:</strong> your HomePilot Supabase authentication user and active sessions.</li>
         </ul>
 
-        <h2>Data Retention Disclosures</h2>
-        <p>
-          Server-verified AdMob reward transaction logs are retained for fraud prevention, audit compliance, and accounting consistency as required by law and platform agreements.
-        </p>
+        <h2>Data retention</h2>
+        <p>Security, fraud-prevention, server-verified AdMob reward transaction, and legally required audit records may be retained when HomePilot has a legitimate obligation to do so. Retained records are not used to recreate your deleted account.</p>
+        <p>This browser flow cannot erase files that exist only on a separately installed Android device. Removing the cloud account invalidates account-scoped synchronization; uninstalling or clearing app storage controls device-local files.</p>
       </div>
 
       <div class="instructions-box">
-        <h2>How to Delete Your Account</h2>
-        <p>You can delete your account using either method below:</p>
+        <h2>How deletion works</h2>
         <ol>
-          <li><strong>In-App Deletion:</strong> Open HomePilot &rarr; Settings &rarr; Account &rarr; Delete Account.</li>
-          <li><strong>Web Deletion (This Page):</strong> Authenticate with Google below to verify ownership and confirm deletion.</li>
+          <li><strong>In app:</strong> HomePilot → Settings → Account → Delete Account.</li>
+          <li><strong>On the web:</strong> sign in with the Google account bound to HomePilot, review the verified identity, then explicitly confirm permanent deletion below.</li>
         </ol>
+        <p>HomePilot never asks you to type a user ID or email address as authorization. The deletion backend derives identity from the authenticated Supabase session.</p>
       </div>
 
       <div class="action-box">
-        <h2>Web Account Deletion Form</h2>
+        <h2>Web account deletion</h2>
         <div id="deletion-status" role="status" aria-live="polite"></div>
+        <p id="authenticated-identity" aria-live="polite"></p>
         <form id="deletion-form">
-          <p>Click below to sign in with your Google account to confirm identity before deletion:</p>
-          <button type="button" id="btn-authenticate" class="btn primary-btn">
-            Sign in with Google to Verify
-          </button>
-          <button type="button" id="btn-delete" class="btn danger-btn" hidden disabled>
-            Permanently Delete My Account
-          </button>
+          <p>Use Google sign-in to create a fresh HomePilot session before deletion:</p>
+          <button type="button" id="btn-authenticate" class="btn primary-btn">Sign in with Google to Verify</button>
+          <button type="button" id="btn-delete" class="btn danger-btn" hidden disabled>Permanently Delete My Account</button>
         </form>
+        <p><small>If the web flow is unavailable, use the in-app deletion path or open a support issue. HomePilot will not report success unless the protected deletion backend confirms it.</small></p>
       </div>
     </section>
   </main>
@@ -80,6 +77,7 @@
     </div>
   </footer>
 
+  <script src="account-deletion-config.js" defer></script>
   <script type="module" src="account-deletion.js"></script>
 </body>
 </html>
