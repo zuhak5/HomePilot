@@ -38,7 +38,13 @@ class FlutterDevicePermissionGateway implements DevicePermissionGateway {
       case PermissionCapability.notifications:
         return _delegate.openAppPermissionSettings();
       case PermissionCapability.exactReminderTiming:
-        return _delegate.openExactAlarmSettings();
+        // The canonical request uses flutter_local_notifications' exact-alarm
+        // special-access API. If a platform implementation cannot open it,
+        // retain the generic settings fallback rather than inventing a second
+        // feature-layer native implementation.
+        final state = await _delegate.request(AppPermissionKind.exactAlarms);
+        if (state == AppPermissionState.granted) return true;
+        return _delegate.openAppPermissionSettings();
     }
   }
 }
