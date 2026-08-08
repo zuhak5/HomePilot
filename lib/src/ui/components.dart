@@ -4,7 +4,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:homepilot/l10n/app_localizations_ext.dart';
-import '../core/utils/app_failure.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:material_symbols_icons/symbols.dart';
@@ -14,7 +13,8 @@ import '../core/domain/task_selectors.dart';
 import '../i18n/dynamic_text.dart';
 import '../core/utils/date_utils.dart' as hk_dates;
 import 'app_theme.dart';
-import '../core/services/feedback_messenger.dart';
+import 'feedback/feedback_coordinator.dart';
+import 'feedback/feedback_model.dart';
 
 const double kSwipeRowMinHeight = 48;
 const double kSwipeRowRadius = HkRadii.lg;
@@ -280,40 +280,37 @@ enum HkIllustrationTone { neutral, info, success, warning, danger }
 
 enum HkToastSeverity { normal, error }
 
-ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showToast(
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showToast(
   BuildContext context, {
   required Widget content,
   SnackBarAction? action,
   HkToastSeverity severity = HkToastSeverity.normal,
   double? bottomOffset,
+  Duration? duration,
 }) {
-  final duration = severity == HkToastSeverity.error
-      ? kErrorToastDuration
-      : action == null
-      ? kToastDuration
-      : kActionToastDuration;
-  final messenger =
-      ScaffoldMessenger.maybeOf(context) ??
-      hkRootScaffoldMessengerKey.currentState;
-  if (messenger == null) {
-    throw FlutterError(
-      'No ScaffoldMessenger available for transient feedback.',
-    );
-  }
-  messenger.hideCurrentSnackBar();
-  return messenger.showSnackBar(
-    SnackBar(
-      content: content,
-      action: action,
-      duration: duration,
-      behavior: SnackBarBehavior.floating,
-      margin: _resolvedSnackBarMargin(context, bottomOffset),
-      persist: false,
-    ),
+  final tone = severity == HkToastSeverity.error
+      ? HkFeedbackTone.error
+      : HkFeedbackTone.neutral;
+  final item = HkFeedbackItem(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    message: content,
+    tone: tone,
+    mode: action != null ? HkFeedbackMode.actionable : HkFeedbackMode.passive,
+    actionLabel: action?.label,
+    onAction: action != null ? () => action.onPressed() : null,
+    duration:
+        duration ??
+        (action != null
+            ? kActionToastDuration
+            : (severity == HkToastSeverity.error
+                  ? kErrorToastDuration
+                  : kToastDuration)),
+    bottomOffset: bottomOffset,
   );
+  return FeedbackCoordinator.instance.show(context, item);
 }
 
-ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showUndoToast(
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showUndoToast(
   BuildContext context, {
   required Widget content,
   required FutureOr<void> Function() onUndo,
@@ -331,7 +328,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showUndoToast(
   );
 }
 
-ScaffoldFeatureController<SnackBar, SnackBarClosedReason>
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
 showTaskMovedToTrashSnackBar(
   BuildContext context, {
   required FutureOr<void> Function() onUndo,
@@ -366,7 +363,7 @@ showTaskMovedToTrashSnackBar(
   );
 }
 
-ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showUndoSnackBar(
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _showUndoSnackBar(
   BuildContext context, {
   required Widget content,
   required FutureOr<void> Function() onUndo,
@@ -374,77 +371,19 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> _showUndoSnackBar(
   required String actionLabel,
   required Duration duration,
   EdgeInsetsGeometry? margin,
+  String? batchItemType,
 }) {
-  var undone = false;
-  var undoRunning = false;
-  final snackBarColors = HkSnackBarColors.of(context);
-  final messenger =
-      ScaffoldMessenger.maybeOf(context) ??
-      hkRootScaffoldMessengerKey.currentState;
-  if (messenger == null) {
-    throw FlutterError('No ScaffoldMessenger available for undo feedback.');
-  }
-  final controller = messenger.showSnackBar(
-    SnackBar(
-      content: TaskDeletionSnackBarContent(
-        content: content,
-        duration: duration,
-      ),
-      action: SnackBarAction(
-        label: actionLabel,
-        textColor: snackBarColors.action,
-        onPressed: () {
-          if (undone || undoRunning) {
-            return;
-          }
-          undone = true;
-          undoRunning = true;
-          unawaited(
-            Future.sync(onUndo).catchError((Object error) {
-              if (context.mounted) {
-                showToast(
-                  context,
-                  content: Text(
-                    localizedFailureMessage(
-                      context.l10n,
-                      appFailureCodeFor(error, fallback: AppFailureCode.undo),
-                    ),
-                  ),
-                  severity: HkToastSeverity.error,
-                );
-              }
-            }),
-          );
-        },
-      ),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: snackBarColors.surface,
-      duration: duration,
-      margin: margin,
-      persist: false,
-    ),
+  final item = HkFeedbackItem(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    message: content,
+    mode: HkFeedbackMode.undoable,
+    actionLabel: actionLabel,
+    onUndo: onUndo,
+    onFinalize: onFinalize,
+    duration: duration,
+    batchItemType: batchItemType ?? 'trash',
   );
-  unawaited(
-    controller.closed.then((reason) async {
-      if (undone || reason == SnackBarClosedReason.action) {
-        return;
-      }
-      try {
-        await Future.sync(onFinalize ?? () {});
-      } catch (error) {
-        if (context.mounted) {
-          showToast(
-            context,
-            content: Text(
-              localizedFailureMessage(context.l10n, appFailureCodeFor(error)),
-            ),
-            severity: HkToastSeverity.error,
-          );
-        }
-      }
-    }),
-  );
-  return controller;
+  return FeedbackCoordinator.instance.show(context, item);
 }
 
 class TaskDeletionSnackBarContent extends StatelessWidget {
@@ -586,24 +525,6 @@ class _UndoCountdownBarState extends State<_UndoCountdownBar> {
       ],
     );
   }
-}
-
-EdgeInsetsGeometry? _resolvedSnackBarMargin(
-  BuildContext context,
-  double? bottomOffset,
-) {
-  final media = MediaQuery.maybeOf(context);
-  final safeBottom = media?.viewPadding.bottom ?? 0;
-  final keyboardBottom = media?.viewInsets.bottom ?? 0;
-  final bottom =
-      bottomOffset ??
-      math.max(safeBottom, keyboardBottom) + kHomePilotSnackBarBottomSpacing;
-  return EdgeInsets.fromLTRB(
-    kHomePilotSnackBarHorizontalMargin,
-    0,
-    kHomePilotSnackBarHorizontalMargin,
-    bottom,
-  );
 }
 
 bool _reduceMotion(BuildContext context) {

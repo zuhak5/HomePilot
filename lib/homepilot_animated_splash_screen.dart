@@ -115,7 +115,7 @@ class _HomePilotAnimatedSplashScreenState
     _loop = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 5200),
-    )..repeat();
+    );
 
     _logoOpacity = CurvedAnimation(
       parent: _intro,
@@ -162,6 +162,20 @@ class _HomePilotAnimatedSplashScreenState
     );
 
     _intro.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      if (_loop.isAnimating) {
+        _loop.stop();
+      }
+    } else {
+      if (!_loop.isAnimating) {
+        _loop.repeat();
+      }
+    }
   }
 
   @override

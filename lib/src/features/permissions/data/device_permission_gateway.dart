@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -33,6 +34,18 @@ class FlutterDevicePermissionGateway implements DevicePermissionGateway {
           if (!Platform.isAndroid) {
             return AppPermissionState.unavailable;
           }
+          try {
+            final plugin = FlutterLocalNotificationsPlugin()
+                .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin
+                >();
+            final canExact = await plugin?.canScheduleExactNotifications();
+            if (canExact != null) {
+              return canExact
+                  ? AppPermissionState.granted
+                  : AppPermissionState.denied;
+            }
+          } catch (_) {}
           final status = await Permission.scheduleExactAlarm.status;
           return _mapPermissionStatus(status);
       }
@@ -62,6 +75,18 @@ class FlutterDevicePermissionGateway implements DevicePermissionGateway {
           if (!Platform.isAndroid) {
             return AppPermissionState.unavailable;
           }
+          try {
+            final plugin = FlutterLocalNotificationsPlugin()
+                .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin
+                >();
+            final granted = await plugin?.requestExactAlarmsPermission();
+            if (granted != null) {
+              return granted
+                  ? AppPermissionState.granted
+                  : AppPermissionState.denied;
+            }
+          } catch (_) {}
           final status = await Permission.scheduleExactAlarm.request();
           return _mapPermissionStatus(status);
       }

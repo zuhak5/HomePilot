@@ -1156,7 +1156,7 @@ void main() {
       expect(preferences.localReminders, isTrue);
       expect(preferences.maxRemindersPerDay, 4);
       expect(preferences.defaultSnoozeMinutes, 60);
-      expect(preferences.preferExactReminders, isTrue);
+      expect(preferences.preferExactReminders, isFalse);
     });
 
     test(

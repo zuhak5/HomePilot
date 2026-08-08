@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="HomePilot Account & Data Deletion Request Page. Permanently delete your HomePilot cloud account and associated data without reinstalling the app.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Account Deletion — HomePilot</title>
+  <link rel="icon" href="assets/versiondeck-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="account-deletion.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="./" aria-label="VersionDeck home">
+        <img src="assets/versiondeck-mark.svg" width="34" height="34" alt="">
+        <span>HomePilot</span>
+      </a>
+      <nav class="topbar-actions" aria-label="Navigation">
+        <a href="./">Releases</a>
+        <a href="https://github.com/zuhak5/HomePilot" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="container deletion-container">
+    <section class="card deletion-card">
+      <h1>HomePilot Account &amp; Data Deletion</h1>
+      <p class="lead">
+        Request permanent deletion of your HomePilot cloud account and associated synchronized data.
+      </p>
+
+      <div class="info-box">
+        <h2>What will be deleted?</h2>
+        <ul>
+          <li><strong>Cloud Database Records:</strong> Your synchronized home structures, tasks, rooms, assets, and schedule configurations.</li>
+          <li><strong>Private Media Files:</strong> Photos and documents uploaded to your private cloud storage bucket.</li>
+          <li><strong>Account Binding:</strong> Your Google authentication association and user identity records.</li>
+        </ul>
+
+        <h2>Data Retention Disclosures</h2>
+        <p>
+          Server-verified AdMob reward transaction logs are retained for fraud prevention, audit compliance, and accounting consistency as required by law and platform agreements.
+        </p>
+      </div>
+
+      <div class="instructions-box">
+        <h2>How to Delete Your Account</h2>
+        <p>You can delete your account using either method below:</p>
+        <ol>
+          <li><strong>In-App Deletion:</strong> Open HomePilot &rarr; Settings &rarr; Account &rarr; Delete Account.</li>
+          <li><strong>Web Deletion (This Page):</strong> Authenticate with Google below to verify ownership and confirm deletion.</li>
+        </ol>
+      </div>
+
+      <div class="action-box">
+        <h2>Web Account Deletion Form</h2>
+        <div id="deletion-status" role="status" aria-live="polite"></div>
+        <form id="deletion-form">
+          <p>Click below to sign in with your Google account to confirm identity before deletion:</p>
+          <button type="button" id="btn-authenticate" class="btn primary-btn">
+            Sign in with Google to Verify
+          </button>
+          <button type="button" id="btn-delete" class="btn danger-btn" hidden disabled>
+            Permanently Delete My Account
+          </button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <p>HomePilot — Household asset organization and maintenance application.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="account-deletion.js"></script>
+</body>
+</html>

@@ -83,6 +83,15 @@ class AppLocalePreference {
 
 enum TaskStatus { dueToday, upcoming, overdue, completed }
 
+enum EffectiveCapabilityState {
+  active,
+  degraded,
+  blocked,
+  disabledByUser,
+  notConfigured,
+  unavailable,
+}
+
 class NotificationPreferences {
   const NotificationPreferences({
     this.enabled = true,
@@ -99,7 +108,7 @@ class NotificationPreferences {
     this.reminderHour = 9,
     this.maxRemindersPerDay = 6,
     this.defaultSnoozeMinutes = 60,
-    this.preferExactReminders = true,
+    this.preferExactReminders = false,
   });
 
   final bool enabled;

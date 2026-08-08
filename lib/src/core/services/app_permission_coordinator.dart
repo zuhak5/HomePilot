@@ -7,6 +7,8 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../database/app_database.dart';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 enum AppPermissionKind { notifications, location, exactAlarms }
 
 enum AppPermissionState {
@@ -38,6 +40,20 @@ class AppPermissionCoordinator implements AppPermissionGateway {
       if (!Platform.isAndroid && kind == AppPermissionKind.exactAlarms) {
         return AppPermissionState.unavailable;
       }
+      if (kind == AppPermissionKind.exactAlarms && Platform.isAndroid) {
+        try {
+          final plugin = FlutterLocalNotificationsPlugin()
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >();
+          final canExact = await plugin?.canScheduleExactNotifications();
+          if (canExact != null) {
+            return canExact
+                ? AppPermissionState.granted
+                : AppPermissionState.denied;
+          }
+        } catch (_) {}
+      }
       if (kind == AppPermissionKind.location &&
           !await Geolocator.isLocationServiceEnabled()) {
         return AppPermissionState.serviceDisabled;
@@ -60,6 +76,20 @@ class AppPermissionCoordinator implements AppPermissionGateway {
     }
     await markPrompted(kind);
     try {
+      if (kind == AppPermissionKind.exactAlarms && Platform.isAndroid) {
+        try {
+          final plugin = FlutterLocalNotificationsPlugin()
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >();
+          final granted = await plugin?.requestExactAlarmsPermission();
+          if (granted != null) {
+            return granted
+                ? AppPermissionState.granted
+                : AppPermissionState.denied;
+          }
+        } catch (_) {}
+      }
       return _mapStatus(await _permission(kind).request());
     } on MissingPluginException {
       return AppPermissionState.unavailable;

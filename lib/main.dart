@@ -2150,68 +2150,57 @@ class _HomePilotAppState extends ConsumerState<HomePilotApp>
       GlobalCupertinoLocalizations.delegate,
     ];
     final startupController = ref.watch(startupBootstrapControllerProvider);
-    return ValueListenableBuilder<StartupBootstrapState>(
-      valueListenable: startupController.stateListenable,
-      builder: (context, startupState, _) {
-        final effectiveStartupStatus =
-            startupState.status ??
-            _syntheticStartupStatus(RestoreRunState.running);
-        if (startupState.kind != StartupBootstrapKind.authenticatedReady) {
-          return MaterialApp(
-            title: 'HomePilot',
-            debugShowCheckedModeBanner: false,
-            locale: locale,
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: localizationsDelegates,
-            themeAnimationDuration: _themeTransitionDuration,
-            themeAnimationCurve: _themeTransitionCurve,
-            themeMode: themeMode,
-            theme: HomePilotTheme.light(),
-            darkTheme: HomePilotTheme.dark(),
-            builder: (context, child) =>
-                HomePilotSplashOverlay(child: child ?? const SizedBox.shrink()),
-            home: Builder(
-              builder: (context) => _StartupHome(
-                state: startupState,
-                status: effectiveStartupStatus,
-                language: appLanguage,
-                onLanguageChanged: (language) => ref
-                    .read(settingsRepositoryProvider)
-                    .setAppLocalePreference(language),
-                onRetry: startupController.retryStartupRestore,
-                onCheckConnection: startupController.retryStartupRestore,
-                onContinueOffline: startupState.canContinueOffline
-                    ? startupController.continueStartupOffline
-                    : null,
-                onSignOut: startupController.signOutFromStartup,
-              ),
-            ),
-          );
-        }
-        final router = ref.watch(routerProvider);
-        return MonetizationBootstrap(
-          child: CloudSyncBootstrap(
-            child: NotificationBootstrap(
-              child: MaterialApp.router(
-                title: 'HomePilot',
-                debugShowCheckedModeBanner: false,
-                scaffoldMessengerKey: hkRootScaffoldMessengerKey,
-                locale: locale,
-                supportedLocales: AppLocalizations.supportedLocales,
-                localizationsDelegates: localizationsDelegates,
-                routerConfig: router,
-                themeAnimationDuration: _themeTransitionDuration,
-                themeAnimationCurve: _themeTransitionCurve,
-                themeMode: themeMode,
-                theme: HomePilotTheme.light(),
-                darkTheme: HomePilotTheme.dark(),
-                builder: (context, child) => HomePilotSplashOverlay(
-                  child: StandardSystemUi(
-                    child: child ?? const SizedBox.shrink(),
+    final router = ref.watch(routerProvider);
+
+    return MaterialApp.router(
+      title: 'HomePilot',
+      debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: hkRootScaffoldMessengerKey,
+      locale: locale,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: localizationsDelegates,
+      routerConfig: router,
+      themeAnimationDuration: _themeTransitionDuration,
+      themeAnimationCurve: _themeTransitionCurve,
+      themeMode: themeMode,
+      theme: HomePilotTheme.light(),
+      darkTheme: HomePilotTheme.dark(),
+      builder: (context, child) {
+        // Splash is process-scoped presentation. Do not duplicate inside auth/startup/router branches.
+        return HomePilotSplashOverlay(
+          child: ValueListenableBuilder<StartupBootstrapState>(
+            valueListenable: startupController.stateListenable,
+            builder: (context, startupState, _) {
+              final effectiveStartupStatus =
+                  startupState.status ??
+                  _syntheticStartupStatus(RestoreRunState.running);
+              if (startupState.kind !=
+                  StartupBootstrapKind.authenticatedReady) {
+                return _StartupHome(
+                  state: startupState,
+                  status: effectiveStartupStatus,
+                  language: appLanguage,
+                  onLanguageChanged: (language) => ref
+                      .read(settingsRepositoryProvider)
+                      .setAppLocalePreference(language),
+                  onRetry: startupController.retryStartupRestore,
+                  onCheckConnection: startupController.retryStartupRestore,
+                  onContinueOffline: startupState.canContinueOffline
+                      ? startupController.continueStartupOffline
+                      : null,
+                  onSignOut: startupController.signOutFromStartup,
+                );
+              }
+              return MonetizationBootstrap(
+                child: CloudSyncBootstrap(
+                  child: NotificationBootstrap(
+                    child: StandardSystemUi(
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         );
       },
@@ -14715,7 +14704,6 @@ Future<bool> moveTaskToTrashWithUndo(
   if (!context.mounted) {
     return true;
   }
-  _showTaskActionFeedback(context, _TaskActionFeedbackType.deleted);
   hk_ui.showTaskMovedToTrashSnackBar(
     context,
     duration: const Duration(seconds: 5),

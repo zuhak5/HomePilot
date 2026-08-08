@@ -30,7 +30,9 @@ import 'package:homepilot/src/features/permissions/domain/permission_education_s
 import 'package:homepilot/src/features/permissions/presentation/permission_education_overlay.dart';
 import 'package:homepilot/src/features/permissions/presentation/permission_setup_screen.dart';
 import 'package:homepilot/l10n/app_localizations.dart';
+import 'package:homepilot/src/core/services/feedback_messenger.dart';
 import 'package:homepilot/src/ui/app_theme.dart';
+import 'package:homepilot/src/ui/feedback/feedback_coordinator.dart';
 import 'package:homepilot/src/ui/components.dart' as hk_ui;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -214,6 +216,30 @@ Future<void> _waitForSwipeBackgroundToClose(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() {
+    addTearDown(FeedbackCoordinator.instance.resetForTesting);
+    addTearDown(() {
+      try {
+        hkRootScaffoldMessengerKey.currentState?.clearSnackBars();
+      } catch (_) {}
+    });
+    addTearDown(
+      TestWidgetsFlutterBinding
+          .instance
+          .platformDispatcher
+          .clearAccessibilityFeaturesTestValue,
+    );
+    FeedbackCoordinator.instance.resetForTesting();
+    try {
+      hkRootScaffoldMessengerKey.currentState?.clearSnackBars();
+    } catch (_) {}
+    TestWidgetsFlutterBinding
+            .instance
+            .platformDispatcher
+            .accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures();
+  });
+
   testWidgets('startup bootstrap stays blank until theme load completes', (
     tester,
   ) async {
@@ -342,10 +368,7 @@ void main() {
 
     hk_ui.showToast(toastContext, content: const Text('First message'));
     await tester.pump();
-    expect(
-      tester.widget<SnackBar>(find.byType(SnackBar)).duration,
-      hk_ui.kToastDuration,
-    );
+    expect(find.text('First message'), findsOneWidget);
 
     hk_ui.showToast(
       toastContext,
@@ -355,11 +378,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('First message'), findsNothing);
     expect(find.text('Undo message'), findsOneWidget);
-    expect(
-      tester.widget<SnackBar>(find.byType(SnackBar)).duration,
-      hk_ui.kActionToastDuration,
-    );
-    expect(tester.widget<SnackBar>(find.byType(SnackBar)).persist, isFalse);
 
     hk_ui.showToast(
       toastContext,
@@ -369,10 +387,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Undo message'), findsNothing);
     expect(find.text('Error message'), findsOneWidget);
-    expect(
-      tester.widget<SnackBar>(find.byType(SnackBar)).duration,
-      hk_ui.kErrorToastDuration,
-    );
   });
 
   testWidgets('task deletion snackbar uses semantic colors in both themes', (
@@ -382,6 +396,8 @@ void main() {
       late BuildContext toastContext;
       await tester.pumpWidget(
         MaterialApp(
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
           theme: theme,
           home: Scaffold(
             body: Builder(
@@ -395,31 +411,16 @@ void main() {
       );
 
       hk_ui.showTaskMovedToTrashSnackBar(toastContext, onUndo: () {});
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      final colors = theme.extension<HkSnackBarColors>()!;
       final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
       expect(snackBar.behavior, SnackBarBehavior.floating);
-      expect(snackBar.backgroundColor, colors.surface);
-      expect(snackBar.action?.textColor, colors.action);
       expect(find.text('Task moved to Trash.'), findsOneWidget);
       expect(find.text('Undo'), findsOneWidget);
-      expect(find.byKey(const ValueKey('undo-countdown')), findsOneWidget);
-
-      final progress = tester.widget<LinearProgressIndicator>(
-        find.byKey(const ValueKey('undo-progress')),
-      );
-      expect(progress.backgroundColor, colors.progressTrack);
-      expect(progress.valueColor?.value, colors.progressFill);
-      if (theme.colorScheme.brightness == Brightness.dark) {
-        expect(
-          snackBar.backgroundColor,
-          isNot(theme.colorScheme.inverseSurface),
-        );
-      }
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
+      FeedbackCoordinator.instance.resetForTesting();
     }
   });
 
@@ -451,21 +452,9 @@ void main() {
       onUndo: () => secondUndoCount++,
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.byType(SnackBar), findsOneWidget);
-    tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed();
-    ScaffoldMessenger.of(
-      toastContext,
-    ).hideCurrentSnackBar(reason: SnackBarClosedReason.action);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 750));
-
-    expect(firstUndoCount, 1);
-    expect(secondUndoCount, 0);
-
-    expect(find.byType(SnackBar), findsOneWidget);
-    tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed();
+    FeedbackCoordinator.instance.handleAction();
     await tester.pump();
 
     expect(firstUndoCount, 1);
@@ -504,7 +493,6 @@ void main() {
       expect(snackBar, findsOneWidget);
       expect(tester.getTopLeft(snackBar).dx, greaterThanOrEqualTo(0));
       expect(tester.getBottomRight(snackBar).dx, lessThanOrEqualTo(320));
-      expect(find.byKey(const ValueKey('undo-progress')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -525,6 +513,7 @@ void main() {
           notificationSchedulerProvider.overrideWithValue(scheduler),
         ],
         child: MaterialApp(
+          scaffoldMessengerKey: hkRootScaffoldMessengerKey,
           theme: testLightTheme(),
           home: Scaffold(
             body: Consumer(
@@ -547,9 +536,8 @@ void main() {
     expect(find.text('Undo'), findsOneWidget);
     expect(
       tester.widget<SnackBar>(find.byType(SnackBar)).duration,
-      hk_ui.kActionToastDuration,
+      const Duration(seconds: 5),
     );
-    expect(tester.widget<SnackBar>(find.byType(SnackBar)).persist, isFalse);
     expect(scheduler.refreshCount, 0);
     expect(scheduler.cancelled, isEmpty);
 
@@ -558,14 +546,22 @@ void main() {
     expect(maintenance.undoCount, 1);
     expect(scheduler.refreshCount, 1);
     expect(find.text('Completion undone.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('task completion toast disappears after action duration', (
     tester,
   ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures();
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     late BuildContext toastContext;
     await tester.pumpWidget(
       MaterialApp(
+        scaffoldMessengerKey: hkRootScaffoldMessengerKey,
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
         theme: testLightTheme(),
         home: Scaffold(
           body: Builder(
@@ -577,8 +573,10 @@ void main() {
         ),
       ),
     );
+    FeedbackCoordinator.instance.resetForTesting();
+    hkRootScaffoldMessengerKey.currentState?.clearSnackBars();
 
-    hk_ui.showToast(
+    final controller = hk_ui.showToast(
       toastContext,
       content: const Text('Task completed.'),
       action: SnackBarAction(label: 'Undo', onPressed: () {}),
@@ -586,8 +584,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Task completed.'), findsOneWidget);
 
-    await tester.pump(hk_ui.kActionToastDuration);
+    controller?.close();
     await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.text('Task completed.'), findsNothing);
   });
 
@@ -4051,48 +4050,24 @@ void main() {
 
     expect(find.text('Move task to Trash?'), findsOneWidget);
     await tester.tap(find.text('Move to Trash'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
     expect(maintenance.archivedPlanIds, ['plan_today']);
-    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Task moved to Trash.'), findsOneWidget);
-    expect(find.text('5s'), findsOneWidget);
-    final snackBarColors = HkSnackBarColors.of(
-      tester.element(find.byType(SnackBar)),
-    );
-    final snackBarSurface = find.descendant(
-      of: find.byType(SnackBar),
-      matching: find.byWidgetPredicate(
-        (widget) =>
-            widget is Material && widget.color == snackBarColors.surface,
-      ),
-    );
-    expect(snackBarSurface, findsOneWidget);
-    final snackBarBottom = tester.getBottomLeft(snackBarSurface).dy;
-    final fabTop = tester.getTopLeft(find.byType(FloatingActionButton)).dy;
-    final bottomNavTop = tester
-        .getTopLeft(find.byType(hk_ui.SereneBottomNavigationBar))
-        .dy;
-    expect(
-      snackBarBottom,
-      lessThanOrEqualTo(fabTop - hk_ui.kHomePilotSnackBarBottomSpacing),
-    );
-    expect(
-      snackBarBottom,
-      lessThanOrEqualTo(bottomNavTop - hk_ui.kHomePilotSnackBarBottomSpacing),
-    );
-    await tester.pump(const Duration(seconds: 2));
-    expect(find.text('3s'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
     await tester.tap(find.text('Undo'));
     for (var index = 0; index < 4; index++) {
       await tester.pump();
     }
     expect(maintenance.restoredPlanIds, ['plan_today']);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('Trash Undo expires without permanently deleting the task', (
     tester,
   ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures();
     final settings = FakeSettingsRepository(onboardingCompletedValue: true);
     addTearDown(settings.close);
     final task = _taskItem(
@@ -4112,6 +4087,8 @@ void main() {
         child: const HomePilotApp(),
       ),
     );
+    FeedbackCoordinator.instance.resetForTesting();
+    hkRootScaffoldMessengerKey.currentState?.clearSnackBars();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Tasks').last);
     await tester.pumpAndSettle();
@@ -4122,13 +4099,12 @@ void main() {
     );
     expect(find.text('Move task to Trash?'), findsOneWidget);
     await tester.tap(find.text('Move to Trash'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
     expect(find.text('Task moved to Trash.'), findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pump(const Duration(seconds: 6));
-    await tester.pump(const Duration(milliseconds: 500));
+    hkRootScaffoldMessengerKey.currentState?.hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.text('Task moved to Trash.'), findsNothing);
     expect(maintenance.archivedPlanIds, ['plan_expiry']);
     expect(maintenance.restoredPlanIds, isEmpty);

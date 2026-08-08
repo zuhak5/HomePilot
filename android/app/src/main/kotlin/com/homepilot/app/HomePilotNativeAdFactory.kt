@@ -5,6 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import android.graphics.Color
+import com.google.android.gms.ads.nativead.AdChoicesView
 import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.gms.ads.nativead.NativeAdView
 import io.flutter.plugins.googlemobileads.NativeAdFactory
@@ -23,12 +25,31 @@ class HomePilotNativeAdFactory(
         val body = view.findViewById<TextView>(R.id.homepilot_ad_body)
         val advertiser = view.findViewById<TextView>(R.id.homepilot_ad_advertiser)
         val callToAction = view.findViewById<TextView>(R.id.homepilot_ad_cta)
+        val adChoices = view.findViewById<AdChoicesView>(R.id.homepilot_ad_choices)
 
         view.iconView = icon
         view.headlineView = headline
         view.bodyView = body
         view.advertiserView = advertiser
         view.callToActionView = callToAction
+        if (adChoices != null) {
+            view.adChoicesView = adChoices
+        }
+
+        val backgroundColorStr = customOptions?.get("backgroundColor") as? String
+        val textColorStr = customOptions?.get("textColor") as? String
+        if (!backgroundColorStr.isNullOrEmpty()) {
+            try {
+                view.setBackgroundColor(Color.parseColor(backgroundColorStr))
+            } catch (_: Exception) {}
+        }
+        if (!textColorStr.isNullOrEmpty()) {
+            try {
+                val color = Color.parseColor(textColorStr)
+                headline.setTextColor(color)
+                body.setTextColor(color)
+            } catch (_: Exception) {}
+        }
 
         headline.text = nativeAd.headline
         body.text = nativeAd.body
