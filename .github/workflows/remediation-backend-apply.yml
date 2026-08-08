@@ -1,0 +1,56 @@
+name: Remediation Backend Apply
+
+on:
+  push:
+    branches:
+      - remediation/master-completion-pass-2026-08-08
+    paths:
+      - tool/remediation_account_deletion_apply.py
+      - .github/workflows/remediation-backend-apply.yml
+  workflow_dispatch:
+
+concurrency:
+  group: remediation-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apply-account-deletion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: remediation/master-completion-pass-2026-08-08
+          fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Apply account deletion backend hardening
+        run: python3 tool/remediation_account_deletion_apply.py
+      - name: Format and test Edge function
+        run: |
+          deno fmt --check supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts || deno fmt supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
+          deno test --allow-env --allow-net supabase/functions/delete-account/index_test.ts
+      - name: Test browser deletion contracts
+        run: node --test tool/account-deletion-site.test.mjs
+      - name: Commit validated backend changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No backend changes to commit."
+            exit 0
+          fi
+          git config user.name "homepilot-remediation-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
+          git commit -m "fix(account): harden browser deletion backend contract"
+          git fetch origin remediation/master-completion-pass-2026-08-08
+          git rebase origin/remediation/master-completion-pass-2026-08-08
+          git push origin HEAD:remediation/master-completion-pass-2026-08-08
