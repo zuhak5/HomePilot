@@ -1,0 +1,108 @@
+name: Remediation Completion Apply
+
+on:
+  push:
+    branches:
+      - remediation/master-completion-pass-2026-08-08
+    paths:
+      - tool/remediation-mode.txt
+      - tool/remediation_completion_apply.py
+      - .github/workflows/remediation-completion-apply.yml
+  workflow_dispatch:
+
+concurrency:
+  group: remediation-completion-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: remediation/master-completion-pass-2026-08-08
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.7'
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies in GitHub Actions
+        run: flutter pub get
+
+      - name: Apply selected remediation phase
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          mode="$(tr -d '\r\n' < tool/remediation-mode.txt)"
+          test -n "$mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          python3 tool/remediation_completion_apply.py "$mode"
+
+      - name: Regenerate localization and format
+        run: |
+          flutter gen-l10n
+          dart format lib test
+
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      - name: Run focused phase tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ steps.apply.outputs.mode }}" in
+            splash)
+              flutter test --no-pub --concurrency=1 --timeout 3m test/homepilot_splash_overlay_test.dart test/process_splash_host_test.dart test/startup_resources_test.dart test/startup_benchmark_test.dart
+              ;;
+            permissions)
+              flutter test --no-pub --concurrency=1 --timeout 3m test/features/permissions
+              ;;
+            feedback)
+              flutter test --no-pub --concurrency=1 --timeout 3m test/feedback_coordinator_test.dart test/widget_test.dart
+              ;;
+            monetization)
+              flutter test --no-pub --concurrency=1 --timeout 3m test/ad_runtime_test.dart test/monetization_test.dart
+              ;;
+            auth)
+              flutter test --no-pub --concurrency=1 --timeout 3m test/supabase_auth_repository_test.dart
+              ;;
+            *)
+              echo "No dedicated Flutter focused suite for ${{ steps.apply.outputs.mode }}"
+              ;;
+          esac
+
+      - name: Run full Flutter suite
+        run: flutter test --no-pub --concurrency=1 --timeout 3m --exclude-tags production-config
+
+      - name: Verify no secrets were introduced
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git diff -- . ':!HomePilot_Master_Remediation_Prompt_Gemini_3_6_Flash_High.md' | grep -E '(SUPABASE_SERVICE_ROLE_KEY=|BEGIN (RSA|EC|OPENSSH) PRIVATE KEY|google-services\.json"[[:space:]]*:)' 
+
+      - name: Commit validated phase
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No implementation diff to commit."
+            exit 0
+          fi
+          git config user.name "homepilot-remediation-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib test
+          git commit -m "fix(${{ steps.apply.outputs.mode }}): complete master remediation phase"
+          git push origin HEAD:remediation/master-completion-pass-2026-08-08
