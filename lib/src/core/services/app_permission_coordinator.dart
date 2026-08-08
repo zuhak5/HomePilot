@@ -27,7 +27,6 @@ abstract interface class AppPermissionGateway {
   Future<void> markPrompted(AppPermissionKind kind);
   Future<bool> openAppPermissionSettings();
   Future<bool> openLocationServiceSettings();
-  Future<bool> openExactAlarmSettings();
 }
 
 class AppPermissionCoordinator implements AppPermissionGateway {
@@ -126,7 +125,11 @@ class AppPermissionCoordinator implements AppPermissionGateway {
   Future<bool> openLocationServiceSettings() =>
       Geolocator.openLocationSettings();
 
-  @override
+  /// Opens the Android Alarms & reminders special-access surface when the
+  /// notification plugin supports it. Feature adapters call [request] for the
+  /// exact-alarm kind to preserve testable gateway compatibility; this helper
+  /// remains available to direct production callers without forcing every fake
+  /// gateway in tests to implement a new method.
   Future<bool> openExactAlarmSettings() async {
     if (!Platform.isAndroid) return false;
     try {
@@ -141,8 +144,7 @@ class AppPermissionCoordinator implements AppPermissionGateway {
     } on MissingPluginException {
       return false;
     } on Exception {
-      // Fall back to the app settings surface when the Android plugin cannot
-      // open the exact-alarm special-access screen on this device/version.
+      // Fall back below.
     }
     return openAppSettings();
   }
