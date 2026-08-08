@@ -5893,13 +5893,13 @@ abstract class AppLocalizations {
   /// No description provided for @locationEducationBody.
   ///
   /// In en, this message translates to:
-  /// **'Use your location to show local weather and recommend seasonal home tasks.'**
+  /// **'Choose a city or use your current approximate location to show local weather for maintenance planning.'**
   String get locationEducationBody;
 
   /// No description provided for @locationEducationPrivacy.
   ///
   /// In en, this message translates to:
-  /// **'HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.'**
+  /// **'If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.'**
   String get locationEducationPrivacy;
 
   /// No description provided for @enableLocation.
@@ -5967,6 +5967,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Location, notifications, and reminders are already set up.'**
   String get permissionsAlreadyEnabled;
+
+  /// No description provided for @permissionSetupFinishLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish later'**
+  String get permissionSetupFinishLater;
+
+  /// No description provided for @permissionSetupChooseLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose location'**
+  String get permissionSetupChooseLocation;
+
+  /// No description provided for @permissionSetupUseCurrentLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Use current location'**
+  String get permissionSetupUseCurrentLocation;
+
+  /// No description provided for @permissionSetupWeatherTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set your weather area'**
+  String get permissionSetupWeatherTitle;
+
+  /// No description provided for @permissionSetupWeatherBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a city or use your current approximate location to show local weather for maintenance planning.'**
+  String get permissionSetupWeatherBody;
+
+  /// No description provided for @permissionSetupWeatherPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.'**
+  String get permissionSetupWeatherPrivacy;
+
+  /// No description provided for @permissionSetupExactOptionalTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use precise reminder timing'**
+  String get permissionSetupExactOptionalTitle;
+
+  /// No description provided for @permissionSetupExactOptionalBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Android requires special access for reminders at the exact selected time. Without it, HomePilot will use approximate timing.'**
+  String get permissionSetupExactOptionalBody;
+
+  /// No description provided for @permissionSetupUseApproximateTiming.
+  ///
+  /// In en, this message translates to:
+  /// **'Use approximate timing'**
+  String get permissionSetupUseApproximateTiming;
+
+  /// No description provided for @permissionSetupAllowPreciseTiming.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow precise timing'**
+  String get permissionSetupAllowPreciseTiming;
+
+  /// No description provided for @permissionSetupManageInSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage in settings'**
+  String get permissionSetupManageInSettings;
 }
 
 class _AppLocalizationsDelegate

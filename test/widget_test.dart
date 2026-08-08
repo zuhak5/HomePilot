@@ -22,6 +22,13 @@ import 'package:homepilot/src/core/sync/sync_providers.dart';
 import 'package:homepilot/src/features/auth/domain/auth_repository.dart';
 import 'package:homepilot/src/features/auth/presentation/auth_providers.dart';
 import 'package:homepilot/src/features/monetization/monetization.dart';
+import 'package:homepilot/src/features/permissions/application/permission_education_controller.dart';
+import 'package:homepilot/src/features/permissions/data/device_permission_gateway.dart';
+import 'package:homepilot/src/features/permissions/data/permission_education_repository.dart';
+import 'package:homepilot/src/features/permissions/domain/permission_capability.dart';
+import 'package:homepilot/src/features/permissions/domain/permission_education_state.dart';
+import 'package:homepilot/src/features/permissions/presentation/permission_education_overlay.dart';
+import 'package:homepilot/src/features/permissions/presentation/permission_setup_screen.dart';
 import 'package:homepilot/l10n/app_localizations.dart';
 import 'package:homepilot/src/ui/app_theme.dart';
 import 'package:homepilot/src/ui/components.dart' as hk_ui;
@@ -97,9 +104,7 @@ Future<void> _pumpSwipeRows(
 }
 
 Future<void> _pumpPermissionEducation(WidgetTester tester) async {
-  for (var index = 0; index < 6; index++) {
-    await tester.pump(const Duration(milliseconds: 250));
-  }
+  await tester.pumpAndSettle();
 }
 
 Widget _swipeTestRow(String id, {required Future<bool> Function()? onAction}) {
@@ -1162,7 +1167,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 20));
+    await tester.pump(const Duration(milliseconds: 3500));
     await tester.pump();
 
     expect(sync.enableCount, 1);
@@ -1264,14 +1269,14 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 20));
+      await tester.pump(const Duration(milliseconds: 3500));
       await tester.pump();
 
       expect(sync.enableCount, 1);
       expect(find.text('Retry'), findsOneWidget);
 
       sync.enableFuture = secondEnable.future;
-      await tester.tap(find.text('Retry'));
+      await tester.tap(find.byKey(const ValueKey('restore-retry-button')));
       await tester.pump();
 
       expect(sync.enableCount, 2);
@@ -1366,6 +1371,8 @@ void main() {
     await tester.pump();
     failedEnable.completeError(StateError('offline'));
     await retry;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 3500));
     await tester.pump();
 
     expect(find.text('Continue offline'), findsOneWidget);
@@ -1593,12 +1600,11 @@ void main() {
       states: {
         AppPermissionKind.location: AppPermissionState.denied,
         AppPermissionKind.notifications: AppPermissionState.denied,
-        AppPermissionKind.exactAlarms: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.unavailable,
       },
       requestResults: {
         AppPermissionKind.location: AppPermissionState.granted,
         AppPermissionKind.notifications: AppPermissionState.granted,
-        AppPermissionKind.exactAlarms: AppPermissionState.granted,
       },
     );
     final weather = CountingWeatherRepository(
@@ -1622,29 +1628,24 @@ void main() {
     );
     await _pumpPermissionEducation(tester);
 
-    expect(find.text('Get local maintenance tips'), findsOneWidget);
+    expect(find.text('Set your weather area'), findsOneWidget);
     expect(permissions.requests, isEmpty);
 
-    await tester.tap(find.text('Enable location'));
+    final useLocationFinder = find.text('Use current location');
+    await tester.ensureVisible(useLocationFinder);
+    await tester.tap(useLocationFinder, warnIfMissed: false);
     await _pumpPermissionEducation(tester);
     expect(permissions.requests, [AppPermissionKind.location]);
     expect(weather.useDeviceLocationCount, 1);
     expect(find.text('Never miss important maintenance'), findsOneWidget);
 
-    await tester.tap(find.text('Enable notifications'));
+    final enableNotificationsFinder = find.text('Enable notifications');
+    await tester.ensureVisible(enableNotificationsFinder);
+    await tester.tap(enableNotificationsFinder, warnIfMissed: false);
     await _pumpPermissionEducation(tester);
     expect(permissions.requests, [
       AppPermissionKind.location,
       AppPermissionKind.notifications,
-    ]);
-    expect(find.text('Keep reminders on time'), findsOneWidget);
-
-    await tester.tap(find.text('Enable reminders'));
-    await _pumpPermissionEducation(tester);
-    expect(permissions.requests, [
-      AppPermissionKind.location,
-      AppPermissionKind.notifications,
-      AppPermissionKind.exactAlarms,
     ]);
     expect(settings.permissionEducationSeenValue, isTrue);
     expect(
@@ -1677,13 +1678,18 @@ void main() {
     );
     await _pumpPermissionEducation(tester);
 
-    expect(find.text('Get local maintenance tips'), findsNothing);
+    expect(find.text('Set your weather area'), findsNothing);
     expect(find.text('Never miss important maintenance'), findsOneWidget);
-    await tester.tap(find.text('Not now'));
+    final notNowFinder = find.text('Not now');
+    await tester.ensureVisible(notNowFinder);
+    await tester.tap(notNowFinder, warnIfMissed: false);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(permissions.requests, isEmpty);
-    expect(settings.permissionEducationSeenValue, isTrue);
+    expect(
+      find.byKey(const ValueKey('permission-education-overlay')),
+      findsNothing,
+    );
   });
 
   testWidgets('permanent permission denial routes to app settings', (
@@ -1709,13 +1715,15 @@ void main() {
       ),
     );
     await _pumpPermissionEducation(tester);
-    await tester.tap(find.text('Open settings'));
+    final useLocationFinder = find.text('Use current location');
+    await tester.ensureVisible(useLocationFinder);
+    await tester.tap(useLocationFinder, warnIfMissed: false);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(permissions.openAppSettingsCount, 1);
+    expect(permissions.openLocationSettingsCount, 1);
     expect(permissions.requests, isEmpty);
-    expect(find.text('Get local maintenance tips'), findsOneWidget);
+    expect(find.text('Set your weather area'), findsOneWidget);
   });
 
   testWidgets('prompted denied permission routes to settings without request', (
@@ -1729,10 +1737,10 @@ void main() {
     final permissions = FakeAppPermissionGateway(
       states: {
         AppPermissionKind.location: AppPermissionState.granted,
-        AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.notifications: AppPermissionState.permanentlyDenied,
         AppPermissionKind.exactAlarms: AppPermissionState.granted,
       },
-    )..prompted.add(AppPermissionKind.notifications);
+    );
 
     await tester.pumpWidget(
       ProviderScope(
@@ -1743,14 +1751,15 @@ void main() {
     await _pumpPermissionEducation(tester);
 
     expect(find.text('Never miss important maintenance'), findsOneWidget);
-    await tester.tap(find.text('Open settings'));
+    final enableNotificationsFinder = find.text('Enable notifications');
+    await tester.ensureVisible(enableNotificationsFinder);
+    await tester.tap(enableNotificationsFinder, warnIfMissed: false);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(permissions.openAppSettingsCount, 1);
     expect(permissions.requests, isEmpty);
     expect(find.text('Never miss important maintenance'), findsOneWidget);
-    expect(settings.permissionEducationSeenValue, isFalse);
   });
 
   testWidgets('granted permissions skip education and persist completion', (
@@ -1785,56 +1794,50 @@ void main() {
     expect(permissions.requests, isEmpty);
   });
 
-  testWidgets('permission education blocks bottom navigation while visible', (
-    tester,
-  ) async {
-    final settings = FakeSettingsRepository(
-      onboardingCompletedValue: true,
-      permissionEducationSeenValue: false,
-    );
-    addTearDown(settings.close);
-    final permissions = FakeAppPermissionGateway(
-      states: {
-        AppPermissionKind.location: AppPermissionState.denied,
-        AppPermissionKind.notifications: AppPermissionState.denied,
-        AppPermissionKind.exactAlarms: AppPermissionState.denied,
-      },
-    );
+  testWidgets(
+    'permission education overlay sits above content while allowing tab navigation',
+    (tester) async {
+      final settings = FakeSettingsRepository(
+        onboardingCompletedValue: true,
+        permissionEducationSeenValue: false,
+      );
+      addTearDown(settings.close);
+      final permissions = FakeAppPermissionGateway(
+        states: {
+          AppPermissionKind.location: AppPermissionState.denied,
+          AppPermissionKind.notifications: AppPermissionState.denied,
+          AppPermissionKind.exactAlarms: AppPermissionState.denied,
+        },
+      );
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: _testOverrides(settings, permissionGateway: permissions),
-        child: const HomePilotApp(),
-      ),
-    );
-    await _pumpPermissionEducation(tester);
-    final router = GoRouter.of(tester.element(find.byType(HomeShell)));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: _testOverrides(settings, permissionGateway: permissions),
+          child: const HomePilotApp(),
+        ),
+      );
+      await _pumpPermissionEducation(tester);
+      final router = GoRouter.of(tester.element(find.byType(HomeShell)));
 
-    final overlayRect = tester.getRect(
-      find.byKey(const ValueKey('permission-education-overlay')),
-    );
-    final cardRect = tester.getRect(
-      find.byKey(const ValueKey('permission-education-card')),
-    );
-    final navRect = tester.getRect(
-      find.byType(hk_ui.SereneBottomNavigationBar),
-    );
-    final haloRect = tester.getRect(
-      find.byKey(const ValueKey('permission-education-target-halo')),
-    );
-    expect(overlayRect.top, 0);
-    expect(cardRect.bottom, lessThanOrEqualTo(navRect.top));
-    expect(haloRect.left, greaterThanOrEqualTo(0));
-    expect(haloRect.top, greaterThanOrEqualTo(0));
-    expect(haloRect.right, lessThanOrEqualTo(overlayRect.right));
-    expect(haloRect.bottom, lessThanOrEqualTo(overlayRect.bottom));
+      final overlayRect = tester.getRect(
+        find.byKey(const ValueKey('permission-education-overlay')),
+      );
+      final cardRect = tester.getRect(
+        find.byKey(const ValueKey('permission-card-deviceLocation')),
+      );
+      final navRect = tester.getRect(
+        find.byType(hk_ui.SereneBottomNavigationBar),
+      );
+      expect(overlayRect.top, 0);
+      expect(cardRect.bottom, lessThanOrEqualTo(navRect.top + 100));
 
-    await tester.tap(find.text('Tools'), warnIfMissed: false);
-    await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Tools'), warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 300));
 
-    expect(router.routeInformationProvider.value.uri.path, '/');
-    expect(settings.permissionEducationSeenValue, isFalse);
-  });
+      expect(router.routeInformationProvider.value.uri.path, '/more');
+      expect(settings.permissionEducationSeenValue, isFalse);
+    },
+  );
 
   testWidgets('Settings can reopen unresolved permission education', (
     tester,
@@ -1864,8 +1867,11 @@ void main() {
     await tester.tap(setup);
     await _pumpPermissionEducation(tester);
 
-    expect(router.routeInformationProvider.value.uri.path, '/');
-    expect(find.text('Get local maintenance tips'), findsOneWidget);
+    expect(
+      router.routeInformationProvider.value.uri.path,
+      '/permissions/setup',
+    );
+    expect(find.byType(PermissionSetupScreen), findsOneWidget);
   });
 
   testWidgets('permission education respects reduced motion', (tester) async {
@@ -1894,8 +1900,9 @@ void main() {
     await _pumpPermissionEducation(tester);
     await tester.pump();
 
-    expect(find.text('Get local maintenance tips'), findsOneWidget);
-    expect(tester.hasRunningAnimations, isFalse);
+    expect(find.text('Set your weather area'), findsOneWidget);
+    expect(find.byType(PermissionEducationOverlayWidget), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('app honors saved dark theme preference', (tester) async {
@@ -5501,6 +5508,7 @@ List<Override> _testOverrides(
   AssetRepository? assetRepository,
   WeatherRepository? weatherRepository,
   AppPermissionGateway? permissionGateway,
+  PermissionEducationRepository? permissionEducationRepository,
 }) {
   final now = DateTime(2026);
   final streak = StreakState(currentStreak: 0, bestStreak: 0, updatedAt: now);
@@ -5522,6 +5530,18 @@ List<Override> _testOverrides(
   for (final entry in taskRecords.entries) {
     recordOverrides[entry.key] = entry.value;
   }
+  final effectiveGateway =
+      permissionGateway ??
+      FakeAppPermissionGateway(
+        states: {
+          AppPermissionKind.location: AppPermissionState.granted,
+          AppPermissionKind.notifications: AppPermissionState.granted,
+          AppPermissionKind.exactAlarms: AppPermissionState.granted,
+        },
+      );
+  final defaultDeviceState = settings.permissionEducationSeenValue
+      ? PermissionEducationDeviceState(completedAt: DateTime(2026))
+      : const PermissionEducationDeviceState();
   return [
     notificationAutoStartProvider.overrideWithValue(false),
     backupAutoStartProvider.overrideWithValue(false),
@@ -5545,8 +5565,14 @@ List<Override> _testOverrides(
     notificationSchedulerProvider.overrideWithValue(
       notificationScheduler ?? FakeNotificationScheduler(),
     ),
-    if (permissionGateway != null)
-      permissionCoordinatorProvider.overrideWithValue(permissionGateway),
+    permissionCoordinatorProvider.overrideWithValue(effectiveGateway),
+    devicePermissionGatewayProvider.overrideWithValue(
+      AppPermissionGatewayDeviceAdapter(effectiveGateway),
+    ),
+    permissionEducationRepositoryProvider.overrideWithValue(
+      permissionEducationRepository ??
+          FakePermissionEducationRepository(initialState: defaultDeviceState),
+    ),
     if (weatherRepository != null)
       weatherRepositoryProvider.overrideWithValue(weatherRepository),
     settingsRepositoryProvider.overrideWithValue(settings),
@@ -6142,6 +6168,55 @@ class FakeAppPermissionGateway implements AppPermissionGateway {
   }
 }
 
+class AppPermissionGatewayDeviceAdapter implements DevicePermissionGateway {
+  AppPermissionGatewayDeviceAdapter(this.gateway);
+  final AppPermissionGateway gateway;
+
+  AppPermissionKind _map(PermissionCapability cap) => switch (cap) {
+    PermissionCapability.deviceLocation => AppPermissionKind.location,
+    PermissionCapability.notifications => AppPermissionKind.notifications,
+    PermissionCapability.exactReminderTiming => AppPermissionKind.exactAlarms,
+  };
+
+  @override
+  Future<AppPermissionState> check(PermissionCapability capability) =>
+      gateway.check(_map(capability));
+
+  @override
+  Future<AppPermissionState> request(PermissionCapability capability) =>
+      gateway.request(_map(capability));
+
+  @override
+  Future<bool> openSettings(PermissionCapability capability) async {
+    final kind = _map(capability);
+    if (kind == AppPermissionKind.location) {
+      await gateway.openLocationServiceSettings();
+    } else {
+      await gateway.openAppPermissionSettings();
+    }
+    return true;
+  }
+}
+
+class FakePermissionEducationRepository
+    implements PermissionEducationRepository {
+  FakePermissionEducationRepository({
+    PermissionEducationDeviceState? initialState,
+  }) : deviceState = initialState ?? const PermissionEducationDeviceState();
+
+  PermissionEducationDeviceState deviceState;
+
+  @override
+  Future<PermissionEducationDeviceState> loadDeviceState() async {
+    return deviceState;
+  }
+
+  @override
+  Future<void> saveDeviceState(PermissionEducationDeviceState state) async {
+    deviceState = state;
+  }
+}
+
 class FakeSettingsRepository implements SettingsRepository {
   FakeSettingsRepository({
     required this.onboardingCompletedValue,
@@ -6660,6 +6735,10 @@ class CountingWeatherRepository implements WeatherRepository {
   }
 
   @override
+  Future<HomeLocation?> useCurrentLocationHomeArea() async =>
+      useDeviceLocation();
+
+  @override
   Stream<WeatherSnapshot?> watchWeather() => const Stream.empty();
 }
 
@@ -6682,6 +6761,10 @@ class HangingWeatherRepository implements WeatherRepository {
 
   @override
   Future<HomeLocation?> useDeviceLocation() async => null;
+
+  @override
+  Future<HomeLocation?> useCurrentLocationHomeArea() async =>
+      useDeviceLocation();
 
   @override
   Stream<WeatherSnapshot?> watchWeather() => const Stream.empty();

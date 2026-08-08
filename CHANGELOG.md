@@ -4,10 +4,21 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.8 (Build 34) — 2026-08-08
+
+### Fixed and Improved
+
+- **V3 Non-Blocking Permission Education Overlay**: Refactored `PermissionEducationController` to Riverpod `Notifier` and updated `PermissionEducationOverlayWidget` with modern Material Design cards, step indicators, accessible tap barriers, and smooth reduced-motion handling.
+- **Isolated Pure Splash Overlay**: Stacked `HomePilotSplashOverlay` at the root above `MaterialApp` to ensure pure presentation without interference from background routing or state.
+
 ## 1.4.7 (Build 33) — 2026-08-08
 
 ### Fixed and Improved
 
+- **Pure Animated Splash Screen Overlay**: Activated `HomePilotSplashOverlay` as a purely visual, fixed-duration (3.2s display + 250ms fade) startup overlay placed above the running application root, isolated from app state, network, or navigation.
+- **Capability-Based Permission Setup & Local v3 State**: Migrated permission education to a device-local state (`permission_education_device_state_v3`) to prevent cross-device setting sync from suppressing setup on fresh devices.
+- **Contextual Exact Alarms & Optional Weather Area**: Removed exact alarm requests from first-run onboarding, redesigning Step 1 as a permission-optional weather area setup offering manual city selection alongside current location.
+- **Location Coordinate Quantization**: Quantized device coordinates to 2 decimal places prior to persistence, weather queries, and account sync to preserve user location privacy.
 - **Recurring Maintenance Completion Precision & Reconciliation**: Fixed recurring task completion rollback by standardizing protocol timestamps to whole-second UTC precision across Flutter, Drift/SQLite, outbox payloads, and Supabase.
 - **Supabase RPC Migration**: Applied migration `20260807223000` to canonicalize occurrence timestamps in `complete_maintenance_task`, self-healing existing legacy cloud plans with sub-second precision.
 - **Dependency & Ordering Defense**: Enforced topological readiness in `LocalSyncStore.pendingMutations()` so dependent completion operations are held in outbox until predecessor operations resolve.

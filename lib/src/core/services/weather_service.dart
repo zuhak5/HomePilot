@@ -11,6 +11,18 @@ import '../database/app_database.dart';
 import '../domain/contracts.dart';
 import '../domain/models.dart';
 
+HomeLocation privacyReducedLocation(HomeLocation location) {
+  final lat = double.parse(location.latitude.toStringAsFixed(2));
+  final lng = double.parse(location.longitude.toStringAsFixed(2));
+  return HomeLocation(
+    label: location.label,
+    latitude: lat,
+    longitude: lng,
+    timezone: location.timezone,
+    source: location.source,
+  );
+}
+
 class OpenMeteoWeatherRepository implements WeatherRepository {
   OpenMeteoWeatherRepository({
     required this.db,
@@ -64,13 +76,14 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
   }
 
   Future<WeatherSnapshot?> _performWeatherRefresh() async {
-    final location = await settingsRepository.homeLocation();
-    if (location == null) {
+    final rawLocation = await settingsRepository.homeLocation();
+    if (rawLocation == null) {
       return cachedWeather();
     }
+    final location = privacyReducedLocation(rawLocation);
     final uri = Uri.https('api.open-meteo.com', '/v1/forecast', {
-      'latitude': location.latitude.toStringAsFixed(5),
-      'longitude': location.longitude.toStringAsFixed(5),
+      'latitude': location.latitude.toStringAsFixed(2),
+      'longitude': location.longitude.toStringAsFixed(2),
       'current':
           'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m',
       'daily':
@@ -129,14 +142,16 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
         for (final item in results.whereType<Map<String, dynamic>>())
           if ((item['latitude'] as num?) != null &&
               (item['longitude'] as num?) != null)
-            HomeLocation(
-              label: [item['name'], item['admin1'], item['country_code']]
-                  .where((part) => part != null && '$part'.trim().isNotEmpty)
-                  .join(', '),
-              latitude: (item['latitude'] as num).toDouble(),
-              longitude: (item['longitude'] as num).toDouble(),
-              timezone: item['timezone'] as String?,
-              source: 'manual',
+            privacyReducedLocation(
+              HomeLocation(
+                label: [item['name'], item['admin1'], item['country_code']]
+                    .where((part) => part != null && '$part'.trim().isNotEmpty)
+                    .join(', '),
+                latitude: (item['latitude'] as num).toDouble(),
+                longitude: (item['longitude'] as num).toDouble(),
+                timezone: item['timezone'] as String?,
+                source: 'manual',
+              ),
             ),
       ];
     } catch (_) {
@@ -146,6 +161,11 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
 
   @override
   Future<HomeLocation?> useDeviceLocation() async {
+    return useCurrentLocationHomeArea();
+  }
+
+  @override
+  Future<HomeLocation?> useCurrentLocationHomeArea() async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -162,13 +182,17 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
           timeLimit: Duration(seconds: 15),
         ),
       );
+      final rawLat = double.parse(position.latitude.toStringAsFixed(2));
+      final rawLng = double.parse(position.longitude.toStringAsFixed(2));
+      final label = await _deviceLocationLabel(rawLat, rawLng);
       final location = HomeLocation(
-        label: await _deviceLocationLabel(position),
-        latitude: position.latitude,
-        longitude: position.longitude,
+        label: label,
+        latitude: rawLat,
+        longitude: rawLng,
         source: 'device',
       );
       await settingsRepository.setHomeLocation(location);
+      unawaited(refreshWeather());
       return location;
     } catch (_) {
       return null;
@@ -316,12 +340,12 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
 
   int _int(Object? value) => value is num ? value.round() : 0;
 
-  Future<String> _deviceLocationLabel(Position position) async {
+  Future<String> _deviceLocationLabel(double lat, double lng) async {
     final language = await _languageCode();
     final l10n = lookupAppLocalizations(Locale(language));
     final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
-      'lat': position.latitude.toStringAsFixed(5),
-      'lon': position.longitude.toStringAsFixed(5),
+      'lat': lat.toStringAsFixed(2),
+      'lon': lng.toStringAsFixed(2),
       'format': 'jsonv2',
       'zoom': '10',
       'accept-language': language,

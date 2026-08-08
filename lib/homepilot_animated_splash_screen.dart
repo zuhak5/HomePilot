@@ -1,50 +1,89 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// HomePilot in-app animated splash screen.
+/// Purely visual, isolated startup splash overlay controller for HomePilot.
 ///
-/// This is NOT the native Android launch splash.
-/// Use it after the native splash if you want a branded transition/loading screen.
+/// Places the animated splash visually above the already-running application child
+/// for a fixed duration, fades out, and removes itself from the widget tree.
+class HomePilotSplashOverlay extends StatefulWidget {
+  const HomePilotSplashOverlay({
+    required this.child,
+    this.displayDuration = const Duration(milliseconds: 3200),
+    this.fadeOutDuration = const Duration(milliseconds: 250),
+    super.key,
+  });
+
+  final Widget child;
+  final Duration displayDuration;
+  final Duration fadeOutDuration;
+
+  @override
+  State<HomePilotSplashOverlay> createState() => _HomePilotSplashOverlayState();
+}
+
+class _HomePilotSplashOverlayState extends State<HomePilotSplashOverlay> {
+  Timer? _displayTimer;
+  Timer? _removalTimer;
+  bool _showSplash = true;
+  bool _isFadingOut = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayTimer = Timer(widget.displayDuration, () {
+      if (!mounted) return;
+      setState(() {
+        _isFadingOut = true;
+      });
+      _removalTimer = Timer(widget.fadeOutDuration, () {
+        if (!mounted) return;
+        setState(() {
+          _showSplash = false;
+        });
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _displayTimer?.cancel();
+    _removalTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.child,
+        if (_showSplash)
+          Positioned.fill(
+            child: AnimatedOpacity(
+              opacity: _isFadingOut ? 0.0 : 1.0,
+              duration: widget.fadeOutDuration,
+              child: const HomePilotAnimatedSplashScreen(),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// HomePilot in-app animated splash screen visual component.
 ///
-/// Add this asset to pubspec.yaml:
-///
-/// flutter:
-///   assets:
-///     - assets/splash/homepilot_splash_icon_3d.png
-///
-/// Example:
-///
-/// MaterialApp(
-///   initialRoute: '/',
-///   routes: {
-///     '/': (_) => const HomePilotAnimatedSplashScreen(
-///       nextRoute: '/onboarding',
-///     ),
-///     '/onboarding': (_) => const OnboardingScreen(),
-///   },
-/// );
+/// Pure presentation widget for the fixed startup overlay.
 class HomePilotAnimatedSplashScreen extends StatefulWidget {
   const HomePilotAnimatedSplashScreen({
     super.key,
-    this.nextRoute = '/onboarding',
     this.assetPath = 'assets/splash/homepilot_splash_icon_3d.png',
     this.duration = const Duration(milliseconds: 3200),
-    this.navigateAutomatically = true,
-    this.onFinished,
-    this.progressValue,
-    required this.statusText,
-    required this.footerText,
   });
 
-  final String nextRoute;
   final String assetPath;
   final Duration duration;
-  final bool navigateAutomatically;
-  final VoidCallback? onFinished;
-  final double? progressValue;
-  final String statusText;
-  final String footerText;
 
   @override
   State<HomePilotAnimatedSplashScreen> createState() =>
@@ -66,19 +105,10 @@ class _HomePilotAnimatedSplashScreenState
   late final Animation<double> _footerOpacity;
 
   static const Color _background = Color(0xFFF9FCF8);
+
   @override
   void initState() {
     super.initState();
-
-    SystemChrome.setSystemUIOverlayStyle(
-      const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: _background,
-        systemNavigationBarIconBrightness: Brightness.dark,
-      ),
-    );
 
     _intro = AnimationController(vsync: this, duration: widget.duration);
 
@@ -132,21 +162,6 @@ class _HomePilotAnimatedSplashScreenState
     );
 
     _intro.forward();
-
-    if (widget.navigateAutomatically) {
-      Future<void>.delayed(
-        widget.duration + const Duration(milliseconds: 180),
-        () {
-          if (!mounted) return;
-          widget.onFinished?.call();
-
-          final navigator = Navigator.maybeOf(context);
-          if (navigator != null) {
-            navigator.pushReplacementNamed(widget.nextRoute);
-          }
-        },
-      );
-    }
   }
 
   @override
@@ -161,76 +176,93 @@ class _HomePilotAnimatedSplashScreenState
     final media = MediaQuery.of(context);
     final shortest = media.size.shortestSide;
     final logoSize = math.min(
-      shortest.clamp(220.0, 430.0),
-      (media.size.height * 0.48).clamp(180.0, 430.0),
+      shortest.clamp(140.0, 430.0),
+      (media.size.height * 0.38).clamp(140.0, 430.0),
     );
-    final horizontalPadding = (media.size.width * 0.075).clamp(24.0, 44.0);
+    final horizontalPadding = (media.size.width * 0.075).clamp(16.0, 44.0);
 
-    return Scaffold(
-      backgroundColor: _background,
-      body: SafeArea(
-        child: AnimatedBuilder(
-          animation: Listenable.merge([_intro, _loop]),
-          builder: (context, _) {
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                CustomPaint(
-                  painter: _HomePilotSplashBackgroundPainter(
-                    loopValue: _loop.value,
-                    introValue: _intro.value,
-                  ),
-                ),
-
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                  child: Column(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: _background,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: AbsorbPointer(
+        absorbing: true,
+        child: Semantics(
+          container: true,
+          label: 'Starting HomePilot',
+          value: 'Works online and offline',
+          child: Scaffold(
+            backgroundColor: _background,
+            body: SafeArea(
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_intro, _loop]),
+                builder: (context, _) {
+                  return Stack(
+                    fit: StackFit.expand,
                     children: [
-                      const Spacer(flex: 9),
+                      CustomPaint(
+                        painter: _HomePilotSplashBackgroundPainter(
+                          loopValue: _loop.value,
+                          introValue: _intro.value,
+                        ),
+                      ),
 
-                      Transform.translate(
-                        offset: Offset(0, _logoLift.value),
-                        child: FadeTransition(
-                          opacity: _logoOpacity,
-                          child: ScaleTransition(
-                            scale: _logoScale,
-                            child: _AnimatedSplashIcon(
-                              assetPath: widget.assetPath,
-                              size: logoSize,
-                              loopValue: _loop.value,
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: horizontalPadding,
+                        ),
+                        child: Column(
+                          children: [
+                            const Spacer(flex: 9),
+
+                            Transform.translate(
+                              offset: Offset(0, _logoLift.value),
+                              child: FadeTransition(
+                                opacity: _logoOpacity,
+                                child: ScaleTransition(
+                                  scale: _logoScale,
+                                  child: _AnimatedSplashIcon(
+                                    assetPath: widget.assetPath,
+                                    size: logoSize,
+                                    loopValue: _loop.value,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+
+                            const SizedBox(height: 18),
+
+                            FadeTransition(
+                              opacity: _titleOpacity,
+                              child: SlideTransition(
+                                position: _titleOffset,
+                                child: const _SplashTitle(),
+                              ),
+                            ),
+
+                            const Spacer(flex: 7),
+
+                            _LoadingSection(
+                              value: _progressValue.value,
+                              statusText: 'Starting HomePilot',
+                              footerText: 'Works online and offline',
+                              footerOpacity: _footerOpacity.value,
+                            ),
+
+                            const Spacer(flex: 3),
+                          ],
                         ),
                       ),
-
-                      const SizedBox(height: 18),
-
-                      FadeTransition(
-                        opacity: _titleOpacity,
-                        child: SlideTransition(
-                          position: _titleOffset,
-                          child: const _SplashTitle(),
-                        ),
-                      ),
-
-                      const Spacer(flex: 7),
-
-                      _LoadingSection(
-                        value:
-                            widget.progressValue?.clamp(0.0, 1.0) ??
-                            _progressValue.value,
-                        statusText: widget.statusText,
-                        footerText: widget.footerText,
-                        footerOpacity: _footerOpacity.value,
-                      ),
-
-                      const Spacer(flex: 3),
                     ],
-                  ),
-                ),
-              ],
-            );
-          },
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -394,44 +426,51 @@ class _LoadingSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(
-          width: 310,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: Stack(
-              children: [
-                Container(
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE7EFE8),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                FractionallySizedBox(
-                  widthFactor: value.clamp(0.0, 1.0),
-                  child: Container(
-                    height: 12,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFF64D85F),
-                          Color(0xFF159A3B),
-                          Color(0xFF0C7A31),
-                        ],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _green.withValues(alpha: 0.32),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
+        ExcludeSemantics(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final progressWidth = math.min(310.0, constraints.maxWidth);
+              return SizedBox(
+                width: progressWidth,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: Stack(
+                    children: [
+                      Container(
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE7EFE8),
+                          borderRadius: BorderRadius.circular(999),
                         ),
-                      ],
-                    ),
+                      ),
+                      FractionallySizedBox(
+                        widthFactor: value.clamp(0.0, 1.0),
+                        child: Container(
+                          height: 12,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            gradient: const LinearGradient(
+                              colors: [
+                                Color(0xFF64D85F),
+                                Color(0xFF159A3B),
+                                Color(0xFF0C7A31),
+                              ],
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _green.withValues(alpha: 0.32),
+                                blurRadius: 16,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 18),

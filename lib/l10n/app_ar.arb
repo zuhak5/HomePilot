@@ -970,8 +970,8 @@
   "nextAddMaintainedItem": "أضف عنصراً تريد صيانته",
   "nextScheduleMaintenanceTask": "جدول مهمة الصيانة الأولى",
   "getLocalMaintenanceTips": "احصل على نصائح صيانة محلية",
-  "locationEducationBody": "استخدم موقعك لعرض الطقس المحلي واقتراح مهام منزلية موسمية.",
-  "locationEducationPrivacy": "يرسل HomePilot إحداثيات تقريبية إلى Open-Meteo للطقس وإلى OpenStreetMap لعرض اسم المنطقة. لا يُجمع الموقع في الخلفية.",
+  "locationEducationBody": "اختر مدينة أو استخدم موقعك التقريبي الحالي لعرض الطقس المحلي لتخطيط الصيانة.",
+  "locationEducationPrivacy": "إذا استخدمت الموقع الحالي، يحفظ HomePilot منطقة منزلية تقريبية. لا يتم جمع موقعك باستمرار في الخلفية.",
   "enableLocation": "تفعيل الموقع",
   "neverMissImportantMaintenance": "لا تفوّت أعمال الصيانة المهمة",
   "notificationEducationBody": "احصل على تذكيرات قبل موعد المهام وتنبيهات عند تأخرها.",
@@ -988,5 +988,16 @@
   "enableAlarmsAndRemindersOnboarding": "تفعيل التذكيرات",
   "permissionSetup": "إعداد الموقع والإشعارات والتذكيرات",
   "permissionSetupSubtitle": "راجع كيفية استخدام HomePilot للموقع والتذكيرات.",
-  "permissionsAlreadyEnabled": "تم إعداد الموقع والإشعارات والتذكيرات بالفعل."
+  "permissionsAlreadyEnabled": "تم إعداد الموقع والإشعارات والتذكيرات بالفعل.",
+  "permissionSetupFinishLater": "إكمال لاحقاً",
+  "permissionSetupChooseLocation": "تحديد مدينة",
+  "permissionSetupUseCurrentLocation": "استخدام الموقع الحالي",
+  "permissionSetupWeatherTitle": "تحديد منطقة الطقس",
+  "permissionSetupWeatherBody": "اختر مدينة أو استخدم موقعك التقريبي الحالي لعرض الطقس المحلي لتخطيط الصيانة.",
+  "permissionSetupWeatherPrivacy": "إذا استخدمت الموقع الحالي، يحفظ HomePilot منطقة منزلية تقريبية. لا يتم جمع موقعك باستمرار في الخلفية.",
+  "permissionSetupExactOptionalTitle": "استخدام التوقيت الدقيق للتذكير",
+  "permissionSetupExactOptionalBody": "يتطلب أندرويد إذنًا خاصًا للتذكير في الوقت المحدد تمامًا. بدونه، سيعتمد HomePilot التوقيت التقريبي.",
+  "permissionSetupUseApproximateTiming": "استخدام التوقيت التقريبي",
+  "permissionSetupAllowPreciseTiming": "السماح بالتوقيت الدقيق",
+  "permissionSetupManageInSettings": "إدارة في الإعدادات"
 }

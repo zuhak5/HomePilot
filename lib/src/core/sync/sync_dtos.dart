@@ -124,6 +124,9 @@ class SyncEntitySpec {
   }
 }
 
+/// Device-scoped permission state (permission_education_device_state_v3) is
+/// deliberately unsynced and excluded from allowedRemoteSettingKeys because OS
+/// permissions are device-specific.
 const allowedRemoteSettingKeys = <String>{
   'theme',
   'app_language',

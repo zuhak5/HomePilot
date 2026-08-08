@@ -73,7 +73,11 @@ import 'src/ui/app_theme.dart';
 import 'src/ui/components.dart' as hk_ui;
 import 'src/ui/full_bleed_illustration_background.dart';
 import 'src/ui/full_canvas_system_ui.dart';
-import 'src/ui/permission_education.dart';
+import 'src/features/permissions/application/permission_education_controller.dart';
+import 'src/features/permissions/domain/permission_capability.dart';
+import 'src/features/permissions/presentation/permission_education_overlay.dart';
+import 'src/features/permissions/presentation/permission_setup_screen.dart';
+import 'homepilot_animated_splash_screen.dart';
 import 'package:homepilot/l10n/app_localizations.dart';
 import 'package:homepilot/l10n/app_localizations_ext.dart';
 
@@ -2041,6 +2045,22 @@ final routerProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) =>
                 _appRoutePage(context, state, const NotificationsScreen()),
           ),
+          GoRoute(
+            path: '/permissions/setup',
+            pageBuilder: (context, state) => _appRoutePage(
+              context,
+              state,
+              PermissionSetupScreen(
+                onChooseLocationManually: (context) =>
+                    showModalBottomSheet<HomeLocation>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => const LocationPickerSheet(),
+                    ),
+              ),
+            ),
+          ),
         ],
       ),
     ],
@@ -2148,6 +2168,8 @@ class _HomePilotAppState extends ConsumerState<HomePilotApp>
             themeMode: themeMode,
             theme: HomePilotTheme.light(),
             darkTheme: HomePilotTheme.dark(),
+            builder: (context, child) =>
+                HomePilotSplashOverlay(child: child ?? const SizedBox.shrink()),
             home: Builder(
               builder: (context) => _StartupHome(
                 state: startupState,
@@ -2183,8 +2205,11 @@ class _HomePilotAppState extends ConsumerState<HomePilotApp>
                 themeMode: themeMode,
                 theme: HomePilotTheme.light(),
                 darkTheme: HomePilotTheme.dark(),
-                builder: (context, child) =>
-                    StandardSystemUi(child: child ?? const SizedBox.shrink()),
+                builder: (context, child) => HomePilotSplashOverlay(
+                  child: StandardSystemUi(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -3860,11 +3885,6 @@ class DashboardScreen extends ConsumerStatefulWidget {
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with WidgetsBindingObserver {
   static const _homeDataSettleDuration = Duration(milliseconds: 180);
-  static const _permissionEducationSteps = [
-    PermissionEducationStep.location,
-    PermissionEducationStep.notifications,
-    PermissionEducationStep.exactAlarms,
-  ];
 
   late _HomeRenderData _homeData;
   Timer? _homeDataTimer;
@@ -3872,17 +3892,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   final LayerLink _notificationEducationLink = LayerLink();
   final GlobalKey _weatherEducationTargetKey = GlobalKey();
   final GlobalKey _notificationEducationTargetKey = GlobalKey();
-  PermissionEducationStep? _permissionEducationStep;
-  OverlayEntry? _permissionEducationOverlayEntry;
-  bool _permissionOverlaySyncScheduled = false;
-  AppPermissionState _locationPermissionState = AppPermissionState.unavailable;
-  AppPermissionState _notificationPermissionState =
-      AppPermissionState.unavailable;
-  AppPermissionState _exactAlarmPermissionState =
-      AppPermissionState.unavailable;
-  final Map<AppPermissionKind, bool> _permissionPrompted = {};
-  bool _permissionEducationBusy = false;
-  bool _permissionEducationLoadInFlight = false;
   bool _forcePermissionEducationHandled = false;
 
   @override
@@ -3893,13 +3902,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     ref.listenManual(tasksProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(assetsProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(roomsProvider, (_, _) => _scheduleHomeDataCommit());
-    ref.listenManual(permissionEducationSeenProvider, (previous, next) {
-      if (next.value == false) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          unawaited(_maybeStartPermissionEducation());
-        });
+    scheduleMicrotask(() {
+      if (mounted) {
+        ref.read(permissionEducationControllerProvider.notifier).initialize();
       }
-    }, fireImmediately: true);
+    });
   }
 
   @override
@@ -3914,24 +3921,32 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         '1';
     if (force && !_forcePermissionEducationHandled) {
       _forcePermissionEducationHandled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_maybeStartPermissionEducation(force: true));
+      scheduleMicrotask(() {
+        if (mounted) {
+          ref
+              .read(permissionEducationControllerProvider.notifier)
+              .initialize(
+                source: PermissionEducationSource.settings,
+                forceShow: true,
+              );
+          _clearPermissionSetupQuery();
+        }
       });
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        _permissionEducationStep != null) {
-      unawaited(_refreshPermissionEducationAfterSettings());
+    if (state == AppLifecycleState.resumed) {
+      ref
+          .read(permissionEducationControllerProvider.notifier)
+          .handleAppResume();
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _removePermissionEducationOverlay();
     _homeDataTimer?.cancel();
     super.dispose();
   }
@@ -3970,340 +3985,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     });
   }
 
-  Future<void> _maybeStartPermissionEducation({bool force = false}) async {
-    if (_permissionEducationLoadInFlight || !mounted) return;
-    final session = ref.read(authSessionProvider).value;
-    if (session == null) return;
-    _permissionEducationLoadInFlight = true;
-    try {
-      final settings = ref.read(settingsRepositoryProvider);
-      final seen = await settings.permissionEducationSeen();
-      if (seen && !force) return;
-      final permissions = ref.read(permissionCoordinatorProvider);
-      final states = await Future.wait([
-        permissions.check(AppPermissionKind.location),
-        permissions.check(AppPermissionKind.notifications),
-        permissions.check(AppPermissionKind.exactAlarms),
-      ]);
-      final prompted = await Future.wait([
-        permissions.wasPrompted(AppPermissionKind.location),
-        permissions.wasPrompted(AppPermissionKind.notifications),
-        permissions.wasPrompted(AppPermissionKind.exactAlarms),
-      ]);
-      if (!mounted) return;
-      _locationPermissionState = states[0];
-      _notificationPermissionState = states[1];
-      _exactAlarmPermissionState = states[2];
-      _permissionPrompted[AppPermissionKind.location] = prompted[0];
-      _permissionPrompted[AppPermissionKind.notifications] = prompted[1];
-      _permissionPrompted[AppPermissionKind.exactAlarms] = prompted[2];
-      final nextStep = _nextPendingPermissionStep();
-      if (nextStep == null) {
-        if (!seen) await settings.setPermissionEducationSeen(true);
-        if (force && mounted) {
-          hk_ui.showToast(
-            context,
-            content: Text(context.l10n.permissionsAlreadyEnabled),
-          );
-          _clearPermissionSetupQuery();
-        }
-        return;
-      }
-      setState(() => _permissionEducationStep = nextStep);
-      _schedulePermissionEducationOverlaySync();
-    } catch (error) {
-      AppLogger.warning('permission_education_load', error: error);
-    } finally {
-      _permissionEducationLoadInFlight = false;
-    }
-  }
-
-  bool _isPermissionStepSkipped(AppPermissionState state) =>
-      state == AppPermissionState.granted ||
-      state == AppPermissionState.unavailable;
-
-  Future<void> _handlePermissionContinue() async {
-    final step = _permissionEducationStep;
-    if (step == null || _permissionEducationBusy) return;
-    setState(() => _permissionEducationBusy = true);
-    _schedulePermissionEducationOverlaySync();
-    final permissions = ref.read(permissionCoordinatorProvider);
-    final kind = _permissionKindForStep(step);
-    try {
-      var state = await permissions.check(kind);
-      final wasPrompted = await permissions.wasPrompted(kind);
-      var openedSettings = false;
-      _permissionPrompted[kind] = wasPrompted;
-      if (state == AppPermissionState.serviceDisabled) {
-        await permissions.openLocationServiceSettings();
-        openedSettings = true;
-      } else if (state == AppPermissionState.permanentlyDenied ||
-          state == AppPermissionState.restricted ||
-          (state == AppPermissionState.denied && wasPrompted)) {
-        await permissions.openAppPermissionSettings();
-        openedSettings = true;
-      } else if (state == AppPermissionState.denied) {
-        state = await permissions.request(kind);
-        _permissionPrompted[kind] = true;
-      }
-      if (!mounted) return;
-      _setPermissionState(step, state);
-      _schedulePermissionEducationOverlaySync();
-      if (state == AppPermissionState.granted) {
-        await _applyGrantedPermission(step);
-        if (mounted) await _advancePermissionEducation();
-      } else if (!openedSettings &&
-          (state == AppPermissionState.denied ||
-              state == AppPermissionState.unavailable)) {
-        await _advancePermissionEducation();
-      }
-    } catch (error) {
-      AppLogger.warning('permission_education_continue', error: error);
-    } finally {
-      if (mounted) {
-        setState(() => _permissionEducationBusy = false);
-        _schedulePermissionEducationOverlaySync();
-      }
-    }
-  }
-
-  void _setPermissionState(
-    PermissionEducationStep step,
-    AppPermissionState state,
-  ) {
-    if (step == PermissionEducationStep.location) {
-      _locationPermissionState = state;
-    } else if (step == PermissionEducationStep.notifications) {
-      _notificationPermissionState = state;
-    } else {
-      _exactAlarmPermissionState = state;
-    }
-  }
-
-  Future<void> _applyGrantedPermission(PermissionEducationStep step) async {
-    if (step == PermissionEducationStep.location) {
-      final location = await ref
-          .read(weatherRepositoryProvider)
-          .useDeviceLocation();
-      if (location != null) {
-        await ref.read(weatherRepositoryProvider).refreshWeather();
-        await refreshNotificationSchedules(ref);
-        ref.invalidate(homeLocationProvider);
-        ref.invalidate(weatherProvider);
-      }
-      return;
-    }
-    final scheduler = ref.read(notificationSchedulerProvider);
-    await scheduler.initialize();
-    await scheduler.refreshSchedules();
-    ref.invalidate(notificationPermissionStateProvider);
-  }
-
-  Future<void> _advancePermissionEducation() async {
-    final step = _permissionEducationStep;
-    final nextStep = _nextPendingPermissionStep(after: step);
-    if (nextStep != null) {
-      if (mounted) setState(() => _permissionEducationStep = nextStep);
-      _schedulePermissionEducationOverlaySync();
-      return;
-    }
-    await _completePermissionEducation();
-  }
-
-  Future<void> _completePermissionEducation() async {
-    try {
-      await ref
-          .read(settingsRepositoryProvider)
-          .setPermissionEducationSeen(true);
-      ref.invalidate(permissionEducationSeenProvider);
-    } catch (error) {
-      AppLogger.warning('permission_education_persist', error: error);
-    }
-    if (!mounted) return;
-    setState(() => _permissionEducationStep = null);
-    _schedulePermissionEducationOverlaySync();
-    _clearPermissionSetupQuery();
-  }
-
   void _clearPermissionSetupQuery() {
     if (!mounted) return;
     final router = GoRouter.maybeOf(context);
     final uri = router?.routeInformationProvider.value.uri;
     if (uri == null) return;
     if (uri.queryParameters.containsKey('permissionSetup')) {
-      router!.replace<void>('/');
+      final newParams = Map<String, String>.from(uri.queryParameters)
+        ..remove('permissionSetup');
+      final newUri = uri.replace(
+        queryParameters: newParams.isEmpty ? null : newParams,
+      );
+      router!.replace<void>(newUri.toString());
     }
-  }
-
-  Future<void> _refreshPermissionEducationAfterSettings() async {
-    final step = _permissionEducationStep;
-    if (step == null || _permissionEducationBusy) return;
-    final kind = _permissionKindForStep(step);
-    final state = await ref.read(permissionCoordinatorProvider).check(kind);
-    if (!mounted || _permissionEducationStep != step) return;
-    setState(() => _setPermissionState(step, state));
-    _schedulePermissionEducationOverlaySync();
-    if (state == AppPermissionState.granted) {
-      await _applyGrantedPermission(step);
-      if (mounted) await _advancePermissionEducation();
-    }
-  }
-
-  void _showPreviousPermissionStep() {
-    final step = _permissionEducationStep;
-    if (step == null) {
-      return;
-    }
-    final index = _permissionEducationSteps.indexOf(step);
-    for (
-      var candidateIndex = index - 1;
-      candidateIndex >= 0;
-      candidateIndex--
-    ) {
-      final candidate = _permissionEducationSteps[candidateIndex];
-      if (!_isPermissionStepSkipped(_permissionStateForStep(candidate))) {
-        setState(() => _permissionEducationStep = candidate);
-        _schedulePermissionEducationOverlaySync();
-        return;
-      }
-    }
-  }
-
-  String _permissionPrimaryLabel(BuildContext context) {
-    final step = _permissionEducationStep;
-    if (step == null) return context.l10n.continueLabel;
-    final kind = _permissionKindForStep(step);
-    final state = _permissionStateForStep(step);
-    if (state == AppPermissionState.serviceDisabled ||
-        state == AppPermissionState.permanentlyDenied ||
-        state == AppPermissionState.restricted ||
-        (state == AppPermissionState.denied &&
-            (_permissionPrompted[kind] ?? false))) {
-      return context.l10n.openSettings;
-    }
-    return switch (step) {
-      PermissionEducationStep.location => context.l10n.enableLocation,
-      PermissionEducationStep.notifications =>
-        context.l10n.enableNotificationsOnboarding,
-      PermissionEducationStep.exactAlarms =>
-        context.l10n.enableAlarmsAndRemindersOnboarding,
-    };
-  }
-
-  PermissionEducationStep? _nextPendingPermissionStep({
-    PermissionEducationStep? after,
-  }) {
-    final start = after == null
-        ? 0
-        : _permissionEducationSteps.indexOf(after) + 1;
-    for (var index = start; index < _permissionEducationSteps.length; index++) {
-      final step = _permissionEducationSteps[index];
-      if (!_isPermissionStepSkipped(_permissionStateForStep(step))) {
-        return step;
-      }
-    }
-    return null;
-  }
-
-  AppPermissionKind _permissionKindForStep(PermissionEducationStep step) =>
-      switch (step) {
-        PermissionEducationStep.location => AppPermissionKind.location,
-        PermissionEducationStep.notifications =>
-          AppPermissionKind.notifications,
-        PermissionEducationStep.exactAlarms => AppPermissionKind.exactAlarms,
-      };
-
-  AppPermissionState _permissionStateForStep(PermissionEducationStep step) =>
-      switch (step) {
-        PermissionEducationStep.location => _locationPermissionState,
-        PermissionEducationStep.notifications => _notificationPermissionState,
-        PermissionEducationStep.exactAlarms => _exactAlarmPermissionState,
-      };
-
-  LayerLink _permissionTargetLink(PermissionEducationStep step) =>
-      step == PermissionEducationStep.location
-      ? _weatherEducationLink
-      : _notificationEducationLink;
-
-  VoidCallback? _previousPermissionStepCallback(PermissionEducationStep step) {
-    final index = _permissionEducationSteps.indexOf(step);
-    for (
-      var candidateIndex = index - 1;
-      candidateIndex >= 0;
-      candidateIndex--
-    ) {
-      if (!_isPermissionStepSkipped(
-        _permissionStateForStep(_permissionEducationSteps[candidateIndex]),
-      )) {
-        return _showPreviousPermissionStep;
-      }
-    }
-    return null;
-  }
-
-  void _schedulePermissionEducationOverlaySync() {
-    if (!mounted || _permissionOverlaySyncScheduled) return;
-    _permissionOverlaySyncScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _permissionOverlaySyncScheduled = false;
-      if (!mounted) {
-        _removePermissionEducationOverlay();
-        return;
-      }
-      _syncPermissionEducationOverlay();
-    });
-  }
-
-  void _syncPermissionEducationOverlay() {
-    final step = _permissionEducationStep;
-    if (step == null) {
-      _removePermissionEducationOverlay();
-      return;
-    }
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
-    if (overlay == null) return;
-    final entry = _permissionEducationOverlayEntry;
-    if (entry == null) {
-      final nextEntry = OverlayEntry(builder: _buildPermissionEducationOverlay);
-      _permissionEducationOverlayEntry = nextEntry;
-      overlay.insert(nextEntry);
-    } else {
-      entry.markNeedsBuild();
-    }
-  }
-
-  Widget _buildPermissionEducationOverlay(BuildContext overlayContext) {
-    final step = _permissionEducationStep;
-    if (step == null) return const SizedBox.shrink();
-    return PermissionEducationOverlay(
-      step: step,
-      targetLink: _permissionTargetLink(step),
-      targetRect: _permissionTargetRect(step),
-      primaryLabel: _permissionPrimaryLabel(overlayContext),
-      busy: _permissionEducationBusy,
-      onContinue: () => unawaited(_handlePermissionContinue()),
-      onNotNow: () => unawaited(_advancePermissionEducation()),
-      onClose: () => unawaited(_completePermissionEducation()),
-      onBack: _previousPermissionStepCallback(step),
-    );
-  }
-
-  void _removePermissionEducationOverlay() {
-    _permissionEducationOverlayEntry?.remove();
-    _permissionEducationOverlayEntry = null;
-  }
-
-  Rect? _permissionTargetRect(PermissionEducationStep step) {
-    final targetContext = switch (step) {
-      PermissionEducationStep.location =>
-        _weatherEducationTargetKey.currentContext,
-      PermissionEducationStep.notifications ||
-      PermissionEducationStep.exactAlarms =>
-        _notificationEducationTargetKey.currentContext,
-    };
-    final renderObject = targetContext?.findRenderObject();
-    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
-    return renderObject.localToGlobal(Offset.zero) & renderObject.size;
   }
 
   @override
@@ -4317,7 +4011,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final rooms = _homeData.rooms;
     final topPadding = MediaQuery.paddingOf(context).top;
     final headerExtent = _dashboardHeaderExtent(context, topPadding);
-    final permissionStep = _permissionEducationStep;
     final hasThings = assets.isNotEmpty;
     final canAddThing = rooms.isNotEmpty;
     return Scaffold(
@@ -4351,11 +4044,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       notificationEducationLink: _notificationEducationLink,
                       notificationEducationTargetKey:
                           _notificationEducationTargetKey,
-                      onNotificationEducationTap:
-                          permissionStep ==
-                              PermissionEducationStep.notifications
-                          ? () => unawaited(_handlePermissionContinue())
-                          : null,
+                      onNotificationEducationTap: null,
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -4377,13 +4066,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                                   educationLink: _weatherEducationLink,
                                   educationTargetKey:
                                       _weatherEducationTargetKey,
-                                  onEducationTap:
-                                      permissionStep ==
-                                          PermissionEducationStep.location
-                                      ? () => unawaited(
-                                          _handlePermissionContinue(),
-                                        )
-                                      : null,
+                                  onEducationTap: null,
                                 ),
                               ),
                               const SizedBox(height: HkSpacing.sm),
@@ -4502,6 +4185,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ),
                 ],
               ),
+            ),
+          ),
+          PermissionEducationOverlayWrapper(
+            targetLink: _weatherEducationLink,
+            onChooseLocationManually: () => showModalBottomSheet<HomeLocation>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const LocationPickerSheet(),
             ),
           ),
         ],
@@ -11937,10 +11629,10 @@ class SettingsScreen extends ConsumerWidget {
         );
         return;
       }
-      context.go('/?permissionSetup=1');
+      context.go('/permissions/setup');
     } catch (error) {
       AppLogger.warning('permission_setup_open', error: error);
-      if (context.mounted) context.go('/?permissionSetup=1');
+      if (context.mounted) context.go('/permissions/setup');
     }
   }
 

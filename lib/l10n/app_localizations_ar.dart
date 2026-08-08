@@ -3546,11 +3546,11 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get locationEducationBody =>
-      'استخدم موقعك لعرض الطقس المحلي واقتراح مهام منزلية موسمية.';
+      'اختر مدينة أو استخدم موقعك التقريبي الحالي لعرض الطقس المحلي لتخطيط الصيانة.';
 
   @override
   String get locationEducationPrivacy =>
-      'يرسل HomePilot إحداثيات تقريبية إلى Open-Meteo للطقس وإلى OpenStreetMap لعرض اسم المنطقة. لا يُجمع الموقع في الخلفية.';
+      'إذا استخدمت الموقع الحالي، يحفظ HomePilot منطقة منزلية تقريبية. لا يتم جمع موقعك باستمرار في الخلفية.';
 
   @override
   String get enableLocation => 'تفعيل الموقع';
@@ -3597,4 +3597,41 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get permissionsAlreadyEnabled =>
       'تم إعداد الموقع والإشعارات والتذكيرات بالفعل.';
+
+  @override
+  String get permissionSetupFinishLater => 'إكمال لاحقاً';
+
+  @override
+  String get permissionSetupChooseLocation => 'تحديد مدينة';
+
+  @override
+  String get permissionSetupUseCurrentLocation => 'استخدام الموقع الحالي';
+
+  @override
+  String get permissionSetupWeatherTitle => 'تحديد منطقة الطقس';
+
+  @override
+  String get permissionSetupWeatherBody =>
+      'اختر مدينة أو استخدم موقعك التقريبي الحالي لعرض الطقس المحلي لتخطيط الصيانة.';
+
+  @override
+  String get permissionSetupWeatherPrivacy =>
+      'إذا استخدمت الموقع الحالي، يحفظ HomePilot منطقة منزلية تقريبية. لا يتم جمع موقعك باستمرار في الخلفية.';
+
+  @override
+  String get permissionSetupExactOptionalTitle =>
+      'استخدام التوقيت الدقيق للتذكير';
+
+  @override
+  String get permissionSetupExactOptionalBody =>
+      'يتطلب أندرويد إذنًا خاصًا للتذكير في الوقت المحدد تمامًا. بدونه، سيعتمد HomePilot التوقيت التقريبي.';
+
+  @override
+  String get permissionSetupUseApproximateTiming => 'استخدام التوقيت التقريبي';
+
+  @override
+  String get permissionSetupAllowPreciseTiming => 'السماح بالتوقيت الدقيق';
+
+  @override
+  String get permissionSetupManageInSettings => 'إدارة في الإعدادات';
 }

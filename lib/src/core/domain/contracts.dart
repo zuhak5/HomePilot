@@ -241,6 +241,7 @@ abstract interface class WeatherRepository {
   Future<WeatherSnapshot?> refreshWeather();
   Future<List<HomeLocation>> searchLocations(String query);
   Future<HomeLocation?> useDeviceLocation();
+  Future<HomeLocation?> useCurrentLocationHomeArea();
 }
 
 abstract interface class BackupRepository {

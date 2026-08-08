@@ -1442,8 +1442,8 @@
   "nextAddMaintainedItem": "Add an item you want to maintain",
   "nextScheduleMaintenanceTask": "Schedule your first maintenance task",
   "getLocalMaintenanceTips": "Get local maintenance tips",
-  "locationEducationBody": "Use your location to show local weather and recommend seasonal home tasks.",
-  "locationEducationPrivacy": "HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.",
+  "locationEducationBody": "Choose a city or use your current approximate location to show local weather for maintenance planning.",
+  "locationEducationPrivacy": "If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.",
   "enableLocation": "Enable location",
   "neverMissImportantMaintenance": "Never miss important maintenance",
   "notificationEducationBody": "Get reminders before tasks are due and alerts when something becomes overdue.",
@@ -1460,5 +1460,16 @@
   "enableAlarmsAndRemindersOnboarding": "Enable reminders",
   "permissionSetup": "Location, notifications, and reminders setup",
   "permissionSetupSubtitle": "Review how HomePilot uses location and reminders.",
-  "permissionsAlreadyEnabled": "Location, notifications, and reminders are already set up."
+  "permissionsAlreadyEnabled": "Location, notifications, and reminders are already set up.",
+  "permissionSetupFinishLater": "Finish later",
+  "permissionSetupChooseLocation": "Choose location",
+  "permissionSetupUseCurrentLocation": "Use current location",
+  "permissionSetupWeatherTitle": "Set your weather area",
+  "permissionSetupWeatherBody": "Choose a city or use your current approximate location to show local weather for maintenance planning.",
+  "permissionSetupWeatherPrivacy": "If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.",
+  "permissionSetupExactOptionalTitle": "Use precise reminder timing",
+  "permissionSetupExactOptionalBody": "Android requires special access for reminders at the exact selected time. Without it, HomePilot will use approximate timing.",
+  "permissionSetupUseApproximateTiming": "Use approximate timing",
+  "permissionSetupAllowPreciseTiming": "Allow precise timing",
+  "permissionSetupManageInSettings": "Manage in settings"
 }

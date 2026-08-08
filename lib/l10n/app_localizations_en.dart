@@ -3479,11 +3479,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get locationEducationBody =>
-      'Use your location to show local weather and recommend seasonal home tasks.';
+      'Choose a city or use your current approximate location to show local weather for maintenance planning.';
 
   @override
   String get locationEducationPrivacy =>
-      'HomePilot sends approximate coordinates to Open-Meteo for weather and OpenStreetMap for an area label. Location is not collected in the background.';
+      'If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.';
 
   @override
   String get enableLocation => 'Enable location';
@@ -3531,4 +3531,40 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get permissionsAlreadyEnabled =>
       'Location, notifications, and reminders are already set up.';
+
+  @override
+  String get permissionSetupFinishLater => 'Finish later';
+
+  @override
+  String get permissionSetupChooseLocation => 'Choose location';
+
+  @override
+  String get permissionSetupUseCurrentLocation => 'Use current location';
+
+  @override
+  String get permissionSetupWeatherTitle => 'Set your weather area';
+
+  @override
+  String get permissionSetupWeatherBody =>
+      'Choose a city or use your current approximate location to show local weather for maintenance planning.';
+
+  @override
+  String get permissionSetupWeatherPrivacy =>
+      'If you use current location, HomePilot saves an approximate home area. It does not continuously collect your location in the background.';
+
+  @override
+  String get permissionSetupExactOptionalTitle => 'Use precise reminder timing';
+
+  @override
+  String get permissionSetupExactOptionalBody =>
+      'Android requires special access for reminders at the exact selected time. Without it, HomePilot will use approximate timing.';
+
+  @override
+  String get permissionSetupUseApproximateTiming => 'Use approximate timing';
+
+  @override
+  String get permissionSetupAllowPreciseTiming => 'Allow precise timing';
+
+  @override
+  String get permissionSetupManageInSettings => 'Manage in settings';
 }
