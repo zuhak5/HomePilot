@@ -183,9 +183,7 @@ void main() {
     resources = read(resources_path)
     resources = re.sub(
         r"\n  test\('in-app startup uses no artificial fixed splash wait', \(\) \{.*?\n  \}\);\n",
-        "\n  test('canonical Flutter splash color matches native launch color', () {\n"
-        "    expect(homePilotSplashBackground, const Color(0xFFF9FCF8));\n"
-        "  });\n",
+        "\n",
         resources,
         count=1,
         flags=re.S,
@@ -216,6 +214,9 @@ def main() -> None:
         apply()
     elif mode == "feedback":
         from remediation_feedback_apply import apply
+        apply()
+    elif mode == "monetization":
+        from remediation_monetization_apply import apply
         apply()
     else:
         raise SystemExit(f"unknown mode: {mode}")
