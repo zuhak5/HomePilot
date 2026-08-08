@@ -1,8 +1,4 @@
-import 'dart:io';
-import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:homepilot/src/core/services/app_permission_coordinator.dart';
 
 import '../domain/permission_capability.dart';
 
@@ -13,130 +9,36 @@ abstract interface class DevicePermissionGateway {
 }
 
 class FlutterDevicePermissionGateway implements DevicePermissionGateway {
-  const FlutterDevicePermissionGateway();
+  const FlutterDevicePermissionGateway(this._delegate);
+
+  final AppPermissionGateway _delegate;
+
+  AppPermissionKind _kind(PermissionCapability capability) => switch (capability) {
+    PermissionCapability.deviceLocation => AppPermissionKind.location,
+    PermissionCapability.notifications => AppPermissionKind.notifications,
+    PermissionCapability.exactReminderTiming => AppPermissionKind.exactAlarms,
+  };
 
   @override
-  Future<AppPermissionState> check(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return AppPermissionState.serviceDisabled;
-          }
-          final status = await Geolocator.checkPermission();
-          return _mapLocationPermission(status);
-
-        case PermissionCapability.notifications:
-          final status = await Permission.notification.status;
-          return _mapPermissionStatus(status);
-
-        case PermissionCapability.exactReminderTiming:
-          if (!Platform.isAndroid) {
-            return AppPermissionState.unavailable;
-          }
-          try {
-            final plugin = FlutterLocalNotificationsPlugin()
-                .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin
-                >();
-            final canExact = await plugin?.canScheduleExactNotifications();
-            if (canExact != null) {
-              return canExact
-                  ? AppPermissionState.granted
-                  : AppPermissionState.denied;
-            }
-          } catch (_) {}
-          final status = await Permission.scheduleExactAlarm.status;
-          return _mapPermissionStatus(status);
-      }
-    } on MissingPluginException {
-      return AppPermissionState.unavailable;
-    } on Exception {
-      return AppPermissionState.unavailable;
-    }
-  }
+  Future<AppPermissionState> check(PermissionCapability capability) =>
+      _delegate.check(_kind(capability));
 
   @override
-  Future<AppPermissionState> request(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return AppPermissionState.serviceDisabled;
-          }
-          final status = await Geolocator.requestPermission();
-          return _mapLocationPermission(status);
-
-        case PermissionCapability.notifications:
-          final status = await Permission.notification.request();
-          return _mapPermissionStatus(status);
-
-        case PermissionCapability.exactReminderTiming:
-          if (!Platform.isAndroid) {
-            return AppPermissionState.unavailable;
-          }
-          try {
-            final plugin = FlutterLocalNotificationsPlugin()
-                .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin
-                >();
-            final granted = await plugin?.requestExactAlarmsPermission();
-            if (granted != null) {
-              return granted
-                  ? AppPermissionState.granted
-                  : AppPermissionState.denied;
-            }
-          } catch (_) {}
-          final status = await Permission.scheduleExactAlarm.request();
-          return _mapPermissionStatus(status);
-      }
-    } on MissingPluginException {
-      return AppPermissionState.unavailable;
-    } on Exception {
-      return AppPermissionState.unavailable;
-    }
-  }
+  Future<AppPermissionState> request(PermissionCapability capability) =>
+      _delegate.request(_kind(capability));
 
   @override
   Future<bool> openSettings(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return await Geolocator.openLocationSettings();
-          }
-          return await openAppSettings();
-
-        case PermissionCapability.notifications:
-        case PermissionCapability.exactReminderTiming:
-          return await openAppSettings();
-      }
-    } on MissingPluginException {
-      return false;
-    } on Exception {
-      return false;
+    switch (capability) {
+      case PermissionCapability.deviceLocation:
+        final state = await _delegate.check(AppPermissionKind.location);
+        return state == AppPermissionState.serviceDisabled
+            ? _delegate.openLocationServiceSettings()
+            : _delegate.openAppPermissionSettings();
+      case PermissionCapability.notifications:
+        return _delegate.openAppPermissionSettings();
+      case PermissionCapability.exactReminderTiming:
+        return _delegate.openExactAlarmSettings();
     }
-  }
-
-  AppPermissionState _mapLocationPermission(LocationPermission permission) {
-    return switch (permission) {
-      LocationPermission.always ||
-      LocationPermission.whileInUse => AppPermissionState.granted,
-      LocationPermission.denied => AppPermissionState.denied,
-      LocationPermission.deniedForever => AppPermissionState.permanentlyDenied,
-      LocationPermission.unableToDetermine => AppPermissionState.denied,
-    };
-  }
-
-  AppPermissionState _mapPermissionStatus(PermissionStatus status) {
-    return switch (status) {
-      PermissionStatus.granted ||
-      PermissionStatus.limited => AppPermissionState.granted,
-      PermissionStatus.permanentlyDenied =>
-        AppPermissionState.permanentlyDenied,
-      PermissionStatus.restricted => AppPermissionState.restricted,
-      PermissionStatus.denied ||
-      PermissionStatus.provisional => AppPermissionState.denied,
-    };
   }
 }
