@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../main.dart';
 import '../../../../src/core/domain/contracts.dart';
 import '../../../../src/core/domain/models.dart';
-
-import '../../../../main.dart';
+import '../../../../src/core/services/app_permission_coordinator.dart';
 import '../data/device_permission_gateway.dart';
 import '../data/permission_education_repository.dart';
 import '../domain/permission_capability.dart';
@@ -20,6 +20,7 @@ class PermissionEducationControllerState {
     this.relevantCapabilities = const [],
     this.activeCapability,
     this.capabilityStatuses = const {},
+    this.setupSnapshot,
     this.isBusy = false,
     this.isVisible = false,
     this.source = PermissionEducationSource.firstDashboardVisit,
@@ -30,6 +31,7 @@ class PermissionEducationControllerState {
   final List<PermissionCapability> relevantCapabilities;
   final PermissionCapability? activeCapability;
   final Map<PermissionCapability, CapabilityStatus> capabilityStatuses;
+  final CapabilitySetupSnapshot? setupSnapshot;
   final bool isBusy;
   final bool isVisible;
   final PermissionEducationSource source;
@@ -39,7 +41,9 @@ class PermissionEducationControllerState {
     PermissionEducationDeviceState? deviceState,
     List<PermissionCapability>? relevantCapabilities,
     PermissionCapability? activeCapability,
+    bool clearActiveCapability = false,
     Map<PermissionCapability, CapabilityStatus>? capabilityStatuses,
+    CapabilitySetupSnapshot? setupSnapshot,
     bool? isBusy,
     bool? isVisible,
     PermissionEducationSource? source,
@@ -48,8 +52,11 @@ class PermissionEducationControllerState {
     return PermissionEducationControllerState(
       deviceState: deviceState ?? this.deviceState,
       relevantCapabilities: relevantCapabilities ?? this.relevantCapabilities,
-      activeCapability: activeCapability ?? this.activeCapability,
+      activeCapability: clearActiveCapability
+          ? null
+          : activeCapability ?? this.activeCapability,
       capabilityStatuses: capabilityStatuses ?? this.capabilityStatuses,
+      setupSnapshot: setupSnapshot ?? this.setupSnapshot,
       isBusy: isBusy ?? this.isBusy,
       isVisible: isVisible ?? this.isVisible,
       source: source ?? this.source,
@@ -59,10 +66,10 @@ class PermissionEducationControllerState {
   }
 }
 
-final devicePermissionGatewayProvider = Provider<DevicePermissionGateway>((
-  ref,
-) {
-  return const FlutterDevicePermissionGateway();
+final devicePermissionGatewayProvider = Provider<DevicePermissionGateway>((ref) {
+  return FlutterDevicePermissionGateway(
+    AppPermissionCoordinator(ref.watch(databaseProvider)),
+  );
 });
 
 final permissionEducationRepositoryProvider =
@@ -120,137 +127,197 @@ class PermissionEducationController
     bool forceShow = false,
   }) async {
     final deviceState = await _repository.loadDeviceState();
+    final (snapshot, statuses) = await _readCapabilityState(deviceState);
     final now = DateTime.now();
-
-    final statuses = <PermissionCapability, CapabilityStatus>{};
-    for (final cap in PermissionCapability.values) {
-      final permState = await _gateway.check(cap);
-      final outcome = _determineOutcome(cap, permState, deviceState);
-      final nextAction = _determineNextAction(cap, permState);
-      statuses[cap] = CapabilityStatus(
-        capability: cap,
-        permissionState: permState,
-        outcome: outcome,
-        nextAction: nextAction,
-      );
-    }
-
     final relevant = _buildRelevantCapabilities(
       source,
+      snapshot,
       statuses,
       deviceState,
       now,
       forceShow: forceShow,
     );
-
     final active = relevant.isNotEmpty ? relevant.first : null;
-    final shouldShow = forceShow || (relevant.isNotEmpty && active != null);
+    final shouldShow = forceShow || active != null;
 
     state = state.copyWith(
       deviceState: deviceState,
       relevantCapabilities: relevant,
       activeCapability: active,
+      clearActiveCapability: active == null,
       capabilityStatuses: statuses,
+      setupSnapshot: snapshot,
       isVisible: shouldShow,
       source: source,
+      awaitingSettingsReturn: false,
     );
 
     if (shouldShow) {
-      await _repository.saveDeviceState(
-        deviceState.copyWith(
-          lastShownAt: now,
-          showCount: deviceState.showCount + 1,
-          source: source,
-        ),
+      final updatedDeviceState = deviceState.copyWith(
+        lastShownAt: now,
+        showCount: deviceState.showCount + 1,
+        source: source,
       );
+      await _repository.saveDeviceState(updatedDeviceState);
+      state = state.copyWith(deviceState: updatedDeviceState);
     } else if (!forceShow) {
       await _settingsRepository.setPermissionEducationSeen(true);
     }
   }
 
+  Future<(CapabilitySetupSnapshot, Map<PermissionCapability, CapabilityStatus>)>
+  _readCapabilityState(PermissionEducationDeviceState deviceState) async {
+    final locationPermission = await _gateway.check(
+      PermissionCapability.deviceLocation,
+    );
+    final notificationPermission = await _gateway.check(
+      PermissionCapability.notifications,
+    );
+    final exactPermission = await _gateway.check(
+      PermissionCapability.exactReminderTiming,
+    );
+    final selectedArea = await _settingsRepository.homeLocation();
+    final preferences = await _settingsRepository.notificationPreferences();
+
+    final weather = deriveWeatherAreaCapability(
+      selectedArea: selectedArea,
+      permission: locationPermission,
+    );
+    final notifications = deriveNotificationCapability(
+      preferences: preferences,
+      notificationPermission: notificationPermission,
+      exactAlarmPermission: exactPermission,
+    );
+    final snapshot = CapabilitySetupSnapshot(
+      weather: weather,
+      notifications: notifications,
+    );
+
+    final statuses = <PermissionCapability, CapabilityStatus>{
+      PermissionCapability.deviceLocation: CapabilityStatus(
+        capability: PermissionCapability.deviceLocation,
+        permissionState: locationPermission,
+        outcome: weather.mode == WeatherAreaMode.manual
+            ? PermissionEducationOutcome.configuredManually
+            : _determineOutcome(
+                PermissionCapability.deviceLocation,
+                locationPermission,
+                deviceState,
+              ),
+        nextAction: weather.nextAction,
+        effectiveState: weather.effectiveState,
+      ),
+      PermissionCapability.notifications: CapabilityStatus(
+        capability: PermissionCapability.notifications,
+        permissionState: notificationPermission,
+        outcome: _determineOutcome(
+          PermissionCapability.notifications,
+          notificationPermission,
+          deviceState,
+        ),
+        nextAction: _determineNextAction(
+          PermissionCapability.notifications,
+          notificationPermission,
+        ),
+        userPreferenceEnabled: preferences.allowsLocalReminders,
+        effectiveState: notifications.deviceReminderState,
+      ),
+      PermissionCapability.exactReminderTiming: CapabilityStatus(
+        capability: PermissionCapability.exactReminderTiming,
+        permissionState: exactPermission,
+        outcome: _determineOutcome(
+          PermissionCapability.exactReminderTiming,
+          exactPermission,
+          deviceState,
+        ),
+        nextAction: _determineNextAction(
+          PermissionCapability.exactReminderTiming,
+          exactPermission,
+        ),
+        userPreferenceEnabled: preferences.preferExactReminders,
+        effectiveState: notifications.exactTimingState,
+      ),
+    };
+    return (snapshot, statuses);
+  }
+
   List<PermissionCapability> _buildRelevantCapabilities(
     PermissionEducationSource source,
+    CapabilitySetupSnapshot snapshot,
     Map<PermissionCapability, CapabilityStatus> statuses,
     PermissionEducationDeviceState deviceState,
     DateTime now, {
     bool forceShow = false,
   }) {
-    final caps = <PermissionCapability>[];
-
-    if (source == PermissionEducationSource.firstDashboardVisit) {
-      for (final cap in [
+    if (forceShow || source == PermissionEducationSource.settings) {
+      return [
         PermissionCapability.deviceLocation,
         PermissionCapability.notifications,
-      ]) {
-        final status = statuses[cap];
-        if (status != null &&
-            status.permissionState != AppPermissionState.granted) {
-          if (forceShow || !deviceState.isDeferredFor(cap, now)) {
-            caps.add(cap);
-          }
-        }
+        if (Platform.isAndroid) PermissionCapability.exactReminderTiming,
+      ];
+    }
+
+    final caps = <PermissionCapability>[];
+    if (source == PermissionEducationSource.firstDashboardVisit) {
+      if (!snapshot.weather.isConfigured &&
+          !deviceState.isDeferredFor(PermissionCapability.deviceLocation, now)) {
+        caps.add(PermissionCapability.deviceLocation);
+      }
+      if (snapshot.notifications.deviceReminderState ==
+              EffectiveCapabilityState.blocked &&
+          !deviceState.isDeferredFor(PermissionCapability.notifications, now)) {
+        caps.add(PermissionCapability.notifications);
+      }
+    } else if (source == PermissionEducationSource.weatherCard) {
+      if (!snapshot.weather.isConfigured ||
+          (snapshot.weather.mode == WeatherAreaMode.device &&
+              snapshot.weather.effectiveState ==
+                  EffectiveCapabilityState.degraded)) {
+        caps.add(PermissionCapability.deviceLocation);
       }
     } else if (source == PermissionEducationSource.reminderSettings ||
         source == PermissionEducationSource.taskScheduling) {
-      if (Platform.isAndroid) {
-        final exactStatus = statuses[PermissionCapability.exactReminderTiming];
-        if (exactStatus != null &&
-            exactStatus.permissionState != AppPermissionState.granted) {
-          caps.add(PermissionCapability.exactReminderTiming);
-        }
-      }
-    } else if (source == PermissionEducationSource.settings) {
-      for (final cap in PermissionCapability.values) {
-        if (cap == PermissionCapability.exactReminderTiming &&
-            !Platform.isAndroid) {
-          continue;
-        }
-        final status = statuses[cap];
-        if (status != null &&
-            status.permissionState != AppPermissionState.granted) {
-          caps.add(cap);
-        }
+      if (Platform.isAndroid &&
+          snapshot.notifications.preferences.preferExactReminders &&
+          snapshot.notifications.exactTimingState !=
+              EffectiveCapabilityState.active) {
+        caps.add(PermissionCapability.exactReminderTiming);
       }
     }
-
     return caps;
   }
 
   Future<void> useCurrentLocation() async {
     if (state.isBusy) return;
     state = state.copyWith(isBusy: true);
-
     try {
       final currentStatus = state
           .capabilityStatuses[PermissionCapability.deviceLocation]
           ?.permissionState;
-      if (currentStatus == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
+      if (currentStatus == AppPermissionState.permanentlyDenied ||
+          currentStatus == AppPermissionState.restricted ||
+          currentStatus == AppPermissionState.serviceDisabled) {
+        await openSettingsFor(PermissionCapability.deviceLocation);
         return;
       }
-
-      final reqResult = await _gateway.request(
-        PermissionCapability.deviceLocation,
-      );
-
-      if (reqResult == AppPermissionState.granted) {
-        unawaited(_weatherRepository.useCurrentLocationHomeArea());
-        await _updateCapabilityOutcome(
+      final result = await _gateway.request(PermissionCapability.deviceLocation);
+      if (result == AppPermissionState.granted) {
+        await _weatherRepository.useCurrentLocationHomeArea();
+        await _recordOutcome(
           PermissionCapability.deviceLocation,
           PermissionEducationOutcome.granted,
-          reqResult,
         );
+        await _refreshCapabilityState();
         await _advanceNextStep();
-      } else if (reqResult == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
       } else {
-        await _updateCapabilityOutcome(
+        await _recordOutcome(
           PermissionCapability.deviceLocation,
-          PermissionEducationOutcome.blocked,
-          reqResult,
+          result == AppPermissionState.unavailable
+              ? PermissionEducationOutcome.unavailable
+              : PermissionEducationOutcome.blocked,
         );
+        await _refreshCapabilityState();
       }
-    } catch (_) {
     } finally {
       state = state.copyWith(isBusy: false);
     }
@@ -259,17 +326,17 @@ class PermissionEducationController
   Future<void> chooseLocationManually(HomeLocation chosenLocation) async {
     if (state.isBusy) return;
     state = state.copyWith(isBusy: true);
-
     try {
       await _settingsRepository.setHomeLocation(chosenLocation);
-      unawaited(_weatherRepository.refreshWeather());
-      await _updateCapabilityOutcome(
+      await _weatherRepository.refreshWeather();
+      await _recordOutcome(
         PermissionCapability.deviceLocation,
         PermissionEducationOutcome.configuredManually,
-        AppPermissionState.granted,
       );
+      // Re-read the real Android location permission. Manual configuration
+      // satisfies weather-area capability but never impersonates an OS grant.
+      await _refreshCapabilityState();
       await _advanceNextStep();
-    } catch (_) {
     } finally {
       state = state.copyWith(isBusy: false);
     }
@@ -278,38 +345,29 @@ class PermissionEducationController
   Future<void> enableNotifications() async {
     if (state.isBusy) return;
     state = state.copyWith(isBusy: true);
-
     try {
-      final currentStatus = state
+      final current = state
           .capabilityStatuses[PermissionCapability.notifications]
           ?.permissionState;
-      if (currentStatus == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
+      if (current == AppPermissionState.permanentlyDenied ||
+          current == AppPermissionState.restricted) {
+        await openSettingsFor(PermissionCapability.notifications);
         return;
       }
-
-      final reqResult = await _gateway.request(
+      final result = await _gateway.request(PermissionCapability.notifications);
+      await _recordOutcome(
         PermissionCapability.notifications,
+        result == AppPermissionState.granted
+            ? PermissionEducationOutcome.granted
+            : result == AppPermissionState.unavailable
+            ? PermissionEducationOutcome.unavailable
+            : PermissionEducationOutcome.blocked,
       );
-
-      if (reqResult == AppPermissionState.granted) {
+      await _refreshCapabilityState();
+      if (result == AppPermissionState.granted) {
         await _notificationScheduler.refreshSchedules();
-        await _updateCapabilityOutcome(
-          PermissionCapability.notifications,
-          PermissionEducationOutcome.granted,
-          reqResult,
-        );
         await _advanceNextStep();
-      } else if (reqResult == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
-      } else {
-        await _updateCapabilityOutcome(
-          PermissionCapability.notifications,
-          PermissionEducationOutcome.blocked,
-          reqResult,
-        );
       }
-    } catch (_) {
     } finally {
       state = state.copyWith(isBusy: false);
     }
@@ -318,38 +376,21 @@ class PermissionEducationController
   Future<void> enableExactTiming() async {
     if (state.isBusy) return;
     state = state.copyWith(isBusy: true);
-
     try {
-      final currentStatus = state
-          .capabilityStatuses[PermissionCapability.exactReminderTiming]
-          ?.permissionState;
-      if (currentStatus == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
-        return;
-      }
-
-      final reqResult = await _gateway.request(
+      final result = await _gateway.request(
         PermissionCapability.exactReminderTiming,
       );
-
-      if (reqResult == AppPermissionState.granted) {
-        await _notificationScheduler.refreshSchedules();
-        await _updateCapabilityOutcome(
-          PermissionCapability.exactReminderTiming,
-          PermissionEducationOutcome.granted,
-          reqResult,
-        );
-        await _advanceNextStep();
-      } else if (reqResult == AppPermissionState.permanentlyDenied) {
-        await openSettingsForCurrent();
-      } else {
-        await _updateCapabilityOutcome(
-          PermissionCapability.exactReminderTiming,
-          PermissionEducationOutcome.blocked,
-          reqResult,
-        );
-      }
-    } catch (_) {
+      await _recordOutcome(
+        PermissionCapability.exactReminderTiming,
+        result == AppPermissionState.granted
+            ? PermissionEducationOutcome.granted
+            : result == AppPermissionState.unavailable
+            ? PermissionEducationOutcome.unavailable
+            : PermissionEducationOutcome.blocked,
+      );
+      await _refreshCapabilityState();
+      await _notificationScheduler.refreshSchedules();
+      if (result == AppPermissionState.granted) await _advanceNextStep();
     } finally {
       state = state.copyWith(isBusy: false);
     }
@@ -358,24 +399,20 @@ class PermissionEducationController
   Future<void> deferCurrentStep() async {
     final currentCap = state.activeCapability;
     if (currentCap == null) return;
-
     final now = DateTime.now();
-    final stepsMap = Map<PermissionCapability, StepEducationState>.from(
+    final steps = Map<PermissionCapability, StepEducationState>.from(
       state.deviceState.steps,
     );
-    final existingStep = stepsMap[currentCap] ?? const StepEducationState();
-
-    stepsMap[currentCap] = existingStep.copyWith(
+    final existing = steps[currentCap] ?? const StepEducationState();
+    steps[currentCap] = existing.copyWith(
       educationSeen: true,
       deferredAt: now,
-      deferCount: existingStep.deferCount + 1,
+      deferCount: existing.deferCount + 1,
       lastOutcome: PermissionEducationOutcome.deferred,
     );
-
-    final updatedDeviceState = state.deviceState.copyWith(steps: stepsMap);
-    await _repository.saveDeviceState(updatedDeviceState);
-
-    state = state.copyWith(deviceState: updatedDeviceState);
+    final updated = state.deviceState.copyWith(steps: steps);
+    await _repository.saveDeviceState(updated);
+    state = state.copyWith(deviceState: updated);
     await _advanceNextStep();
   }
 
@@ -383,39 +420,37 @@ class PermissionEducationController
     state = state.copyWith(isVisible: false, awaitingSettingsReturn: false);
   }
 
-  Future<void> openSettingsForCurrent() async {
-    final cap = state.activeCapability;
-    if (cap == null) return;
+  Future<void> openSettingsFor(PermissionCapability capability) async {
     state = state.copyWith(awaitingSettingsReturn: true);
-    await _gateway.openSettings(cap);
+    await _gateway.openSettings(capability);
+  }
+
+  Future<void> openSettingsForCurrent() async {
+    final capability = state.activeCapability;
+    if (capability != null) await openSettingsFor(capability);
   }
 
   Future<void> handleAppResume() async {
     if (!state.awaitingSettingsReturn && !state.isVisible) return;
-    state = state.copyWith(awaitingSettingsReturn: false);
-
-    final statuses = Map<PermissionCapability, CapabilityStatus>.from(
-      state.capabilityStatuses,
-    );
-    for (final cap in state.relevantCapabilities) {
-      final permState = await _gateway.check(cap);
-      final outcome = _determineOutcome(cap, permState, state.deviceState);
-      final nextAction = _determineNextAction(cap, permState);
-      statuses[cap] = CapabilityStatus(
-        capability: cap,
-        permissionState: permState,
-        outcome: outcome,
-        nextAction: nextAction,
-      );
-    }
-
+    final (snapshot, statuses) = await _readCapabilityState(state.deviceState);
     final active = state.activeCapability;
+    state = state.copyWith(
+      awaitingSettingsReturn: false,
+      setupSnapshot: snapshot,
+      capabilityStatuses: statuses,
+    );
     if (active != null &&
-        statuses[active]?.permissionState == AppPermissionState.granted) {
-      _advanceNextStep();
+        statuses[active]?.effectiveState == EffectiveCapabilityState.active) {
+      await _advanceNextStep();
     }
+  }
 
-    state = state.copyWith(capabilityStatuses: statuses);
+  Future<void> _refreshCapabilityState() async {
+    final (snapshot, statuses) = await _readCapabilityState(state.deviceState);
+    state = state.copyWith(
+      setupSnapshot: snapshot,
+      capabilityStatuses: statuses,
+    );
   }
 
   Future<void> _advanceNextStep() async {
@@ -426,77 +461,67 @@ class PermissionEducationController
       finishLater();
       return;
     }
-
-    final currentIndex = caps.indexOf(active);
-    if (currentIndex >= 0 && currentIndex < caps.length - 1) {
-      state = state.copyWith(activeCapability: caps[currentIndex + 1]);
-    } else {
-      final now = DateTime.now();
-      final updatedState = state.deviceState.copyWith(completedAt: now);
-      await _repository.saveDeviceState(updatedState);
-      await _settingsRepository.setPermissionEducationSeen(true);
-      state = state.copyWith(deviceState: updatedState);
-      finishLater();
+    final index = caps.indexOf(active);
+    if (index >= 0 && index < caps.length - 1) {
+      state = state.copyWith(activeCapability: caps[index + 1]);
+      return;
     }
+    final updated = state.deviceState.copyWith(completedAt: DateTime.now());
+    await _repository.saveDeviceState(updated);
+    await _settingsRepository.setPermissionEducationSeen(true);
+    state = state.copyWith(deviceState: updated);
+    finishLater();
   }
 
-  Future<void> _updateCapabilityOutcome(
-    PermissionCapability cap,
+  Future<void> _recordOutcome(
+    PermissionCapability capability,
     PermissionEducationOutcome outcome,
-    AppPermissionState permState,
   ) async {
-    final stepsMap = Map<PermissionCapability, StepEducationState>.from(
+    final steps = Map<PermissionCapability, StepEducationState>.from(
       state.deviceState.steps,
     );
-    final existingStep = stepsMap[cap] ?? const StepEducationState();
-
-    stepsMap[cap] = existingStep.copyWith(
+    final existing = steps[capability] ?? const StepEducationState();
+    steps[capability] = existing.copyWith(
       educationSeen: true,
       lastOutcome: outcome,
     );
-
-    final updatedDeviceState = state.deviceState.copyWith(steps: stepsMap);
-    await _repository.saveDeviceState(updatedDeviceState);
-
-    final updatedStatuses = Map<PermissionCapability, CapabilityStatus>.from(
-      state.capabilityStatuses,
-    );
-    updatedStatuses[cap] = CapabilityStatus(
-      capability: cap,
-      permissionState: permState,
-      outcome: outcome,
-      nextAction: _determineNextAction(cap, permState),
-    );
-
-    state = state.copyWith(
-      deviceState: updatedDeviceState,
-      capabilityStatuses: updatedStatuses,
-    );
+    final updated = state.deviceState.copyWith(steps: steps);
+    await _repository.saveDeviceState(updated);
+    state = state.copyWith(deviceState: updated);
   }
 
   PermissionEducationOutcome _determineOutcome(
-    PermissionCapability cap,
-    AppPermissionState permState,
+    PermissionCapability capability,
+    AppPermissionState permissionState,
     PermissionEducationDeviceState deviceState,
   ) {
-    if (permState == AppPermissionState.granted) {
+    if (permissionState == AppPermissionState.granted) {
       return PermissionEducationOutcome.granted;
     }
-    return deviceState.steps[cap]?.lastOutcome ??
+    if (permissionState == AppPermissionState.unavailable) {
+      return PermissionEducationOutcome.unavailable;
+    }
+    return deviceState.steps[capability]?.lastOutcome ??
         PermissionEducationOutcome.deferred;
   }
 
   PermissionNextAction _determineNextAction(
-    PermissionCapability cap,
-    AppPermissionState permState,
+    PermissionCapability capability,
+    AppPermissionState permissionState,
   ) {
-    return switch (permState) {
+    return switch (permissionState) {
       AppPermissionState.granted => PermissionNextAction.none,
-      AppPermissionState.denied => PermissionNextAction.request,
-      AppPermissionState.permanentlyDenied =>
-        cap == PermissionCapability.deviceLocation
-            ? PermissionNextAction.openLocationSettings
-            : PermissionNextAction.openAppSettings,
+      AppPermissionState.denied => capability ==
+              PermissionCapability.exactReminderTiming
+          ? PermissionNextAction.openExactAlarmSettings
+          : PermissionNextAction.request,
+      AppPermissionState.permanentlyDenied => switch (capability) {
+        PermissionCapability.deviceLocation =>
+          PermissionNextAction.openAppSettings,
+        PermissionCapability.notifications => PermissionNextAction.openAppSettings,
+        PermissionCapability.exactReminderTiming =>
+          PermissionNextAction.openExactAlarmSettings,
+      },
       AppPermissionState.restricted => PermissionNextAction.none,
       AppPermissionState.serviceDisabled =>
         PermissionNextAction.openLocationSettings,
