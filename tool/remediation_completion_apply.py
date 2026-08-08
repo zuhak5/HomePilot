@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -19,43 +18,18 @@ def write(path: str, text: str) -> None:
     target.write_text(text, encoding="utf-8")
 
 
-def replace_once(path: str, old: str, new: str) -> None:
-    text = read(path)
-    count = text.count(old)
-    if count != 1:
-        raise RuntimeError(f"{path}: expected exactly one match, found {count}: {old[:100]!r}")
-    write(path, text.replace(old, new, 1))
-
-
-def replace_all(path: str, old: str, new: str, *, minimum: int = 1) -> None:
-    text = read(path)
-    count = text.count(old)
-    if count < minimum:
-        raise RuntimeError(f"{path}: expected at least {minimum} matches, found {count}: {old[:100]!r}")
-    write(path, text.replace(old, new))
-
-
-def regex_once(path: str, pattern: str, replacement: str) -> None:
-    text = read(path)
-    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
-    if count != 1:
-        raise RuntimeError(f"{path}: regex expected one match, found {count}: {pattern[:100]!r}")
-    write(path, updated)
-
-
 def splash() -> None:
-    path = "lib/homepilot_animated_splash_screen.dart"
-    text = read(path)
+    splash_path = "lib/homepilot_animated_splash_screen.dart"
+    splash_text = read(splash_path)
     marker = "import 'package:flutter/services.dart';\n\n"
-    if "const homePilotSplashBackground" not in text:
+    if "class HomePilotProcessSplashHost" not in splash_text:
         host = r'''const homePilotSplashBackground = Color(0xFFF9FCF8);
 
 /// Stable process-level owner for the branded Flutter splash.
 ///
-/// This host is intentionally independent from the app's startup theme,
-/// authentication, providers, Supabase initialization, and router. It supplies
-/// only the inherited context needed by the presentation layer so deferred work
-/// can run underneath the splash from the first usable Flutter frame.
+/// This host is deliberately independent from startup theme, authentication,
+/// Supabase, database hydration and routing. Deferred work renders underneath
+/// one process-scoped presentation lifetime from the first usable Flutter frame.
 class HomePilotProcessSplashHost extends StatelessWidget {
   const HomePilotProcessSplashHost({required this.child, super.key});
 
@@ -90,21 +64,22 @@ class HomePilotProcessSplashHost extends StatelessWidget {
 }
 
 '''
-        if marker not in text:
+        if marker not in splash_text:
             raise RuntimeError("splash import marker not found")
-        text = text.replace(marker, marker + host, 1)
-    text = text.replace(
+        splash_text = splash_text.replace(marker, marker + host, 1)
+    elif "const homePilotSplashBackground" not in splash_text:
+        raise RuntimeError("process splash host exists without canonical background")
+    splash_text = splash_text.replace(
         "  static const Color _background = Color(0xFFF9FCF8);",
         "  static const Color _background = homePilotSplashBackground;",
     )
-    write(path, text)
+    write(splash_path, splash_text)
 
-    main = "lib/main.dart"
-    text = read(main)
+    main_path = "lib/main.dart"
+    text = read(main_path)
     text = text.replace(
         "const minimumNativeSplashDuration = Duration(milliseconds: 3200);\n",
         "",
-        1,
     )
     text = re.sub(
         r"\n@visibleForTesting\nDuration remainingNativeSplashDuration\(Duration _\) \{\n  return Duration\.zero;\n\}\n",
@@ -115,9 +90,8 @@ class HomePilotProcessSplashHost extends StatelessWidget {
     text = text.replace(
         "    this.minimumSplashDuration = minimumNativeSplashDuration,\n",
         "",
-        1,
     )
-    text = text.replace("  final Duration minimumSplashDuration;\n", "", 1)
+    text = text.replace("  final Duration minimumSplashDuration;\n", "")
     text = text.replace(
         "        color: HkColors.appBackground,\n",
         "        color: homePilotSplashBackground,\n",
@@ -128,6 +102,7 @@ class HomePilotProcessSplashHost extends StatelessWidget {
         "      return const ColoredBox(color: homePilotSplashBackground);",
         1,
     )
+
     old_run = '''    runApp(
       _DeferredHomePilotBootstrap(
         database: database,
@@ -144,9 +119,11 @@ class HomePilotProcessSplashHost extends StatelessWidget {
         ),
       ),
     );'''
-    if old_run not in text:
-        raise RuntimeError("runHomePilot root shape changed")
-    text = text.replace(old_run, new_run, 1)
+    if "HomePilotProcessSplashHost(" not in text:
+        if old_run not in text:
+            raise RuntimeError("runHomePilot root shape changed")
+        text = text.replace(old_run, new_run, 1)
+
     old_owner = '''        // Splash is process-scoped presentation. Do not duplicate inside auth/startup/router branches.
         return HomePilotSplashOverlay(
           child: ValueListenableBuilder<StartupBootstrapState>('''
@@ -154,10 +131,11 @@ class HomePilotProcessSplashHost extends StatelessWidget {
         // bootstrap/theme/auth work. Keep this MaterialApp stable underneath it.
         return Builder(
           builder: (_) => ValueListenableBuilder<StartupBootstrapState>('''
-    if old_owner not in text:
+    if old_owner in text:
+        text = text.replace(old_owner, new_owner, 1)
+    elif "Splash lifetime is owned by HomePilotProcessSplashHost" not in text:
         raise RuntimeError("HomePilotApp splash owner shape changed")
-    text = text.replace(old_owner, new_owner, 1)
-    write(main, text)
+    write(main_path, text)
 
     write(
         "test/process_splash_host_test.dart",
@@ -177,13 +155,12 @@ void main() {
         ),
       ),
     );
-
     expect(find.byType(HomePilotAnimatedSplashScreen), findsOneWidget);
     expect(find.byKey(const ValueKey('deferred-bootstrap-placeholder')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('process splash leaves after fixed lifetime without replacing child', (
+  testWidgets('process splash leaves without replacing underlying child', (
     tester,
   ) async {
     const childKey = ValueKey('stable-underlying-child');
@@ -202,25 +179,44 @@ void main() {
 ''',
     )
 
-    # The old title asserted a blank *application startup*. The internal theme
-    # gate may still be unit-tested, but it is now always covered by the process
-    # splash in production. Remove the stale defect wording so future reviews do
-    # not mistake the isolated gate for the real launch topology.
-    for test_file in (ROOT / "test").rglob("*.dart"):
-        data = test_file.read_text(encoding="utf-8")
-        data = data.replace(
-            "startup bootstrap stays blank until theme load completes",
-            "startup theme gate stays inert while theme load completes",
-        )
-        test_file.write_text(data, encoding="utf-8")
+    resources_path = "test/startup_resources_test.dart"
+    resources = read(resources_path)
+    resources = re.sub(
+        r"\n  test\('in-app startup uses no artificial fixed splash wait', \(\) \{.*?\n  \}\);\n",
+        "\n  test('canonical Flutter splash color matches native launch color', () {\n"
+        "    expect(homePilotSplashBackground, const Color(0xFFF9FCF8));\n"
+        "  });\n",
+        resources,
+        count=1,
+        flags=re.S,
+    )
+    write(resources_path, resources)
+
+    widget_path = "test/widget_test.dart"
+    widget = read(widget_path)
+    widget = widget.replace(
+        "elapsedBeforeFirstFrame: minimumNativeSplashDuration,",
+        "elapsedBeforeFirstFrame: Duration.zero,",
+    )
+    widget = widget.replace(
+        "startup bootstrap stays blank until theme load completes",
+        "startup theme gate stays inert while theme load completes",
+    )
+    write(widget_path, widget)
 
 
 def main() -> None:
     if len(sys.argv) != 2:
-        raise SystemExit("usage: remediation_completion_apply.py <splash>")
+        raise SystemExit("usage: remediation_completion_apply.py <phase>")
     mode = sys.argv[1]
     if mode == "splash":
         splash()
+    elif mode == "permissions":
+        from remediation_permissions_apply import apply
+        apply()
+    elif mode == "feedback":
+        from remediation_feedback_apply import apply
+        apply()
     else:
         raise SystemExit(f"unknown mode: {mode}")
 
