@@ -17,11 +17,11 @@ jobs:
     name: Build signed production AAB
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     environment: production
 
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
 
@@ -38,7 +38,7 @@ jobs:
           git fetch origin main --no-tags
           git merge-base --is-ancestor $env:GITHUB_SHA origin/main
           if ($LASTEXITCODE -ne 0) {
-            throw "Production releases must be built from a commit contained in origin/main."
+            throw "Play builds must come from a commit contained in origin/main."
           }
 
       - name: Set up Java 17
@@ -55,41 +55,146 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create production config from secrets
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Path config -Force | Out-Null
-          $config = @{
-            APP_ENV = "prod"
-            SUPABASE_URL = "${{ secrets.PROD_SUPABASE_URL }}"
-            SUPABASE_PUBLISHABLE_KEY = "${{ secrets.PROD_SUPABASE_PUBLISHABLE_KEY }}"
-            GOOGLE_WEB_CLIENT_ID = "${{ secrets.PROD_GOOGLE_WEB_CLIENT_ID }}"
-            SENTRY_ENABLED = $true
-            SENTRY_DSN = "${{ secrets.PROD_SENTRY_DSN }}"
-            SENTRY_TRACES_SAMPLE_RATE = "0.2"
-          }
-          $config | ConvertTo-Json -Depth 5 | Set-Content -Path config/prod.json -Encoding UTF8
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
 
-      - name: Create Android signing material from secrets
+      - name: Validate Google and Play static contracts
+        run: node tool/validate_google_release_contracts.mjs
+
+      - name: Create production config from protected environment variables
         shell: pwsh
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
         run: |
           $ErrorActionPreference = "Stop"
+          foreach ($name in @('SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','GOOGLE_WEB_CLIENT_ID','SENTRY_DSN')) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$name").Value)) {
+              throw "Missing protected production variable: $name"
+            }
+          }
+          New-Item -ItemType Directory -Path config -Force | Out-Null
+          $config = [ordered]@{
+            APP_ENV = "prod"
+            SUPABASE_URL = $env:SUPABASE_URL
+            SUPABASE_PUBLISHABLE_KEY = $env:SUPABASE_PUBLISHABLE_KEY
+            GOOGLE_WEB_CLIENT_ID = $env:GOOGLE_WEB_CLIENT_ID
+            SENTRY_ENABLED = $true
+            SENTRY_DSN = $env:SENTRY_DSN
+            SENTRY_TRACES_SAMPLE_RATE = "0.05"
+          }
+          $json = $config | ConvertTo-Json
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'config\prod.json'), $json, $utf8NoBom)
+
+      - name: Create Android upload signing material from secrets
+        shell: pwsh
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($name in @('ANDROID_KEYSTORE_BASE64','ANDROID_KEY_ALIAS','ANDROID_KEY_PASSWORD','ANDROID_STORE_PASSWORD')) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$name").Value)) {
+              throw "Missing Android upload signing secret: $name"
+            }
+          }
           [System.IO.File]::WriteAllBytes(
-            "android/app/release.jks",
-            [System.Convert]::FromBase64String("${{ secrets.ANDROID_KEYSTORE_BASE64 }}")
+            "android/app/homepilot-release.jks",
+            [System.Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
           )
           @"
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          storeFile=release.jks
-          "@ | Set-Content -Path android/key.properties -Encoding UTF8
+          storePassword=$env:ANDROID_STORE_PASSWORD
+          keyPassword=$env:ANDROID_KEY_PASSWORD
+          keyAlias=$env:ANDROID_KEY_ALIAS
+          storeFile=homepilot-release.jks
+          "@ | Set-Content -Path android/key.properties -Encoding utf8NoBOM
 
-      - name: Build production AAB
+      - name: Build and test production AAB
+        shell: pwsh
+        run: .\tool\build_play_prod.ps1
+
+      - name: Verify AAB signature and collect upload certificate evidence
+        shell: pwsh
+        env:
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Aab = Join-Path $PWD 'build\app\outputs\bundle\prodRelease\app-release.aab'
+          if (-not (Test-Path $Aab)) { throw "Production AAB not found: $Aab" }
+          New-Item -ItemType Directory -Path release-evidence -Force | Out-Null
+
+          $JarOutput = (& jarsigner -verify -verbose -certs $Aab 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $JarOutput -notmatch 'jar verified') {
+            throw "AAB JAR signature verification failed.`n$JarOutput"
+          }
+          $JarOutput | Set-Content release-evidence/aab-signature-verification.txt -Encoding utf8NoBOM
+
+          $CertOutput = (& keytool -list -v `
+            -keystore android/app/homepilot-release.jks `
+            -alias $env:ANDROID_KEY_ALIAS `
+            -storepass $env:ANDROID_STORE_PASSWORD 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "Upload certificate inspection failed.`n$CertOutput" }
+          $CertOutput | Set-Content release-evidence/upload-certificate.txt -Encoding utf8NoBOM
+          if ($CertOutput -notmatch 'SHA256:\s*([0-9A-F:]+)') {
+            throw "Upload certificate SHA-256 fingerprint was not found."
+          }
+          $UploadFingerprint = $Matches[1]
+          @"
+          HomePilot Google Play signing evidence
+          ======================================
+          Commit: $env:GITHUB_SHA
+          Upload certificate SHA-256: $UploadFingerprint
+
+          This certificate is the HomePilot upload certificate used to sign the AAB before upload.
+          Google Play App Signing may use a different app-signing certificate for Play-installed APKs.
+          The Play App Signing SHA-256 fingerprint must be verified in Play Console and registered in Google OAuth where required; CI intentionally does not assume it equals this upload certificate.
+          "@ | Set-Content release-evidence/play-signing-distinction.txt -Encoding utf8NoBOM
+          Get-FileHash $Aab -Algorithm SHA256 | Format-List | Out-String |
+            Set-Content release-evidence/aab-sha256.txt -Encoding utf8NoBOM
+
+      - name: Collect merged release manifest and dependency evidence
         shell: pwsh
         run: |
-          .\tool\build_play_prod.ps1
+          $ErrorActionPreference = "Stop"
+          Push-Location android
+          try {
+            .\gradlew.bat :app:processProdReleaseMainManifest
+            if ($LASTEXITCODE -ne 0) { throw 'Merged manifest task failed.' }
+            .\gradlew.bat :app:dependencies --configuration prodReleaseRuntimeClasspath |
+              Set-Content ..\release-evidence\prod-release-dependencies.txt -Encoding utf8NoBOM
+            if ($LASTEXITCODE -ne 0) { throw 'Dependency report failed.' }
+          }
+          finally { Pop-Location }
+
+          $Manifest = Get-ChildItem build\app\intermediates -Recurse -File -Filter AndroidManifest.xml |
+            Where-Object { $_.FullName -match 'prodRelease' -and $_.FullName -match 'merged|processProdRelease' } |
+            Select-Object -First 1
+          if (-not $Manifest) { throw 'Merged prodRelease AndroidManifest.xml was not found.' }
+          Copy-Item $Manifest.FullName release-evidence/AndroidManifest-prodRelease.xml -Force
+
+      - name: Assert merged manifest release contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Manifest = Get-Content release-evidence/AndroidManifest-prodRelease.xml -Raw
+          if ($Manifest -match 'ACCESS_FINE_LOCATION|ACCESS_BACKGROUND_LOCATION') { throw 'Forbidden location permission in merged manifest.' }
+          if ($Manifest -notmatch 'SCHEDULE_EXACT_ALARM') { throw 'Expected exact-alarm permission missing from merged manifest.' }
+          if ($Manifest -notmatch 'com.google.android.gms.ads.APPLICATION_ID') { throw 'Expected AdMob app metadata missing from merged manifest.' }
+          if ($Manifest -match 'android:debuggable="true"') { throw 'Release manifest is debuggable.' }
+
+      - name: Attest production AAB provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: build/app/outputs/bundle/prodRelease/app-release.aab
 
       - name: Upload production AAB artifact
         uses: actions/upload-artifact@v4
@@ -97,3 +202,12 @@ jobs:
           name: homepilot-production-aab
           path: build/app/outputs/bundle/prodRelease/app-release.aab
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Play release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: homepilot-play-release-evidence-${{ github.run_id }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
