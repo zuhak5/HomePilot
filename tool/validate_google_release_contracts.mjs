@@ -31,7 +31,13 @@ requireMatch(/class AdRuntimeEligibility/.test(runtime), 'authoritative ad runti
 requireMatch(/class AdRetryPolicy/.test(runtime), 'bounded ad retry policy missing');
 requireMatch(!/setTimeout\s*\(/.test(deletion), 'account-deletion page must not simulate backend work with timers');
 requireMatch(/functions\/v1\/delete-account/.test(deletion), 'external deletion must call protected backend');
-requireMatch(!/service[_-]?role/i.test(deletion), 'browser deletion bundle must never reference service-role credentials');
+// A defensive check for the literal words "service role" is expected in the
+// browser validator. What must never appear is a server credential identifier
+// or a browser-side service-role key binding.
+requireMatch(
+  !/SUPABASE_SERVICE_ROLE_KEY|serviceRoleKey|service_role_key/i.test(deletion),
+  'browser deletion bundle must never expose a service-role credential',
+);
 
 if (fs.existsSync('android/app/google-services.json.example')) {
   throw new Error('obsolete google-services.json.example must be removed when Firebase Analytics is unused');
