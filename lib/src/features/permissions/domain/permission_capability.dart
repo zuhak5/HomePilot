@@ -34,15 +34,6 @@ enum PermissionNextAction {
   none,
 }
 
-enum EffectiveCapabilityState {
-  active,
-  degraded,
-  blocked,
-  disabledByUser,
-  notConfigured,
-  unavailable,
-}
-
 enum WeatherAreaMode { none, manual, device }
 
 @immutable
