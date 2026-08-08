@@ -38,6 +38,11 @@ class _FakeGoogleSignInGateway implements GoogleSignInGateway {
   Future<void> signOut() async {
     signOutCalls++;
   }
+
+  @override
+  Future<void> disconnect() async {
+    signOutCalls++;
+  }
 }
 
 void main() {

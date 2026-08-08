@@ -12,6 +12,7 @@ class GoogleSignInTokens {
 abstract interface class GoogleSignInGateway {
   Future<GoogleSignInTokens> signIn();
   Future<void> signOut();
+  Future<void> disconnect();
 }
 
 class NativeGoogleSignInGateway implements GoogleSignInGateway {
@@ -26,10 +27,25 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
   final GoogleSignIn _googleSignIn;
   Future<void>? _initialization;
 
-  Future<void> _initialize() {
-    return _initialization ??= _googleSignIn.initialize(
-      serverClientId: serverClientId,
-    );
+  Future<void> _initialize() async {
+    if (_initialization != null) {
+      try {
+        await _initialization;
+        return;
+      } catch (_) {
+        _initialization = null;
+      }
+    }
+    final init = _googleSignIn.initialize(serverClientId: serverClientId);
+    _initialization = init;
+    try {
+      await init;
+    } catch (_) {
+      if (identical(_initialization, init)) {
+        _initialization = null;
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -77,5 +93,11 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
   Future<void> signOut() async {
     await _initialize();
     await _googleSignIn.signOut();
+  }
+
+  @override
+  Future<void> disconnect() async {
+    await _initialize();
+    await _googleSignIn.disconnect();
   }
 }

@@ -1,0 +1,85 @@
+.deletion-container {
+  max-width: 720px;
+  margin-top: 2rem;
+  margin-bottom: 4rem;
+}
+
+.deletion-card {
+  padding: 2rem;
+  border-radius: 12px;
+}
+
+.deletion-card h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.lead {
+  font-size: 1.125rem;
+  color: var(--text-secondary, #9ca3af);
+  margin-bottom: 1.5rem;
+}
+
+.info-box, .instructions-box, .action-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.info-box h2, .instructions-box h2, .action-box h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary, #f9fafb);
+}
+
+.info-box ul, .instructions-box ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.info-box li, .instructions-box li {
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  border: none;
+  transition: background-color 0.2s ease;
+}
+
+.primary-btn {
+  background-color: #159a3b;
+  color: #ffffff;
+}
+
+.primary-btn:hover {
+  background-color: #117e30;
+}
+
+.danger-btn {
+  background-color: #dc2626;
+  color: #ffffff;
+}
+
+.danger-btn:hover {
+  background-color: #b91c1c;
+}
+
+.danger-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#deletion-status {
+  margin-bottom: 1rem;
+  font-weight: 500;
+}

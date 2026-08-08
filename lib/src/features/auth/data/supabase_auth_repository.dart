@@ -199,11 +199,11 @@ class SupabaseAuthRepository implements AuthRepository {
           retryable: true,
         );
       } finally {
-        await _clearLocalAuthentication();
+        await _clearLocalAuthentication(isAccountDeletion: true);
       }
     } on Object catch (error) {
       if (cloudDeleted) {
-        await _clearLocalAuthentication();
+        await _clearLocalAuthentication(isAccountDeletion: true);
         throw SupabaseFailure.from(error);
       }
       final functionErrorCode = _functionErrorCode(error);
@@ -243,14 +243,24 @@ class SupabaseAuthRepository implements AuthRepository {
     }
   }
 
-  Future<void> _clearLocalAuthentication() async {
+  Future<void> _clearLocalAuthentication({
+    bool isAccountDeletion = false,
+  }) async {
     try {
       await _client.auth.signOut(scope: SignOutScope.local);
     } on Object {
       // GoTrue normally clears local state before any remote work.
     }
     try {
-      await _googleSignIn.signOut();
+      if (isAccountDeletion) {
+        try {
+          await _googleSignIn.disconnect();
+        } on Object {
+          await _googleSignIn.signOut();
+        }
+      } else {
+        await _googleSignIn.signOut();
+      }
     } on Object {
       // Supabase recovery must not depend on Google cleanup.
     }

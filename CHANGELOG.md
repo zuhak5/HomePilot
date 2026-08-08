@@ -4,6 +4,18 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.4.9 (Build 35) — 2026-08-08
+
+### Fixed and Improved
+
+- **Master Remediation & Hardening Program**: Completed comprehensive multi-domain hardening across startup/splash topology, permissions, transient feedback, ad runtime, Google authentication, external account deletion compliance, and release workflows.
+- **Process-Scoped Single Splash Root**: Consolidated application bootstrapping into a single stable `MaterialApp.router` root with one process-scoped `HomePilotSplashOverlay` owner, eliminating startup theme flashes and duplicate splash overlays across authentication transitions.
+- **Capability Domain Model & Permission Separation**: Decoupled user intent, OS permissions, and `EffectiveCapabilityState` (`active`, `degraded`, `blocked`, `disabledByUser`, `notConfigured`, `unavailable`). Exact reminder timing defaults to `false` for new installs. Integrated `canScheduleExactNotifications()` from `flutter_local_notifications` for precise exact alarm capability checks.
+- **Unified Transient Feedback Coordinator & Protected Undo**: Introduced `FeedbackCoordinator` to manage app-wide floating SnackBars, queueing non-error messages behind active Undo opportunities, supporting LIFO batching, and providing accessible timeout management.
+- **Ad Runtime State Machine & Native Ad Parity**: Enforced UMP consent validation at load/show time, 55-minute cache expiration (`kAdCacheMaxAge`), epoch token invalidation for background transitions, and bounded exponential backoff with jitter. Updated `HomePilotNativeAdFactory.kt` and `AdChoicesView` layout binding for app theme parity.
+- **Google Auth Hygiene & Play Account Deletion Page**: Added `disconnect()` to `GoogleSignInGateway` with a safe initialization retry gate. Created public `account-deletion.html` web resource in `download-site/` for Google Play policy compliance.
+- **Play Store AAB Rail & Release Pipeline**: Added `tool/build_play_prod.ps1` and `.github/workflows/build-play-android.yml` for production Android App Bundle (AAB) builds and signature verification.
+
 ## 1.4.8 (Build 34) — 2026-08-08
 
 ### Fixed and Improved

@@ -1250,9 +1250,17 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
 
   Future<void> _load(HomePilotAdsService ads) async {
     final repository = ref.read(monetizationRepositoryProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final ad = NativeAd(
       adUnitId: ads.units.native(widget.placement),
       factoryId: _nativeFactoryId,
+      customOptions: {
+        'schemaVersion': 1,
+        'isDark': isDark,
+        'placement': widget.placement,
+        'backgroundColor': isDark ? '#1C2632' : '#FFFFFF',
+        'textColor': isDark ? '#E2E8F0' : '#0F172A',
+      },
       request: const AdRequest(),
       listener: NativeAdListener(
         onAdLoaded: (loadedAd) {

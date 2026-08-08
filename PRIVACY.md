@@ -1,6 +1,6 @@
 # HomePilot Privacy and Data Use
 
-_Last reviewed: August 4, 2026_
+_Last reviewed: August 8, 2026_
 
 This document describes the data-handling design represented by the current HomePilot source code. It is technical project documentation, not a substitute for jurisdiction-specific legal review or store disclosures.
 
@@ -64,7 +64,7 @@ Android platform backup is disabled for the application in the current manifest;
 
 Local data remains until it is deleted through application behavior, cleared by the user or operating system, removed during sign-out/account cleanup, or replaced through restore.
 
-For account deletion, HomePilot requires recent reauthentication with the same Google identity, suspends synchronization, invokes the protected `delete-account` Edge Function, removes private remote media and the authentication user, verifies the deletion result, and completes local cleanup. Some operational records may be retained only where necessary to complete or prove deletion, prevent replay, investigate abuse, or satisfy legal obligations.
+For account deletion, HomePilot supports both in-app deletion and an external web deletion resource. It requires Google OAuth authentication, suspends synchronization, invokes the protected `delete-account` Edge Function, removes private remote media and the authentication user, verifies the deletion result, and completes local cleanup. Some operational records (such as server-verified reward transactions) may be retained only where necessary to complete or prove deletion, prevent replay, investigate abuse, or satisfy legal obligations.
 
 Backup files previously exported outside the application are not automatically deleted by account deletion.
 
