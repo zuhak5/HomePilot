@@ -16,6 +16,9 @@ abstract interface class GoogleSignInGateway {
 }
 
 class NativeGoogleSignInGateway implements GoogleSignInGateway {
+  // Supabase's native Google ID-token flow currently also requires the Google
+  // access token. Keep authorization scopes minimal and separate from
+  // authentication; do not expand this list without an auth/privacy review.
   static const _authorizationScopes = <String>['email', 'profile'];
 
   NativeGoogleSignInGateway({
@@ -26,26 +29,29 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
   final String serverClientId;
   final GoogleSignIn _googleSignIn;
   Future<void>? _initialization;
+  bool _initialized = false;
 
-  Future<void> _initialize() async {
-    if (_initialization != null) {
-      try {
-        await _initialization;
-        return;
-      } catch (_) {
-        _initialization = null;
-      }
-    }
-    final init = _googleSignIn.initialize(serverClientId: serverClientId);
-    _initialization = init;
-    try {
-      await init;
-    } catch (_) {
-      if (identical(_initialization, init)) {
-        _initialization = null;
-      }
-      rethrow;
-    }
+  Future<void> _initialize() {
+    if (_initialized) return Future<void>.value();
+
+    final existing = _initialization;
+    if (existing != null) return existing;
+
+    late final Future<void> attempt;
+    attempt = _googleSignIn
+        .initialize(serverClientId: serverClientId)
+        .then((_) {
+          _initialized = true;
+        })
+        .whenComplete(() {
+          // Only the attempt that still owns the slot may clear it. This keeps
+          // old failed waiters from erasing a newer retry started meanwhile.
+          if (identical(_initialization, attempt)) {
+            _initialization = null;
+          }
+        });
+    _initialization = attempt;
+    return attempt;
   }
 
   @override
