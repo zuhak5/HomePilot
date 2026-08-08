@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mode="$(tr -d '\r\n' < tool/remediation-mode.txt)"
+          mode="$(xargs < tool/remediation-mode.txt)"
           test -n "$mode"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           python3 tool/remediation_completion_apply.py "$mode"
@@ -103,6 +103,6 @@ jobs:
           fi
           git config user.name "homepilot-remediation-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib test
+          git add -A
           git commit -m "fix(${{ steps.apply.outputs.mode }}): complete master remediation phase"
           git push origin HEAD:remediation/master-completion-pass-2026-08-08
