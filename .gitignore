@@ -66,6 +66,10 @@ app.*.map.json
 # JavaScript tooling
 /node_modules/
 
+# Generated public browser config. It contains no service-role secret, but is
+# produced from protected deployment settings so each environment stays explicit.
+/download-site/account-deletion-config.js
+
 # Supabase CLI state
 /supabase/.temp/
 /supabase/.branches/
