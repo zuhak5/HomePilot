@@ -27,6 +27,7 @@ abstract interface class AppPermissionGateway {
   Future<void> markPrompted(AppPermissionKind kind);
   Future<bool> openAppPermissionSettings();
   Future<bool> openLocationServiceSettings();
+  Future<bool> openExactAlarmSettings();
 }
 
 class AppPermissionCoordinator implements AppPermissionGateway {
@@ -124,6 +125,27 @@ class AppPermissionCoordinator implements AppPermissionGateway {
   @override
   Future<bool> openLocationServiceSettings() =>
       Geolocator.openLocationSettings();
+
+  @override
+  Future<bool> openExactAlarmSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final plugin = FlutterLocalNotificationsPlugin()
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      if (plugin != null) {
+        await plugin.requestExactAlarmsPermission();
+        return true;
+      }
+    } on MissingPluginException {
+      return false;
+    } on Exception {
+      // Fall back to the app settings surface when the Android plugin cannot
+      // open the exact-alarm special-access screen on this device/version.
+    }
+    return openAppSettings();
+  }
 
   Permission _permission(AppPermissionKind kind) => switch (kind) {
     AppPermissionKind.notifications => Permission.notification,
