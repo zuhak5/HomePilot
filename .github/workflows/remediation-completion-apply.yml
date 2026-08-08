@@ -105,4 +105,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "fix(${{ steps.apply.outputs.mode }}): complete master remediation phase"
+          git fetch origin remediation/master-completion-pass-2026-08-08
+          git rebase origin/remediation/master-completion-pass-2026-08-08
           git push origin HEAD:remediation/master-completion-pass-2026-08-08
