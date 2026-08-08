@@ -194,9 +194,6 @@ String _statusLabel(
     if count != 1:
         raise RuntimeError(f"permission setup opener changed: {count}")
 
-    # Keep exact special access contextual without widening AppPermissionGateway,
-    # because test fakes implement that stable interface. request(exactAlarms)
-    # is the canonical flutter_local_notifications special-access operation.
     main = main.replace(
         "      if (open) await coordinator.openAppPermissionSettings();\n      return false;\n    }\n    if (state == AppPermissionState.unavailable) return false;",
         "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.request(kind);\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n      return false;\n    }\n    if (state == AppPermissionState.unavailable) return false;",
@@ -207,6 +204,117 @@ String _statusLabel(
         "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.request(kind);\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n    }\n    return false;",
         1,
     )
+
+    # Dashboard weather renders a real capability affordance independent from
+    # the unrelated light/dark theme toggle.
+    main = main.replace(
+        "    final location =\n        ref.watch(homeLocationProvider).value ?? snapshot?.homeLocation;\n",
+        "    final location =\n        ref.watch(homeLocationProvider).value ?? snapshot?.homeLocation;\n"
+        "    final weatherCapability = ref\n        .watch(permissionEducationControllerProvider)\n        .setupSnapshot\n        ?.weather;\n",
+        1,
+    )
+    main = main.replace(
+        "              location: location,\n              localNow: themeNow,\n              isDark: brightness == Brightness.dark,",
+        "              location: location,\n              capability: weatherCapability,\n              localNow: themeNow,\n              isDark: brightness == Brightness.dark,\n              onLocationAction: () => ref\n                  .read(permissionEducationControllerProvider.notifier)\n                  .initialize(source: PermissionEducationSource.weatherCard),",
+        1,
+    )
+    main = main.replace(
+        "    required this.location,\n    required this.localNow,",
+        "    required this.location,\n    required this.capability,\n    required this.localNow,",
+        1,
+    )
+    main = main.replace(
+        "    required this.isDark,\n    required this.onToggleTheme,",
+        "    required this.isDark,\n    required this.onLocationAction,\n    required this.onToggleTheme,",
+        1,
+    )
+    main = main.replace(
+        "  final HomeLocation? location;\n  final DateTime localNow;",
+        "  final HomeLocation? location;\n  final WeatherAreaCapabilitySnapshot? capability;\n  final DateTime localNow;",
+        1,
+    )
+    main = main.replace(
+        "  final bool isDark;\n  final VoidCallback onToggleTheme;",
+        "  final bool isDark;\n  final VoidCallback onLocationAction;\n  final VoidCallback onToggleTheme;",
+        1,
+    )
+    # Both weather header layouts get an explicit location/configuration action.
+    main = main.replace(
+        "                      const SizedBox(width: HkSpacing.xs),\n                      _WeatherThemeButton(",
+        "                      const SizedBox(width: HkSpacing.xs),\n"
+        "                      _WeatherLocationButton(\n"
+        "                        capability: capability,\n"
+        "                        onPressed: onLocationAction,\n"
+        "                      ),\n"
+        "                      const SizedBox(width: HkSpacing.space4),\n"
+        "                      _WeatherThemeButton(",
+        1,
+    )
+    main = main.replace(
+        "                              SizedBox(width: gap),\n                              _WeatherThemeButton(",
+        "                              SizedBox(width: gap),\n"
+        "                              _WeatherLocationButton(\n"
+        "                                capability: capability,\n"
+        "                                onPressed: onLocationAction,\n"
+        "                              ),\n"
+        "                              SizedBox(width: gap),\n"
+        "                              _WeatherThemeButton(",
+        1,
+    )
+    if "class _WeatherLocationButton" not in main:
+        marker = "class _WeatherThemeButton extends StatelessWidget {"
+        helper = r'''class _WeatherLocationButton extends StatelessWidget {
+  const _WeatherLocationButton({required this.capability, required this.onPressed});
+
+  final WeatherAreaCapabilitySnapshot? capability;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final degraded = capability?.effectiveState == EffectiveCapabilityState.degraded ||
+        capability?.effectiveState == EffectiveCapabilityState.blocked ||
+        capability?.effectiveState == EffectiveCapabilityState.notConfigured ||
+        capability?.effectiveState == EffectiveCapabilityState.unavailable;
+    final manual = capability?.mode == WeatherAreaMode.manual;
+    final icon = manual
+        ? Symbols.location_city_rounded
+        : degraded
+        ? Symbols.location_off_rounded
+        : Symbols.my_location_rounded;
+    final message = manual
+        ? context.l10n.weatherLocationConfiguredManually
+        : degraded
+        ? context.l10n.weatherLocationNeedsAttention
+        : context.l10n.weatherLocationSettings;
+    return Tooltip(
+      message: message,
+      child: Semantics(
+        button: true,
+        label: message,
+        child: SizedBox.square(
+          dimension: 44,
+          child: IconButton(
+            onPressed: onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: scheme.surfaceContainerLowest.withValues(alpha: 0.86),
+              foregroundColor: degraded ? scheme.error : scheme.primary,
+              shape: const CircleBorder(),
+              side: BorderSide(color: scheme.primary.withValues(alpha: 0.12)),
+            ),
+            icon: Icon(icon, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+'''
+        if marker not in main:
+            raise RuntimeError("weather theme button marker changed")
+        main = main.replace(marker, helper + marker, 1)
+
     _write(main_path, main)
 
     en_path = ROOT / "lib/l10n/app_en.arb"
@@ -223,6 +331,9 @@ String _statusLabel(
         "capabilityStatusDisabled": "Off",
         "capabilityStatusNotConfigured": "Not configured",
         "capabilityStatusUnavailable": "Unavailable",
+        "weatherLocationSettings": "Weather location settings",
+        "weatherLocationNeedsAttention": "Weather location needs attention",
+        "weatherLocationConfiguredManually": "Weather area is set manually",
     })
     ar.update({
         "permissionSetup": "الأذونات والإعداد",
@@ -234,6 +345,9 @@ String _statusLabel(
         "capabilityStatusDisabled": "متوقف",
         "capabilityStatusNotConfigured": "غير مُعد",
         "capabilityStatusUnavailable": "غير متاح",
+        "weatherLocationSettings": "إعدادات موقع الطقس",
+        "weatherLocationNeedsAttention": "موقع الطقس يحتاج إلى انتباه",
+        "weatherLocationConfiguredManually": "تم تعيين منطقة الطقس يدوياً",
     })
     en_path.write_text(json.dumps(en, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     ar_path.write_text(json.dumps(ar, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
