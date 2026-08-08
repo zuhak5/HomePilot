@@ -1,0 +1,72 @@
+name: Validate Google Backend and Release Contracts
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - main
+      - remediation/master-completion-pass-2026-08-08
+  workflow_dispatch:
+
+concurrency:
+  group: google-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deno-security:
+    name: Deno SSV and account deletion
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Test AdMob SSV and account deletion edge functions
+        run: |
+          deno test --allow-env --allow-net \
+            supabase/functions/admob-ssv-handler/index_test.ts \
+            supabase/functions/delete-account/index_test.ts
+
+  web-and-static-contracts:
+    name: Deletion site and Google static contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked tooling dependencies
+        run: npm ci
+      - name: Test account deletion browser flow
+        run: node --test tool/account-deletion-site.test.mjs
+      - name: Validate Google and Play static contracts
+        run: node tool/validate_google_release_contracts.mjs
+
+  database-security:
+    name: Supabase database security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked Supabase CLI
+        run: npm ci
+      - name: Start local Supabase stack
+        run: npx supabase start
+      - name: Run database authorization and monetization tests
+        run: npm run supabase:test
+      - name: Lint database schema
+        run: npm run supabase:lint
+      - name: Stop local Supabase stack
+        if: always()
+        run: npx supabase stop --no-backup
