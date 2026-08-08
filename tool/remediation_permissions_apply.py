@@ -167,9 +167,8 @@ String _statusLabel(
         );
       }
     }
-    // Exact timing is a user preference, not a claim that Android special
-    // access is granted. The scheduler will use the inexact fallback whenever
-    // canScheduleExactNotifications() is false.
+    // Exact timing is user intent, not a claim that Android special access is
+    // granted. The scheduler preserves the inexact fallback when it is missing.
     if (context.mounted) {
       await _persistNotificationPreferences(context, ref, preferences);
     }
@@ -195,14 +194,17 @@ String _statusLabel(
     if count != 1:
         raise RuntimeError(f"permission setup opener changed: {count}")
 
+    # Keep exact special access contextual without widening AppPermissionGateway,
+    # because test fakes implement that stable interface. request(exactAlarms)
+    # is the canonical flutter_local_notifications special-access operation.
     main = main.replace(
         "      if (open) await coordinator.openAppPermissionSettings();\n      return false;\n    }\n    if (state == AppPermissionState.unavailable) return false;",
-        "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.openExactAlarmSettings();\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n      return false;\n    }\n    if (state == AppPermissionState.unavailable) return false;",
+        "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.request(kind);\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n      return false;\n    }\n    if (state == AppPermissionState.unavailable) return false;",
         1,
     )
     main = main.replace(
         "      if (open) await coordinator.openAppPermissionSettings();\n    }\n    return false;",
-        "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.openExactAlarmSettings();\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n    }\n    return false;",
+        "      if (open) {\n        if (kind == AppPermissionKind.exactAlarms) {\n          await coordinator.request(kind);\n        } else {\n          await coordinator.openAppPermissionSettings();\n        }\n      }\n    }\n    return false;",
         1,
     )
     _write(main_path, main)
