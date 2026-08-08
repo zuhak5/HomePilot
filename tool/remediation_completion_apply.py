@@ -188,6 +188,8 @@ void main() {
         count=1,
         flags=re.S,
     )
+    if "minimumNativeSplashDuration" not in resources and "remainingNativeSplashDuration" not in resources:
+        resources = resources.replace("import 'package:homepilot/main.dart';\n", "")
     write(resources_path, resources)
 
     widget_path = "test/widget_test.dart"
