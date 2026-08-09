@@ -244,6 +244,8 @@ jobs:
             throw "GitHub Release already exists: $env:RELEASE_TAG"
           }
 
+          exit 0
+
       - name: Create production configuration
         shell: pwsh
         env:
