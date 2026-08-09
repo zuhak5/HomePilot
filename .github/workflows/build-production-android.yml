@@ -537,6 +537,8 @@ jobs:
             throw "Could not recheck Git tag $env:RELEASE_TAG before Sentry publication."
           }
 
+          exit 0
+
       - name: Publish and verify Sentry release
         shell: pwsh
         env:
