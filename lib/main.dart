@@ -475,16 +475,19 @@ class _DeferredHomePilotBootstrapState
     );
     initializeRestoreForegroundService(localeCode: deviceLanguage.name);
     try {
-      final resumed = await LocalAccountDataCleaner(
-        LocalSyncStore(widget.database),
-      ).resumePendingCleanup(
-        additionalCleanup: (accountId) async {
-          await const OfflineCreationDraftStore().clearForAccount(accountId);
-          await TaskCreationOperationStore(
-            storage: const FlutterSecureStorage(),
-          ).clearOperationsForAccount(accountId);
-        },
-      );
+      final resumed =
+          await LocalAccountDataCleaner(
+            LocalSyncStore(widget.database),
+          ).resumePendingCleanup(
+            additionalCleanup: (accountId) async {
+              await const OfflineCreationDraftStore().clearForAccount(
+                accountId,
+              );
+              await TaskCreationOperationStore(
+                storage: const FlutterSecureStorage(),
+              ).clearOperationsForAccount(accountId);
+            },
+          );
       if (resumed) AppLogger.info('account_deletion_local_cleanup_resumed');
     } on Object catch (error) {
       AppLogger.warning(
@@ -3893,6 +3896,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   final LayerLink _notificationEducationLink = LayerLink();
   final GlobalKey _weatherEducationTargetKey = GlobalKey();
   final GlobalKey _notificationEducationTargetKey = GlobalKey();
+  late final NativeAdPresentationDepth _nativeAdPresentationDepth;
   bool _forcePermissionEducationHandled = false;
   bool _permissionOverlaySuspendsNativeAds = false;
 
@@ -3900,6 +3904,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _nativeAdPresentationDepth = ref.read(
+      nativeAdPresentationDepthProvider.notifier,
+    );
     _homeData = _readHomeData();
     ref.listenManual(tasksProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(assetsProvider, (_, _) => _scheduleHomeDataCommit());
@@ -3964,11 +3971,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void _setPermissionOverlayNativeAdSuspension(bool shouldSuspend) {
     if (_permissionOverlaySuspendsNativeAds == shouldSuspend) return;
     _permissionOverlaySuspendsNativeAds = shouldSuspend;
-    final depth = ref.read(nativeAdPresentationDepthProvider.notifier);
     if (shouldSuspend) {
-      depth.push();
+      _nativeAdPresentationDepth.push();
     } else {
-      depth.pop();
+      _nativeAdPresentationDepth.pop();
     }
   }
 
@@ -4085,7 +4091,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               RepaintBoundary(
-                                 child: _DashboardWeatherCard(
+                                child: _DashboardWeatherCard(
                                   educationLink: _weatherEducationLink,
                                   educationTargetKey:
                                       _weatherEducationTargetKey,
@@ -4332,8 +4338,7 @@ class _DashboardWeatherCard extends ConsumerWidget {
           capability: capability,
           localNow: themeNow,
           isDark: brightness == Brightness.dark,
-          onToggleTheme: () =>
-              _toggleWeatherTheme(context, ref, brightness),
+          onToggleTheme: () => _toggleWeatherTheme(context, ref, brightness),
           onCapabilityAction: onEducationTap,
         ),
       ),
@@ -5611,7 +5616,8 @@ class _WeatherCapabilityStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isManual = capability.mode == WeatherAreaMode.manual;
-    final isDeviceActive = capability.mode == WeatherAreaMode.device &&
+    final isDeviceActive =
+        capability.mode == WeatherAreaMode.device &&
         capability.effectiveState == EffectiveCapabilityState.active;
     final label = isManual && capability.selectedArea != null
         ? context.l10n.permissionSelectedArea(capability.selectedArea!.label)
@@ -5641,9 +5647,7 @@ class _WeatherCapabilityStatus extends StatelessWidget {
                 ? Symbols.my_location_rounded
                 : Symbols.location_off_rounded,
             size: 18,
-            color: isManual || isDeviceActive
-                ? scheme.primary
-                : scheme.error,
+            color: isManual || isDeviceActive ? scheme.primary : scheme.error,
           ),
           const SizedBox(width: HkSpacing.xs),
           Expanded(
@@ -11425,8 +11429,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                     icon: Symbols.alarm_rounded,
                     title: context.l10n.deviceReminders,
                     subtitle: context.l10n.scheduledAndroidReminderDelivery,
-                    state:
-                        capabilitySetup.notifications.deviceReminderState,
+                    state: capabilitySetup.notifications.deviceReminderState,
                     onFix: () => _enableDeviceReminders(context, ref),
                   )
                 else
@@ -11514,9 +11517,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Symbols.rainy_rounded),
                   title: Text(context.l10n.weatherAlerts),
-                  subtitle: Text(
-                    context.l10n.weatherAlertsInboxDescription,
-                  ),
+                  subtitle: Text(context.l10n.weatherAlertsInboxDescription),
                   value:
                       notificationPreferences.enabled &&
                       notificationPreferences.weatherAlerts,
@@ -12283,10 +12284,7 @@ class _EffectiveCapabilityPreferenceTile extends StatelessWidget {
               compact: true,
             ),
             if (onFix != null)
-              TextButton(
-                onPressed: onFix,
-                child: Text(context.l10n.fix),
-              ),
+              TextButton(onPressed: onFix, child: Text(context.l10n.fix)),
           ],
         ),
       ),

@@ -87,6 +87,17 @@
   background-color: #126f31;
 }
 
+.secondary-btn {
+  margin-left: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background-color: transparent;
+  color: var(--text-primary, #f9fafb);
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
 .danger-btn {
   margin-top: 1rem;
   background-color: #c81e1e;
@@ -157,5 +168,10 @@
 @media (max-width: 520px) {
   .btn {
     width: 100%;
+  }
+
+  .secondary-btn {
+    margin-top: 0.75rem;
+    margin-left: 0;
   }
 }

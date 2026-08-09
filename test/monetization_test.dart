@@ -179,9 +179,10 @@ void main() {
 
   test('legacy retry delay is epoch bounded', () {
     expect(adRetryDelayForFailure(1), const Duration(seconds: 2));
-    expect(adRetryDelayForFailure(2), const Duration(seconds: 4));
-    expect(adRetryDelayForFailure(3), const Duration(seconds: 8));
-    expect(adRetryDelayForFailure(4), Duration.zero);
+    expect(adRetryDelayForFailure(2), const Duration(seconds: 8));
+    expect(adRetryDelayForFailure(3), const Duration(seconds: 30));
+    expect(adRetryDelayForFailure(4), const Duration(seconds: 60));
+    expect(adRetryDelayForFailure(5), Duration.zero);
     expect(adRetryDelayForFailure(99), Duration.zero);
   });
 
@@ -285,8 +286,25 @@ void main() {
       expect(lowerJitter.delay, const Duration(milliseconds: 1600));
       expect(upperJitter.delay, const Duration(milliseconds: 2400));
       expect(
+        [
+          for (var failure = 1; failure <= 4; failure++)
+            policy
+                .decide(
+                  failure: AdLoadFailureKind.network,
+                  failedAttempt: failure,
+                )
+                .delay,
+        ],
+        const [
+          Duration(seconds: 2),
+          Duration(seconds: 8),
+          Duration(seconds: 30),
+          Duration(seconds: 60),
+        ],
+      );
+      expect(
         policy
-            .decide(failure: AdLoadFailureKind.network, failedAttempt: 4)
+            .decide(failure: AdLoadFailureKind.network, failedAttempt: 5)
             .dormant,
         isTrue,
       );
@@ -298,9 +316,15 @@ void main() {
       );
       expect(
         policy
-            .decide(failure: AdLoadFailureKind.internal, failedAttempt: 2)
+            .decide(failure: AdLoadFailureKind.internal, failedAttempt: 3)
             .dormant,
         isTrue,
+      );
+      expect(
+        policy
+            .decide(failure: AdLoadFailureKind.internal, failedAttempt: 2)
+            .delay,
+        const Duration(seconds: 8),
       );
     });
 

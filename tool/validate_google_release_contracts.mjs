@@ -43,7 +43,14 @@ const authoritativePointsMigration = read(
   'supabase/migrations/20260803090000_address_live_advisors.sql',
 );
 const deletionClient = read('download-site/account-deletion.js');
+const flutterDeletionClient = read(
+  'lib/src/features/auth/data/supabase_auth_repository.dart',
+);
 const deletionFunction = read('supabase/functions/delete-account/index.ts');
+const deletionStatusFunction = read(
+  'supabase/functions/account-deletion-status/index.ts',
+);
+const backendWorkflow = read('.github/workflows/validate-google-backend.yml');
 const serviceWorker = read('download-site/sw.js');
 
 assertContract(
@@ -186,6 +193,12 @@ assertContract(
   'Bounded retry and dormancy contracts are missing.',
 );
 assertContract(
+  /AdLoadFailureKind\.network\s*=>\s*4/.test(adRetry) &&
+    /failedAttempt\s*>\s*maxAutomaticRetries/.test(adRetry) &&
+    /baseSeconds\s*=\s*\[2,\s*8,\s*30,\s*60\]/.test(adRetry),
+  'Network ads must have four automatic retries at 2, 8, 30, and 60 seconds.',
+);
+assertContract(
   /Duration\(minutes:\s*55\)/.test(adCache),
   'The 55-minute ad cache limit is missing.',
 );
@@ -243,8 +256,39 @@ assertContract(
 assertContract(
   !/localStorage/.test(deletionClient) &&
     /sessionStorage\.setItem\(PKCE_STORAGE_KEY, pkce\.verifier\)/.test(deletionClient) &&
+    /saveAccountDeletionOperation/.test(deletionClient) &&
     !/sessionStorage\.setItem\([^\n]*(access|refresh)[_-]?token/i.test(deletionClient),
-  'Only the one-time PKCE verifier may use session storage; tokens must remain in memory.',
+  'Session storage may retain PKCE and deletion-recovery material, but tokens must remain in memory.',
+);
+for (const [label, source] of [
+  ['browser deletion producer', deletionClient],
+  ['Flutter deletion producer', flutterDeletionClient],
+]) {
+  assertContract(
+    source.includes('confirmation') && source.includes('recovery_key'),
+    `${label} must send confirmation and recovery_key.`,
+  );
+  assertContract(
+    source.includes('account-deletion-status') &&
+      source.includes('expected_user_id'),
+    `${label} must reconcile with recovery_key and expected_user_id.`,
+  );
+}
+for (const [label, source] of [
+  ['delete-account', deletionFunction],
+  ['account-deletion-status', deletionStatusFunction],
+]) {
+  assertContract(
+    /\^\[A-Za-z0-9_-\]\{43\}\$/.test(source) &&
+      /decodeBase64Url\([^)]*\)\.length\s*(?:===|!==)\s*32/.test(source),
+    `${label} must enforce a 43-character recovery key that decodes to 32 bytes.`,
+  );
+}
+assertContract(
+  /account-deletion-status\/index_test\.ts/.test(backendWorkflow) &&
+    /account-deletion-site\.test\.mjs/.test(backendWorkflow) &&
+    /validate_google_release_contracts\.mjs/.test(backendWorkflow),
+  'Backend CI must jointly validate both deletion functions and the client producers.',
 );
 assertContract(
   /https:\/\/zuhak5\.github\.io/.test(deletionFunction) &&

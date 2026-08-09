@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homepilot/src/core/supabase/supabase_failure.dart';
 import 'package:homepilot/src/core/utils/redacting_logger.dart';
+import 'package:homepilot/src/features/auth/data/account_deletion_recovery_store.dart';
 import 'package:homepilot/src/features/auth/data/native_google_sign_in.dart';
 import 'package:homepilot/src/features/auth/data/supabase_auth_repository.dart';
 import 'package:homepilot/src/features/auth/domain/auth_repository.dart';
@@ -16,6 +17,22 @@ class _MockFunctionsClient extends Mock implements FunctionsClient {}
 class _MockSession extends Mock implements Session {}
 
 class _MockUser extends Mock implements User {}
+
+class _MemoryAccountDeletionRecoveryStore
+    implements AccountDeletionRecoveryStore {
+  AccountDeletionRecoveryOperation? operation;
+
+  @override
+  Future<void> clear() async => operation = null;
+
+  @override
+  Future<AccountDeletionRecoveryOperation?> read() async => operation;
+
+  @override
+  Future<void> write(AccountDeletionRecoveryOperation value) async {
+    operation = value;
+  }
+}
 
 class _FakeGoogleSignInGateway implements GoogleSignInGateway {
   Object? signInError;
@@ -55,6 +72,8 @@ class _FakeGoogleSignInGateway implements GoogleSignInGateway {
 
 void main() {
   late _FakeGoogleSignInGateway googleSignIn;
+  late _MemoryAccountDeletionRecoveryStore recoveryStore;
+  const recoveryKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
   setUpAll(() {
     registerFallbackValue(OAuthProvider.google);
@@ -63,6 +82,7 @@ void main() {
   setUp(() {
     AppLogger.clearForTesting();
     googleSignIn = _FakeGoogleSignInGateway();
+    recoveryStore = _MemoryAccountDeletionRecoveryStore();
   });
 
   test('repository exposes no session for a fresh client', () {
@@ -76,6 +96,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     expect(repository.currentSession, isNull);
@@ -92,6 +114,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     final state = await repository.watchAuthState().first;
@@ -117,6 +141,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await repository.signInWithGoogle();
@@ -143,6 +169,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await repository.signOut();
@@ -177,6 +205,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await expectLater(
@@ -214,6 +244,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await expectLater(
@@ -251,7 +283,10 @@ void main() {
       when(
         () => functions.invoke(
           'delete-account',
-          body: const {'confirmation': 'delete-my-account'},
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
         ),
       ).thenAnswer(
         (_) async => FunctionResponse(
@@ -275,6 +310,8 @@ void main() {
         onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
         onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
         onAccountDeleted: (userId) async => cleanedUserId = userId,
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
       );
 
       await repository.deleteAccount();
@@ -286,7 +323,10 @@ void main() {
       verify(
         () => functions.invoke(
           'delete-account',
-          body: const {'confirmation': 'delete-my-account'},
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
         ),
       ).called(1);
       verify(() => auth.signOut(scope: SignOutScope.local)).called(1);
@@ -318,7 +358,10 @@ void main() {
       when(
         () => functions.invoke(
           'delete-account',
-          body: const {'confirmation': 'delete-my-account'},
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
         ),
       ).thenAnswer(
         (_) async => FunctionResponse(
@@ -340,6 +383,8 @@ void main() {
         onAccountDeletionPrepared: (_) async {},
         onAccountDeletionCancelled: (_) async {},
         onAccountDeleted: (_) async {},
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
       );
 
       await repository.deleteAccount();
@@ -382,7 +427,10 @@ void main() {
       when(
         () => functions.invoke(
           'delete-account',
-          body: const {'confirmation': 'delete-my-account'},
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
         ),
       ).thenAnswer(
         (_) async => FunctionResponse(
@@ -403,6 +451,8 @@ void main() {
         onAccountDeletionPrepared: (_) async {},
         onAccountDeletionCancelled: (_) async {},
         onAccountDeleted: (_) async => throw StateError('local cleanup failed'),
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
       );
 
       await expectLater(
@@ -454,9 +504,26 @@ void main() {
       when(
         () => functions.invoke(
           'delete-account',
-          body: const {'confirmation': 'delete-my-account'},
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
         ),
       ).thenAnswer((_) async => FunctionResponse(data: receipt, status: 200));
+      when(
+        () => functions.invoke(
+          'account-deletion-status',
+          body: const {
+            'recovery_key': recoveryKey,
+            'expected_user_id': 'user-1',
+          },
+        ),
+      ).thenThrow(
+        FunctionException(
+          status: 404,
+          details: {'error': 'recovery_not_found'},
+        ),
+      );
       String? cancelledUserId;
       final repository = SupabaseAuthRepository(
         client,
@@ -466,6 +533,8 @@ void main() {
           cancelledUserId = userId;
         },
         onAccountDeleted: (_) async {},
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
       );
 
       await expectLater(
@@ -524,6 +593,8 @@ void main() {
       onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (_) async {},
       onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await expectLater(
@@ -540,7 +611,10 @@ void main() {
     verifyNever(
       () => functions.invoke(
         'delete-account',
-        body: const {'confirmation': 'delete-my-account'},
+        body: const {
+          'confirmation': 'delete-my-account',
+          'recovery_key': recoveryKey,
+        },
       ),
     );
     verify(() => auth.signOut(scope: SignOutScope.local)).called(1);
@@ -548,12 +622,224 @@ void main() {
     expect(googleSignIn.disconnectCalls, 0);
   });
 
-  test('prepare failure rolls back an armed account-deletion barrier', () async {
+  test(
+    'prepare failure rolls back an armed account-deletion barrier',
+    () async {
+      final client = _MockSupabaseClient();
+      final auth = _MockGoTrueClient();
+      final functions = _MockFunctionsClient();
+      final session = _MockSession();
+      final user = _MockUser();
+      when(() => client.auth).thenReturn(auth);
+      when(() => client.functions).thenReturn(functions);
+      when(() => auth.currentSession).thenReturn(session);
+      when(() => session.user).thenReturn(user);
+      when(() => user.id).thenReturn('user-1');
+      when(
+        () => auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: 'google-id-token',
+          accessToken: 'google-access-token',
+        ),
+      ).thenAnswer((_) async => AuthResponse(session: session));
+      String? cancelledUserId;
+      final repository = SupabaseAuthRepository(
+        client,
+        googleSignIn,
+        onAccountDeletionPrepared: (_) async {
+          throw StateError('later prepare stage failed');
+        },
+        onAccountDeletionCancelled: (userId) async {
+          cancelledUserId = userId;
+        },
+        onAccountDeleted: (_) async {},
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
+      );
+
+      await expectLater(
+        repository.deleteAccount(),
+        throwsA(isA<SupabaseFailure>()),
+      );
+
+      expect(cancelledUserId, 'user-1');
+      verifyNever(
+        () => functions.invoke(
+          'delete-account',
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
+        ),
+      );
+    },
+  );
+
+  test(
+    'storage cleanup failure keeps the recoverable deletion prepared',
+    () async {
+      final client = _MockSupabaseClient();
+      final auth = _MockGoTrueClient();
+      final functions = _MockFunctionsClient();
+      final session = _MockSession();
+      final user = _MockUser();
+      when(() => client.auth).thenReturn(auth);
+      when(() => client.functions).thenReturn(functions);
+      when(() => auth.currentSession).thenReturn(session);
+      when(() => session.user).thenReturn(user);
+      when(() => user.id).thenReturn('user-1');
+      when(
+        () => auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: 'google-id-token',
+          accessToken: 'google-access-token',
+        ),
+      ).thenAnswer((_) async => AuthResponse(session: session));
+      when(
+        () => functions.invoke(
+          'delete-account',
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
+        ),
+      ).thenThrow(
+        FunctionException(
+          status: 503,
+          details: {'error': 'storage_cleanup_failed'},
+        ),
+      );
+      when(
+        () => functions.invoke(
+          'account-deletion-status',
+          body: const {
+            'recovery_key': recoveryKey,
+            'expected_user_id': 'user-1',
+          },
+        ),
+      ).thenAnswer(
+        (_) async => FunctionResponse(
+          data: const {'deleted': false, 'status': 'pending'},
+          status: 202,
+        ),
+      );
+      when(
+        () => auth.signOut(scope: SignOutScope.local),
+      ).thenAnswer((_) async {});
+      String? preparedUserId;
+      String? cancelledUserId;
+      String? cleanedUserId;
+      final repository = SupabaseAuthRepository(
+        client,
+        googleSignIn,
+        onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
+        onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
+        onAccountDeleted: (userId) async => cleanedUserId = userId,
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
+      );
+
+      await expectLater(
+        repository.deleteAccount(),
+        throwsA(
+          isA<SupabaseFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                SupabaseFailureKind.storage,
+              )
+              .having((failure) => failure.retryable, 'retryable', isTrue),
+        ),
+      );
+
+      expect(preparedUserId, 'user-1');
+      expect(cancelledUserId, isNull);
+      expect(cleanedUserId, isNull);
+      expect(recoveryStore.operation?.recoveryKey, recoveryKey);
+      verifyNever(() => auth.signOut(scope: SignOutScope.local));
+      expect(googleSignIn.signOutCalls, 0);
+      expect(googleSignIn.disconnectCalls, 0);
+    },
+  );
+
+  test(
+    'transport loss is reconciled as deleted by authoritative status',
+    () async {
+      final client = _MockSupabaseClient();
+      final auth = _MockGoTrueClient();
+      final functions = _MockFunctionsClient();
+      final session = _MockSession();
+      final user = _MockUser();
+      when(() => client.auth).thenReturn(auth);
+      when(() => client.functions).thenReturn(functions);
+      when(() => auth.currentSession).thenReturn(session);
+      when(() => session.user).thenReturn(user);
+      when(() => user.id).thenReturn('user-1');
+      when(
+        () => auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: 'google-id-token',
+          accessToken: 'google-access-token',
+        ),
+      ).thenAnswer((_) async => AuthResponse(session: session));
+      when(
+        () => functions.invoke(
+          'delete-account',
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
+        ),
+      ).thenThrow(StateError('response lost'));
+      when(
+        () => functions.invoke(
+          'account-deletion-status',
+          body: const {
+            'recovery_key': recoveryKey,
+            'expected_user_id': 'user-1',
+          },
+        ),
+      ).thenAnswer(
+        (_) async => FunctionResponse(
+          data: const {
+            'deleted': true,
+            'status': 'deleted',
+            'user_id': 'user-1',
+          },
+          status: 200,
+        ),
+      );
+      when(
+        () => auth.signOut(scope: SignOutScope.local),
+      ).thenAnswer((_) async {});
+      String? cancelledUserId;
+      String? cleanedUserId;
+      final repository = SupabaseAuthRepository(
+        client,
+        googleSignIn,
+        onAccountDeletionPrepared: (_) async {},
+        onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
+        onAccountDeleted: (userId) async => cleanedUserId = userId,
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
+      );
+
+      await repository.deleteAccount();
+
+      expect(cancelledUserId, isNull);
+      expect(cleanedUserId, 'user-1');
+      expect(recoveryStore.operation, isNull);
+      expect(googleSignIn.disconnectCalls, 1);
+    },
+  );
+
+  test('pending status retains and reuses the same recovery key', () async {
     final client = _MockSupabaseClient();
     final auth = _MockGoTrueClient();
     final functions = _MockFunctionsClient();
     final session = _MockSession();
     final user = _MockUser();
+    var deleteCalls = 0;
     when(() => client.auth).thenReturn(auth);
     when(() => client.functions).thenReturn(functions);
     when(() => auth.currentSession).thenReturn(session);
@@ -566,91 +852,254 @@ void main() {
         accessToken: 'google-access-token',
       ),
     ).thenAnswer((_) async => AuthResponse(session: session));
-    String? cancelledUserId;
-    final repository = SupabaseAuthRepository(
-      client,
-      googleSignIn,
-      onAccountDeletionPrepared: (_) async {
-        throw StateError('later prepare stage failed');
-      },
-      onAccountDeletionCancelled: (userId) async {
-        cancelledUserId = userId;
-      },
-      onAccountDeleted: (_) async {},
-    );
-
-    await expectLater(repository.deleteAccount(), throwsA(isA<SupabaseFailure>()));
-
-    expect(cancelledUserId, 'user-1');
-    verifyNever(
-      () => functions.invoke(
-        'delete-account',
-        body: const {'confirmation': 'delete-my-account'},
-      ),
-    );
-  });
-
-  test('storage cleanup failure rolls back deletion preparation', () async {
-    final client = _MockSupabaseClient();
-    final auth = _MockGoTrueClient();
-    final functions = _MockFunctionsClient();
-    final session = _MockSession();
-    final user = _MockUser();
-    when(() => client.auth).thenReturn(auth);
-    when(() => client.functions).thenReturn(functions);
-    when(() => auth.currentSession).thenReturn(session);
-    when(() => session.user).thenReturn(user);
-    when(() => user.id).thenReturn('user-1');
-    when(
-      () => auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: 'google-id-token',
-        accessToken: 'google-access-token',
-      ),
-    ).thenAnswer((_) async => AuthResponse(session: session));
     when(
       () => functions.invoke(
         'delete-account',
-        body: const {'confirmation': 'delete-my-account'},
+        body: const {
+          'confirmation': 'delete-my-account',
+          'recovery_key': recoveryKey,
+        },
       ),
-    ).thenThrow(
-      FunctionException(
-        status: 503,
-        details: {'error': 'storage_cleanup_failed'},
+    ).thenAnswer((_) async {
+      deleteCalls++;
+      if (deleteCalls == 1) throw StateError('response lost');
+      return FunctionResponse(
+        data: const {'deleted': true, 'status': 'deleted', 'user_id': 'user-1'},
+        status: 200,
+      );
+    });
+    when(
+      () => functions.invoke(
+        'account-deletion-status',
+        body: const {'recovery_key': recoveryKey, 'expected_user_id': 'user-1'},
+      ),
+    ).thenAnswer(
+      (_) async => FunctionResponse(
+        data: const {'deleted': false, 'status': 'pending'},
+        status: 202,
       ),
     );
     when(
       () => auth.signOut(scope: SignOutScope.local),
     ).thenAnswer((_) async {});
-    String? preparedUserId;
     String? cancelledUserId;
-    String? cleanedUserId;
     final repository = SupabaseAuthRepository(
       client,
       googleSignIn,
-      onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
+      onAccountDeletionPrepared: (_) async {},
       onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
-      onAccountDeleted: (userId) async => cleanedUserId = userId,
+      onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
     );
 
     await expectLater(
       repository.deleteAccount(),
       throwsA(
         isA<SupabaseFailure>()
+            .having((failure) => failure.retryable, 'retryable', isTrue)
             .having(
-              (failure) => failure.kind,
-              'kind',
-              SupabaseFailureKind.storage,
-            )
-            .having((failure) => failure.retryable, 'retryable', isTrue),
+              (failure) => failure.message,
+              'message',
+              contains('still pending'),
+            ),
+      ),
+    );
+    expect(recoveryStore.operation?.recoveryKey, recoveryKey);
+    expect(cancelledUserId, isNull);
+
+    await repository.deleteAccount();
+
+    expect(deleteCalls, 2);
+    expect(recoveryStore.operation, isNull);
+  });
+
+  test(
+    'temporarily unavailable status retains the logical operation',
+    () async {
+      final client = _MockSupabaseClient();
+      final auth = _MockGoTrueClient();
+      final functions = _MockFunctionsClient();
+      final session = _MockSession();
+      final user = _MockUser();
+      when(() => client.auth).thenReturn(auth);
+      when(() => client.functions).thenReturn(functions);
+      when(() => auth.currentSession).thenReturn(session);
+      when(() => session.user).thenReturn(user);
+      when(() => user.id).thenReturn('user-1');
+      when(
+        () => auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: 'google-id-token',
+          accessToken: 'google-access-token',
+        ),
+      ).thenAnswer((_) async => AuthResponse(session: session));
+      when(
+        () => functions.invoke(
+          'delete-account',
+          body: const {
+            'confirmation': 'delete-my-account',
+            'recovery_key': recoveryKey,
+          },
+        ),
+      ).thenThrow(StateError('response lost'));
+      when(
+        () => functions.invoke(
+          'account-deletion-status',
+          body: const {
+            'recovery_key': recoveryKey,
+            'expected_user_id': 'user-1',
+          },
+        ),
+      ).thenThrow(
+        FunctionException(
+          status: 503,
+          details: {'error': 'recovery_temporarily_unavailable'},
+        ),
+      );
+      String? cancelledUserId;
+      final repository = SupabaseAuthRepository(
+        client,
+        googleSignIn,
+        onAccountDeletionPrepared: (_) async {},
+        onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
+        onAccountDeleted: (_) async {},
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
+      );
+
+      await expectLater(
+        repository.deleteAccount(),
+        throwsA(
+          isA<SupabaseFailure>()
+              .having(
+                (failure) => failure.kind,
+                'kind',
+                SupabaseFailureKind.offline,
+              )
+              .having((failure) => failure.retryable, 'retryable', isTrue),
+        ),
+      );
+
+      expect(recoveryStore.operation?.recoveryKey, recoveryKey);
+      expect(cancelledUserId, isNull);
+    },
+  );
+
+  test(
+    'restart recovery completes cleanup from a final status receipt',
+    () async {
+      final client = _MockSupabaseClient();
+      final auth = _MockGoTrueClient();
+      final functions = _MockFunctionsClient();
+      recoveryStore.operation = const AccountDeletionRecoveryOperation(
+        expectedUserId: 'user-1',
+        recoveryKey: recoveryKey,
+      );
+      when(() => client.auth).thenReturn(auth);
+      when(() => client.functions).thenReturn(functions);
+      when(
+        () => functions.invoke(
+          'account-deletion-status',
+          body: const {
+            'recovery_key': recoveryKey,
+            'expected_user_id': 'user-1',
+          },
+        ),
+      ).thenAnswer(
+        (_) async => FunctionResponse(
+          data: const {
+            'deleted': true,
+            'status': 'deleted',
+            'user_id': 'user-1',
+          },
+          status: 200,
+        ),
+      );
+      when(
+        () => auth.signOut(scope: SignOutScope.local),
+      ).thenAnswer((_) async {});
+      String? preparedUserId;
+      String? cleanedUserId;
+      final repository = SupabaseAuthRepository(
+        client,
+        googleSignIn,
+        onAccountDeletionPrepared: (userId) async => preparedUserId = userId,
+        onAccountDeletionCancelled: (_) async {},
+        onAccountDeleted: (userId) async => cleanedUserId = userId,
+        accountDeletionRecoveryStore: recoveryStore,
+        accountDeletionRecoveryKeyFactory: () => recoveryKey,
+      );
+
+      await repository.resumePendingAccountDeletion();
+
+      expect(preparedUserId, 'user-1');
+      expect(cleanedUserId, 'user-1');
+      expect(recoveryStore.operation, isNull);
+      expect(googleSignIn.signInCalls, 0);
+      expect(googleSignIn.disconnectCalls, 1);
+    },
+  );
+
+  test('recent reauthentication rejection is a safe cancellation', () async {
+    final client = _MockSupabaseClient();
+    final auth = _MockGoTrueClient();
+    final functions = _MockFunctionsClient();
+    final session = _MockSession();
+    final user = _MockUser();
+    when(() => client.auth).thenReturn(auth);
+    when(() => client.functions).thenReturn(functions);
+    when(() => auth.currentSession).thenReturn(session);
+    when(() => session.user).thenReturn(user);
+    when(() => user.id).thenReturn('user-1');
+    when(
+      () => auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: 'google-id-token',
+        accessToken: 'google-access-token',
+      ),
+    ).thenAnswer((_) async => AuthResponse(session: session));
+    when(
+      () => functions.invoke(
+        'delete-account',
+        body: const {
+          'confirmation': 'delete-my-account',
+          'recovery_key': recoveryKey,
+        },
+      ),
+    ).thenThrow(
+      FunctionException(
+        status: 401,
+        details: {'error': 'recent_reauthentication_required'},
+      ),
+    );
+    String? cancelledUserId;
+    final repository = SupabaseAuthRepository(
+      client,
+      googleSignIn,
+      onAccountDeletionPrepared: (_) async {},
+      onAccountDeletionCancelled: (userId) async => cancelledUserId = userId,
+      onAccountDeleted: (_) async {},
+      accountDeletionRecoveryStore: recoveryStore,
+      accountDeletionRecoveryKeyFactory: () => recoveryKey,
+    );
+
+    await expectLater(
+      repository.deleteAccount(),
+      throwsA(
+        isA<SupabaseFailure>().having(
+          (failure) => failure.kind,
+          'kind',
+          SupabaseFailureKind.authentication,
+        ),
       ),
     );
 
-    expect(preparedUserId, 'user-1');
     expect(cancelledUserId, 'user-1');
-    expect(cleanedUserId, isNull);
-    verifyNever(() => auth.signOut(scope: SignOutScope.local));
-    expect(googleSignIn.signOutCalls, 0);
-    expect(googleSignIn.disconnectCalls, 0);
+    expect(recoveryStore.operation, isNull);
+    verifyNever(
+      () =>
+          functions.invoke('account-deletion-status', body: any(named: 'body')),
+    );
   });
 }
