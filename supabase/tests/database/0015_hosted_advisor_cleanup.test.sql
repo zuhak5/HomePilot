@@ -35,9 +35,7 @@ select ok(
       'pet_details_user_updated_idx',
       'safety_details_user_updated_idx',
       'streaks_user_updated_idx',
-      'notification_inbox_created_idx',
-      'asset_photos_user_id_asset_id_idx',
-      'rooms_user_id_area_id_idx'
+      'notification_inbox_created_idx'
     ]) as index_name
   ),
   'hosted-statistics-confirmed unused indexes are retired'
@@ -49,8 +47,14 @@ select ok(
   ) is not null
   and to_regclass(
     'homepilot_archive.asset_photo_upload_metadata_user_id_idx'
+  ) is not null
+  and to_regclass(
+    'public.asset_photos_user_id_asset_id_idx'
+  ) is not null
+  and to_regclass(
+    'public.rooms_user_id_area_id_idx'
   ) is not null,
-  'account-deletion cascade indexes remain available for archive rows'
+  'low-frequency account and relationship cascade indexes remain available'
 );
 
 select * from finish();
