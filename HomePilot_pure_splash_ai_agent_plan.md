@@ -1,5 +1,7 @@
 # HomePilot Pure Splash Screen Implementation Plan
 
+> **Historical plan:** This document records an earlier splash proposal and is retained for traceability. It is not a current startup runbook or completion claim; current behavior is defined by `lib/main.dart`, `lib/homepilot_animated_splash_screen.dart`, and their lifecycle/overlay tests.
+
 ## Objective
 
 Activate the existing HomePilot animated splash design as a **purely visual, fixed-duration startup overlay**.

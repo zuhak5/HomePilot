@@ -5,20 +5,58 @@ const jsonHeaders = {
   "Cache-Control": "no-store",
 };
 const requiredConfirmation = "delete-my-account";
+const recoveryKeyPattern = /^[A-Za-z0-9_-]{43}$/;
+const allowedBrowserOrigins = new Set([
+  "https://zuhak5.github.io",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+]);
 
 type EnvironmentReader = Pick<typeof Deno.env, "get">;
 
 export interface AccountDeletionServices {
   getVerifiedUserId(token: string): Promise<string | null>;
   isRecentSession(userId: string, sessionId: string): Promise<boolean>;
-  signOutGlobally(token: string): Promise<void>;
   listObjectPaths(userId: string): Promise<string[]>;
   beginCleanup(userId: string, objectPaths: string[]): Promise<string>;
   removeObjects(objectPaths: string[]): Promise<void>;
   deleteUser(userId: string): Promise<void>;
   completeCleanup(jobId: string): Promise<void>;
   recordCleanupError(jobId: string, errorCode: string): Promise<void>;
+  beginOperation(
+    requestHash: string,
+    subjectBinding: string,
+    userId: string,
+  ): Promise<AccountDeletionOperation>;
+  advanceOperation(
+    operationId: string,
+    userId: string,
+    stage: AccountDeletionOperationStage,
+  ): Promise<void>;
+  completeOperation(
+    operationId: string,
+    userId: string,
+    subjectBinding: string,
+  ): Promise<void>;
+  recordOperationError(
+    operationId: string,
+    userId: string,
+    errorCode: string,
+  ): Promise<void>;
 }
+
+export interface AccountDeletionOperation {
+  operationId: string;
+  stage: AccountDeletionOperationStage;
+  completed: boolean;
+}
+
+export type AccountDeletionOperationStage =
+  | "prepared"
+  | "storage_cleanup"
+  | "storage_complete"
+  | "auth_delete_started"
+  | "completed";
 
 export type ServiceFactory = (
   supabaseUrl: string,
@@ -32,30 +70,53 @@ export async function handleDeleteAccount(
   environment: EnvironmentReader = Deno.env,
   createServices: ServiceFactory = createAccountDeletionServices,
 ): Promise<Response> {
+  const origin = request.headers.get("Origin");
+  if (origin != null && !allowedBrowserOrigins.has(origin)) {
+    return jsonResponse(403, { error: "origin_not_allowed" });
+  }
+  if (request.method === "OPTIONS") {
+    if (origin == null) {
+      return jsonResponse(403, { error: "origin_not_allowed" });
+    }
+    return new Response(null, {
+      status: 204,
+      headers: responseHeaders(origin, true),
+    });
+  }
+
+  const respond = (
+    status: number,
+    body: Record<string, boolean | string>,
+  ): Response => jsonResponse(status, body, origin);
+
   if (request.method !== "POST") {
-    return jsonResponse(405, { error: "method_not_allowed" });
+    return respond(405, { error: "method_not_allowed" });
   }
 
   const authorization = request.headers.get("Authorization");
   if (!authorization?.startsWith("Bearer ")) {
-    return jsonResponse(401, { error: "missing_authorization" });
+    return respond(401, { error: "missing_authorization" });
   }
 
-  if (!await hasDeletionConfirmation(request)) {
-    return jsonResponse(400, { error: "confirmation_required" });
+  const deletionPayload = await readDeletionPayload(request);
+  if (!deletionPayload.confirmed) {
+    return respond(400, { error: "confirmation_required" });
+  }
+  if (deletionPayload.recoveryKey == null) {
+    return respond(400, { error: "recovery_key_required" });
   }
 
   const supabaseUrl = environment.get("SUPABASE_URL");
   const anonKey = environment.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = environment.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-    return jsonResponse(500, { error: "server_configuration_error" });
+    return respond(500, { error: "server_configuration_error" });
   }
 
   const token = authorization.slice("Bearer ".length);
   const sessionId = sessionIdFromJwt(token);
   if (sessionId == null) {
-    return jsonResponse(401, { error: "invalid_session" });
+    return respond(401, { error: "invalid_session" });
   }
 
   const services = createServices(
@@ -66,36 +127,56 @@ export async function handleDeleteAccount(
   );
   const userId = await services.getVerifiedUserId(token);
   if (userId == null) {
-    return jsonResponse(401, { error: "invalid_session" });
+    return respond(401, { error: "invalid_session" });
   }
 
   if (!await services.isRecentSession(userId, sessionId)) {
-    return jsonResponse(403, { error: "recent_reauthentication_required" });
+    return respond(403, { error: "recent_reauthentication_required" });
   }
 
+  const requestHash = await sha256Hex(deletionPayload.recoveryKey);
+  const subjectBinding = await sha256Hex(
+    `${deletionPayload.recoveryKey}:${userId}`,
+  );
   let cleanupJobId: string | null = null;
-  let phase = "prepare_cleanup";
+  let operationId: string | null = null;
+  let phase = "begin_operation";
   try {
+    const operation = await services.beginOperation(
+      requestHash,
+      subjectBinding,
+      userId,
+    );
+    operationId = operation.operationId;
+    if (operation.completed) {
+      return respond(200, deletionReceipt(userId));
+    }
+
+    phase = "prepare_cleanup";
     const initialObjectPaths = await services.listObjectPaths(userId);
     cleanupJobId = await services.beginCleanup(userId, initialObjectPaths);
 
     phase = "remove_storage";
+    await services.advanceOperation(operationId, userId, "storage_cleanup");
     await removeAllUserObjects(services, userId);
-
-    phase = "revoke_sessions";
-    await services.signOutGlobally(token);
-
-    phase = "delete_auth_user";
-    await services.deleteUser(userId);
 
     phase = "complete_cleanup";
     await services.completeCleanup(cleanupJobId);
+    cleanupJobId = null;
+    await services.advanceOperation(operationId, userId, "storage_complete");
 
-    return jsonResponse(200, {
-      deleted: true,
-      status: "deleted",
-      user_id: userId,
-    });
+    phase = "delete_auth_user";
+    await services.advanceOperation(
+      operationId,
+      userId,
+      "auth_delete_started",
+    );
+    await services.deleteUser(userId);
+
+    phase = "complete_operation";
+    await services.completeOperation(operationId, userId, subjectBinding);
+
+    return respond(200, deletionReceipt(userId));
   } catch (error) {
     const errorCode = `${phase}_failed`;
     if (cleanupJobId != null) {
@@ -105,17 +186,23 @@ export async function handleDeleteAccount(
         logDeletionFailure("record_cleanup_error", recordError);
       }
     }
+    if (operationId != null) {
+      try {
+        await services.recordOperationError(operationId, userId, errorCode);
+      } catch (recordError) {
+        logDeletionFailure("record_operation_error", recordError);
+      }
+    }
     logDeletionFailure(phase, error);
     switch (phase) {
-      case "revoke_sessions":
-        return jsonResponse(503, { error: "session_revocation_failed" });
       case "remove_storage":
-        return jsonResponse(503, { error: "storage_cleanup_failed" });
+        return respond(503, { error: "storage_cleanup_failed" });
       case "delete_auth_user":
+      case "complete_operation":
       case "complete_cleanup":
-        return jsonResponse(500, { error: "account_deletion_failed" });
+        return respond(500, { error: "account_deletion_failed" });
       default:
-        return jsonResponse(500, { error: "account_deletion_failed" });
+        return respond(500, { error: "account_deletion_failed" });
     }
   }
 }
@@ -151,10 +238,6 @@ function createAccountDeletionServices(
       if (error) throw error;
       return data === true;
     },
-    async signOutGlobally(token: string): Promise<void> {
-      const { error } = await admin.auth.admin.signOut(token, "global");
-      if (error) throw error;
-    },
     listObjectPaths: (userId: string) =>
       listObjectPaths(admin, "user-media", userId),
     async beginCleanup(
@@ -184,23 +267,144 @@ function createAccountDeletionServices(
       if (error) throw error;
     },
     async recordCleanupError(jobId: string, errorCode: string): Promise<void> {
-      await admin.rpc("complete_homepilot_account_cleanup", {
+      const { error } = await admin.rpc("complete_homepilot_account_cleanup", {
         p_job_id: jobId,
         p_error: errorCode,
       });
+      if (error) throw error;
+    },
+    async beginOperation(requestHash, subjectBinding, userId) {
+      const { data, error } = await admin.rpc(
+        "begin_homepilot_account_deletion_operation",
+        {
+          p_request_hash: requestHash,
+          p_subject_binding: subjectBinding,
+          p_user_id: userId,
+        },
+      );
+      if (error || !isRecord(data)) {
+        throw error ?? new Error("deletion_operation_creation_failed");
+      }
+      const operationId = data.operation_id;
+      const stage = data.stage;
+      if (
+        typeof operationId !== "string" || !isOperationStage(stage) ||
+        typeof data.completed !== "boolean"
+      ) {
+        throw new Error("invalid_deletion_operation");
+      }
+      return {
+        operationId,
+        stage,
+        completed: data.completed,
+      };
+    },
+    async advanceOperation(operationId, userId, stage): Promise<void> {
+      const { error } = await admin.rpc(
+        "advance_homepilot_account_deletion_operation",
+        {
+          p_operation_id: operationId,
+          p_user_id: userId,
+          p_stage: stage,
+        },
+      );
+      if (error) throw error;
+    },
+    async completeOperation(
+      operationId,
+      userId,
+      subjectBinding,
+    ): Promise<void> {
+      const { error } = await admin.rpc(
+        "complete_homepilot_account_deletion_operation",
+        {
+          p_operation_id: operationId,
+          p_user_id: userId,
+          p_subject_binding: subjectBinding,
+        },
+      );
+      if (error) throw error;
+    },
+    async recordOperationError(
+      operationId,
+      userId,
+      errorCode,
+    ): Promise<void> {
+      const { error } = await admin.rpc(
+        "record_homepilot_account_deletion_operation_error",
+        {
+          p_operation_id: operationId,
+          p_user_id: userId,
+          p_error_code: errorCode,
+        },
+      );
+      if (error) throw error;
     },
   };
 }
 
-async function hasDeletionConfirmation(request: Request): Promise<boolean> {
+async function readDeletionPayload(
+  request: Request,
+): Promise<{ confirmed: boolean; recoveryKey: string | null }> {
   try {
     const body: unknown = await request.json();
-    return typeof body === "object" && body != null &&
-      "confirmation" in body &&
-      body.confirmation === requiredConfirmation;
+    if (typeof body !== "object" || body == null) {
+      return { confirmed: false, recoveryKey: null };
+    }
+    const candidate = body as Record<string, unknown>;
+    return {
+      confirmed: candidate.confirmation === requiredConfirmation,
+      recoveryKey: isRecoveryKey(candidate.recovery_key)
+        ? candidate.recovery_key
+        : null,
+    };
+  } catch {
+    return { confirmed: false, recoveryKey: null };
+  }
+}
+
+function isRecoveryKey(value: unknown): value is string {
+  if (typeof value !== "string" || !recoveryKeyPattern.test(value)) {
+    return false;
+  }
+  try {
+    return decodeBase64Url(value).length === 32;
   } catch {
     return false;
   }
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/") +
+    "=".repeat((4 - value.length % 4) % 4);
+  return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null;
+}
+
+function isOperationStage(
+  value: unknown,
+): value is AccountDeletionOperationStage {
+  return typeof value === "string" && [
+    "prepared",
+    "storage_cleanup",
+    "storage_complete",
+    "auth_delete_started",
+    "completed",
+  ].includes(value);
+}
+
+function deletionReceipt(userId: string): Record<string, boolean | string> {
+  return { deleted: true, status: "deleted", user_id: userId };
 }
 
 function sessionIdFromJwt(token: string): string | null {
@@ -298,11 +502,29 @@ async function removeObjectsWithRetry(
 function jsonResponse(
   status: number,
   body: Record<string, boolean | string>,
+  origin: string | null = null,
 ): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: jsonHeaders,
+    headers: responseHeaders(origin),
   });
+}
+
+function responseHeaders(origin: string | null, preflight = false): Headers {
+  const headers = new Headers(jsonHeaders);
+  if (origin != null) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Vary", "Origin");
+  }
+  if (preflight) {
+    headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    headers.set(
+      "Access-Control-Allow-Headers",
+      "authorization, apikey, content-type, x-client-info",
+    );
+    headers.set("Access-Control-Max-Age", "600");
+  }
+  return headers;
 }
 
 function logDeletionFailure(phase: string, error: unknown): void {

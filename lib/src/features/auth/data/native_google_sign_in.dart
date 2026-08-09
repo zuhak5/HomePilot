@@ -16,6 +16,9 @@ abstract interface class GoogleSignInGateway {
 }
 
 class NativeGoogleSignInGateway implements GoogleSignInGateway {
+  // Supabase's native Google token exchange currently requires an access
+  // token in addition to the ID token. Request only the identity scopes needed
+  // for that exchange; broader Google API scopes do not belong here.
   static const _authorizationScopes = <String>['email', 'profile'];
 
   NativeGoogleSignInGateway({
@@ -28,13 +31,10 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
   Future<void>? _initialization;
 
   Future<void> _initialize() async {
-    if (_initialization != null) {
-      try {
-        await _initialization;
-        return;
-      } catch (_) {
-        _initialization = null;
-      }
+    final existing = _initialization;
+    if (existing != null) {
+      await existing;
+      return;
     }
     final init = _googleSignIn.initialize(serverClientId: serverClientId);
     _initialization = init;

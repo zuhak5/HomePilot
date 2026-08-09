@@ -83,9 +83,40 @@ Realtime is an invalidation mechanism, not a replacement for authenticated pull 
 
 Functions run in the Deno-based Supabase runtime and must validate all untrusted requests. Secrets belong in function environment configuration, not source or Flutter. Establish canonical formatting, type-checking, unit-test, and local-invocation commands and keep them aligned with CI.
 
+### `delete-account` HTTP contract
+
+[`supabase/functions/delete-account/index.ts`](../../supabase/functions/delete-account/index.ts) is the shared remote-deletion authority for the installed application and the public browser page.
+
+- `POST` is the only deletion method. The body must contain `{ "confirmation": "delete-my-account" }` and the `Authorization` header must contain the user's bearer token.
+- The function extracts the session ID from the JWT, verifies the user through Supabase Auth, and checks recent-session state. It never accepts a client-supplied user ID as ownership authority.
+- A successful response is HTTP `200` with `deleted: true`, `status: "deleted"`, and `user_id` set to the verified authenticated user. Browser code must match all three fields, including the verified user ID, before reporting success.
+- Responses use `Cache-Control: no-store`. Failure responses expose stable technical error codes rather than raw requests, tokens, provider payloads, or user content.
+
+The function's browser CORS allowlist is exact and contains only:
+
+- `https://zuhak5.github.io`
+- `http://localhost:4173`
+- `http://127.0.0.1:4173`
+
+An allowed `OPTIONS` preflight returns `204`, echoes that exact origin in `Access-Control-Allow-Origin`, varies on `Origin`, and permits `POST, OPTIONS` plus the `authorization`, `apikey`, `content-type`, and `x-client-info` request headers. A missing or non-allowlisted preflight origin is rejected. A non-preflight browser request with an unapproved `Origin` is rejected before authorization or body processing, and allowed browser origins receive readable CORS headers on both success and failure responses. Wildcard origins and credentialed cookies are not used.
+
+Native Flutter HTTP requests normally have no `Origin` header. They continue through the full JWT, confirmation, recent-session, cleanup, and receipt checks, but receive no `Access-Control-Allow-Origin` header. Absence of `Origin` is compatibility behavior, not an authorization bypass.
+
+Focused local validation is:
+
+```powershell
+deno fmt --check supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
+deno check --frozen supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
+deno test --frozen supabase/functions/delete-account/index_test.ts
+```
+
+These tests validate handler contracts with fakes. They do not deploy the function or prove hosted Auth, database, or Storage cleanup.
+
 ## Deployment
 
 Deploy migrations and functions through an explicit reviewed process with environment confirmation, dry-run or diff evidence where available, backward compatibility, and rollback/forward-fix planning. Mobile and backend release order must be documented when contracts change.
+
+For public browser deletion, deploy and verify the updated `delete-account` function before publishing an enabled deletion page. Confirm the hosted function retains `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` only in protected function configuration. Then verify the production Pages origin preflight, an intentionally disallowed origin, a native no-`Origin` request in a controlled test, and one disposable-account deletion. Evidence must record function/project identity, deployment version, HTTP status and CORS headers, receipt field validation, Auth removal, Postgres cleanup, and private `user-media` cleanup without recording tokens or direct user identifiers.
 
 ## Review checklist
 

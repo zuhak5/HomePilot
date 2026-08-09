@@ -1,6 +1,6 @@
 # HomePilot Privacy and Data Use
 
-_Last reviewed: August 8, 2026_
+_Last reviewed: August 9, 2026_
 
 This document describes the data-handling design represented by the current HomePilot source code. It is technical project documentation, not a substitute for jurisdiction-specific legal review or store disclosures.
 
@@ -14,7 +14,7 @@ Depending on the features used, HomePilot can process:
 - Account identifiers and session material required for Google sign-in and Supabase authentication.
 - Synchronization metadata such as operation identifiers, revisions, cursors, retry state, shadows, hydration state, and cleanup state.
 - Backup archives created or selected by the user.
-- Approximate location when the user grants coarse-location permission for location-dependent features. HomePilot does not request background-location permission in the current Android manifest.
+- A manually selected weather area, or approximate location when the user explicitly grants coarse-location permission and chooses the current-location option. Manual configuration does not mean Android location permission was granted. HomePilot stores weather coordinates rounded to two decimal places and does not request fine or background location in the current Android manifest.
 - Advertising consent state, ad events, reward claims, point balances, charged-creation records, and fraud-prevention metadata used by the monetization system.
 - Limited diagnostic and release metadata when Sentry is enabled.
 
@@ -36,9 +36,11 @@ Supabase provides authentication, Postgres storage, private media Storage, Realt
 
 Production authentication uses Google sign-in. Google and Supabase process identity and session information needed to authenticate the user. HomePilot does not use email-and-password sign-up in its current local Supabase configuration.
 
+Ordinary HomePilot sign-out ends the application session without revoking the user's Google authorization grant. In-app account deletion uses the separate disconnect path after confirmed cloud deletion. The public browser deletion flow clears its Supabase browser session on completion, but it cannot revoke Google authorization automatically; users may separately revoke HomePilot from their Google Account connections.
+
 ### Google Mobile Ads
 
-HomePilot includes Google Mobile Ads. Depending on consent, configuration, region, and ad availability, Google may process device, advertising, consent, fraud-prevention, and interaction data. Rewarded-ad claims are verified server-side before points are credited. Core application data must not be inserted into ad request or reward identifiers.
+HomePilot includes Google Mobile Ads. Ads are requested only when the application is foreground-eligible and the current consent and configuration gates permit the specific format. Depending on consent, configuration, region, and ad availability, Google may process device, advertising, consent, fraud-prevention, and interaction data. Rewarded-ad claims are verified server-side before points are credited. Core application data must not be inserted into ad request or reward identifiers.
 
 ### Sentry
 
@@ -46,11 +48,11 @@ Sentry may receive technical error and performance information when enabled. Hom
 
 ### Location and network services
 
-Features that use approximate location or external network data should collect only what is required, handle denied permission, and avoid background tracking. Changes that introduce a new external service require a privacy review and an update to this document.
+HomePilot sends a manually selected or privacy-reduced approximate weather coordinate to Open-Meteo for forecasts. Manual place searches send the entered search text to Open-Meteo's geocoding service. Device location is obtained only after the user chooses that option and Android location permission and services allow it; HomePilot does not continuously track location in the background. Changes that introduce a new external service require a privacy review and an update to this document.
 
 ## Notifications and background work
 
-HomePilot schedules local maintenance notifications and may use exact alarms, boot restoration, wake locks, foreground data-sync service capability, and Workmanager. Notification content can reveal maintenance information on the device lock screen; users should configure operating-system notification privacy according to their needs.
+HomePilot schedules local maintenance notifications and may use exact alarms, boot restoration, wake locks, foreground data-sync service capability, and Workmanager. Notification preferences, Android notification permission, channel state, and effective reminder capability are separate. Exact timing is optional; when exact-alarm access is unavailable, supported reminders use degraded inexact scheduling rather than treating the preference as permission. Notification content can reveal maintenance information on the device lock screen; users should configure operating-system notification privacy according to their needs.
 
 The current Android manifest does not request fine or background location.
 
@@ -64,7 +66,9 @@ Android platform backup is disabled for the application in the current manifest;
 
 Local data remains until it is deleted through application behavior, cleared by the user or operating system, removed during sign-out/account cleanup, or replaced through restore.
 
-For account deletion, HomePilot supports both in-app deletion and an external web deletion resource. It requires Google OAuth authentication, suspends synchronization, invokes the protected `delete-account` Edge Function, removes private remote media and the authentication user, verifies the deletion result, and completes local cleanup. Some operational records (such as server-verified reward transactions) may be retained only where necessary to complete or prove deletion, prevent replay, investigate abuse, or satisfy legal obligations.
+For in-app account deletion, HomePilot requires recent same-identity Google reauthentication, suspends synchronization, invokes the protected `delete-account` Edge Function, verifies the deletion result, and completes device-local database, media, session, notification, and cache cleanup. Restart recovery is designed to finish local cleanup if cloud deletion succeeded before the app stopped.
+
+The external web resource performs real Google OAuth through Supabase with PKCE, verifies the authenticated user, requires explicit confirmation, calls the same protected Edge Function, and accepts success only when the response is a completed receipt for that same user. The backend removes the account's synchronized Postgres data, private Supabase Storage objects, cleanup job, and Auth user. The browser cannot inspect or erase HomePilot data, media, notifications, secure storage, or caches remaining on an installed device; users must clear or uninstall the app on each device. It also cannot erase copies held in user-exported backups or independently retained by service providers under their own disclosed obligations.
 
 Backup files previously exported outside the application are not automatically deleted by account deletion.
 

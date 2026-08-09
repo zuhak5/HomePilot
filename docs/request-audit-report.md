@@ -1,9 +1,12 @@
-# HomePilot — Request-Usage Audit & Network Architecture Review
+# HomePilot — Historical Request-Usage Audit & Network Architecture Review
 
 **Document Version**: 1.0.0  
 **Audit Date**: August 6, 2026  
 **Application Version**: HomePilot 1.4.1 (Build 26)  
 **Environment**: Production Android Host (`com.homepilot.app`) & Supabase Cloud (`iajvkvvvhwjdiuaufymh`)  
+
+> **Historical evidence notice:** This report records a Build 26 observation window from August 6, 2026. It is not evidence for the current source tree, a later release artifact, current hosted configuration, or present policy compliance. Revalidate every operational claim against current code, automated checks, protected CI evidence, and device or hosted-service evidence as applicable.
+
 **Log Datasets Evaluated**: 
 - `build/device_testing_clean.log` (34,928 lines of Android logcat captured during 5-minute active manual testing session)
 - Supabase Edge Function & Edge Router access logs (`iajvkvvvhwjdiuaufymh`)
@@ -29,7 +32,7 @@
 2. **Push Mutation Batching**: Local outbox mutations are coalesced into single transactional RPC payloads (`create_task_with_point_debit_impl`, `complete_maintenance_task`, `process_admob_ssv_reward`) rather than individual HTTP requests per entity edit.
 3. **Redundant 18-Table Incremental Pulls on Connectivity Re-establishment**: When network state transitions from offline to online (`sync_connectivity_changed online=true`), the sync coordinator triggers an incremental pull across all 18 tables simultaneously. While lightweight (0 rows returned when synced), server-side table aggregation or targeted high-priority table syncing would reduce 18 parallel HTTP connections down to 1.
 4. **AdMob SSV Probe Idempotency**: The `admob-ssv-handler` Edge Function correctly isolates synthetic test payloads (`fakeForAdDebugLog`) from production reward processing, returning `HTTP 200` (`verified_debug_noop`) without triggering database mutations or logging 400 validation errors.
-5. **Zero Uncaught Network Exceptions**: Sentry logging and image stream error handlers (`ProfileAvatar`) absorbed CDN 404s and network state changes cleanly with zero unhandled exceptions or app crashes.
+5. **No Uncaught Network Exceptions Observed**: In the captured Build 26 sample, Sentry logging and image stream error handlers (`ProfileAvatar`) absorbed the observed CDN 404s and network state changes without an unhandled exception or app crash appearing in the reviewed logs.
 
 ### Highest-Priority Optimizations
 
@@ -47,7 +50,7 @@
 | **Supabase Realtime** | `wss://{ref}.supabase.co/realtime/v1/websocket` | 5 (WS events) | 0 | Persistent connection | Heartbeat ping, Single Subscription | **Optimal** |
 | **Supabase Auth** | `POST /auth/v1/token?grant_type=refresh_token` | 1 | 0 | 180 ms | Secure storage, Auto-refresh | **Optimal** |
 | **Supabase Storage** | `GET /storage/v1/object/public/user-media/{id}` | 0 (cached) | 0 | 45 ms (disk cache) | ETag, Cache-Control headers | **Optimal** |
-| **Supabase Edge Functions** | `GET /functions/v1/admob-ssv-handler` | 2 | 0 | 129–240 ms | HMAC ECDSA signature, In-Memory Keys | **Optimal** |
+| **Supabase Edge Functions** | `GET /functions/v1/admob-ssv-handler` | 2 | 0 | 129–240 ms | ECDSA P-256/SHA-256 signature, In-Memory Keys | **Optimal** |
 | **AdMob / UMP** | `https://pagead2.googlesyndication.com/...` | 14 | 0 | 210–550 ms | SSV server-verified, Cooldown timers | **Optimal** |
 | **Sentry Observability** | `POST /api/{project_id}/envelope/` | 4 | 0 | Async non-blocking | DLP PII Scrubbed, Event Batching | **Optimal** |
 | **Google CDN** | `GET https://lh3.googleusercontent.com/...` | 1 | 0 | 85 ms | `precacheImage` with `onError` fallback | **Optimal** |
@@ -93,7 +96,7 @@
 - **Total Requests**: 4 async envelope transmissions
 - **Percentage of Total Traffic**: 5.3%
 - **Behavior**: Batches telemetry events and performance spans. Event scrubbing removes PII, user names, coordinates, and request bodies before transmission.
-- **Assessment**: Excellent privacy and performance design. Non-blocking async queueing ensures zero UI thread latency.
+- **Assessment**: The reviewed implementation uses non-blocking async queueing. The captured sample did not independently prove zero UI-thread latency.
 
 ---
 
@@ -103,7 +106,7 @@
 - **Request Count**: 54 (3 passes × 18 tables)
 - **Trigger Source**: App startup initial sync, network reconnect handler, and targeted invalidation.
 - **Frequency**: Triggered on launch and connectivity state transitions.
-- **Duplicate Analysis**: Zero duplicate queries for identical ranges; cursors advance strictly monotonic `sync_seq`.
+- **Duplicate Analysis**: No duplicate queries for identical ranges were observed in this captured sample; the reviewed cursors advanced with monotonic `sync_seq` values.
 - **Caching Opportunities**: Local Drift SQLite acts as the primary query cache. REST calls only fetch delta rows where `sync_seq > local_cursor`.
 - **Recommendation**: Bundle 18 entity requests into 1 batch RPC to reduce HTTP connection overhead on low-bandwidth mobile networks.
 
@@ -152,12 +155,14 @@
 ### Estimated Resource Reductions
 - **Network Requests**: -85% reduction during sync cycles (via Sync Bundle RPC).
 - **Edge Function Invocations**: 0 unnecessary calls (key caching active).
-- **App Startup Time**: 0 ms added (local Drift database powers first frame instantly).
+- **App Startup Time**: Not independently measured by this audit; local Drift reads are intended to avoid a cloud roundtrip on the first frame.
 - **Database Load**: -40% reduction in REST connection overhead.
 
 ---
 
-## 7. Final Scorecard
+## 7. Historical Heuristic Scorecard
+
+The following scores are the original Build 26 audit judgments. They are qualitative historical ratings, not current compliance or release gates.
 
 | Dimension | Score (0–100) | Assessment |
 | :--- | :---: | :--- |
@@ -168,14 +173,14 @@
 | **Realtime Usage** | **98** | Efficient single WebSocket subscription; uses signals for invalidation rather than raw data spam. |
 | **Edge Function Usage** | **96** | Fast execution times (<240ms), in-memory key caching, clean debug probe handling. |
 | **Authentication Efficiency** | **95** | Google OAuth + Supabase Auth token refresh managed seamlessly without session thrashing. |
-| **Cost Efficiency** | **94** | Zero wasted API calls or runaway loops; well within free/pro tier allowances. |
-| **Mobile Optimization** | **90** | Strong offline resilience; non-blocking background sync with zero UI freeze. |
+| **Cost Efficiency** | **94** | No wasted API calls or runaway loops were observed in the captured sample; actual plan usage and cost require current hosted-service evidence. |
+| **Mobile Optimization** | **90** | Strong offline-resilience design; the captured sample did not independently prove an absence of all UI freezes. |
 | **Overall Architecture** | **94** | State-of-the-art Flutter + Drift + Supabase implementation adhering to modern mobile best practices. |
 
 ---
 
 ### Conclusion & Required Documentation Update
 
-The application demonstrates **exceptional request efficiency and adherence to mobile best practices**. Network requests are strictly purpose-driven, offline-first reads avoid cloud roundtrips during normal usage, and mutations use server-authoritative RPCs with robust conflict resolution.
+For the Build 26 observation window, the reviewed logs and source suggested efficient, purpose-driven network behavior, offline-first reads, and server-authoritative mutation boundaries. This historical conclusion must not be used as evidence that the current build, deployed backend, or protected release artifact has the same properties.
 
-This audit report has been compiled and saved to [`docs/request-audit-report.md`](file:///F:/HomePilot/docs/request-audit-report.md).
+This historical audit is stored at [`docs/request-audit-report.md`](request-audit-report.md).

@@ -47,6 +47,30 @@ async function networkFirstNavigation(request) {
   }
 }
 
+async function networkOnlyAccountDeletionNavigation(request) {
+  try {
+    return await fetch(request, { cache: "no-store" });
+  } catch {
+    return new Response(
+      "Account deletion requires a network connection. Reconnect and reload this page.",
+      {
+        status: 503,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
+}
+
+function scopeRelativePath(url) {
+  const scopePath = new URL(self.registration.scope).pathname;
+  return url.pathname.startsWith(scopePath)
+    ? url.pathname.slice(scopePath.length)
+    : null;
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
 });
@@ -76,7 +100,16 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirstNavigation(request));
+    const relativePath = scopeRelativePath(url);
+    if (relativePath === "account-deletion.html") {
+      event.respondWith(networkOnlyAccountDeletionNavigation(request));
+      return;
+    }
+    if (relativePath === "" || relativePath === "index.html") {
+      event.respondWith(networkFirstNavigation(request));
+      return;
+    }
+    event.respondWith(fetch(request));
     return;
   }
 

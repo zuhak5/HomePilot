@@ -181,6 +181,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get needsAccess => 'Needs access';
 
   @override
+  String get limited => 'Limited';
+
+  @override
+  String get unavailable => 'Unavailable';
+
+  @override
+  String get configuredManually => 'Configured manually';
+
+  @override
+  String get approximateTiming => 'Approximate timing';
+
+  @override
   String get preferences => 'Preferences';
 
   @override
@@ -2740,6 +2752,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get startupStartingHomePilot => 'Starting HomePilot';
+
+  @override
+  String get homePilotSplashTagline =>
+      'Your tasks, routines, and reminders\nall in sync.';
 
   @override
   String get startupLoadedPreferences => 'Loaded preferences';

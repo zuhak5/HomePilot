@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertExists, assertMatch } from "jsr:@std/assert@1";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertMatch,
+} from "jsr:@std/assert@1";
 
 import {
   derEcdsaSignatureToP1363,

@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:homepilot/src/core/domain/models.dart'
+    show EffectiveCapabilityState;
 import 'package:homepilot/src/core/services/app_permission_coordinator.dart'
     show AppPermissionState;
 
@@ -33,6 +35,19 @@ enum PermissionNextAction {
   none,
 }
 
+enum PermissionOperationFailureKind { action, settings }
+
+@immutable
+class PermissionOperationFailure {
+  const PermissionOperationFailure({
+    required this.capability,
+    required this.kind,
+  });
+
+  final PermissionCapability capability;
+  final PermissionOperationFailureKind kind;
+}
+
 @immutable
 class CapabilityStatus {
   const CapabilityStatus({
@@ -41,6 +56,7 @@ class CapabilityStatus {
     required this.outcome,
     required this.nextAction,
     this.userPreferenceEnabled = true,
+    this.effectiveState = EffectiveCapabilityState.notConfigured,
   });
 
   final PermissionCapability capability;
@@ -48,6 +64,7 @@ class CapabilityStatus {
   final PermissionEducationOutcome outcome;
   final PermissionNextAction nextAction;
   final bool userPreferenceEnabled;
+  final EffectiveCapabilityState effectiveState;
 
   CapabilityStatus copyWith({
     PermissionCapability? capability,
@@ -55,6 +72,7 @@ class CapabilityStatus {
     PermissionEducationOutcome? outcome,
     PermissionNextAction? nextAction,
     bool? userPreferenceEnabled,
+    EffectiveCapabilityState? effectiveState,
   }) {
     return CapabilityStatus(
       capability: capability ?? this.capability,
@@ -63,6 +81,7 @@ class CapabilityStatus {
       nextAction: nextAction ?? this.nextAction,
       userPreferenceEnabled:
           userPreferenceEnabled ?? this.userPreferenceEnabled,
+      effectiveState: effectiveState ?? this.effectiveState,
     );
   }
 }

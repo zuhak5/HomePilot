@@ -1,7 +1,157 @@
 import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:homepilot/l10n/app_localizations.dart';
+
+const Color homePilotSplashBackground = Color(0xFFF9FCF8);
+const Duration homePilotSplashDisplayDuration = Duration(milliseconds: 3200);
+const Duration homePilotSplashFadeOutDuration = Duration(milliseconds: 250);
+
+Locale _supportedSplashLocale(Locale locale) {
+  return locale.languageCode == 'ar' ? const Locale('ar') : const Locale('en');
+}
+
+TextDirection _splashTextDirection(Locale locale) {
+  return locale.languageCode == 'ar' ? TextDirection.rtl : TextDirection.ltr;
+}
+
+/// Stable, process-lifetime owner for the one Flutter launch splash.
+///
+/// This host is deliberately independent from application readiness, routing,
+/// providers, theme preferences, and authentication. Its state stays mounted
+/// while [child] moves through deferred startup and into the real app.
+class HomePilotProcessSplash extends StatefulWidget {
+  const HomePilotProcessSplash({
+    required this.child,
+    this.displayDuration = homePilotSplashDisplayDuration,
+    this.fadeOutDuration = homePilotSplashFadeOutDuration,
+    super.key,
+  });
+
+  final Widget child;
+  final Duration displayDuration;
+  final Duration fadeOutDuration;
+
+  @override
+  State<HomePilotProcessSplash> createState() => _HomePilotProcessSplashState();
+}
+
+class _HomePilotProcessSplashState extends State<HomePilotProcessSplash>
+    with WidgetsBindingObserver {
+  Locale _deviceLocale = WidgetsBinding.instance.platformDispatcher.locale;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    final next =
+        locales?.firstOrNull ??
+        WidgetsBinding.instance.platformDispatcher.locale;
+    if (next == _deviceLocale) return;
+    setState(() => _deviceLocale = next);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = _supportedSplashLocale(_deviceLocale);
+    return MediaQuery.fromView(
+      view: View.of(context),
+      child: Directionality(
+        textDirection: _splashTextDirection(locale),
+        child: Theme(
+          data: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: homePilotSplashBackground,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF159A3B),
+              brightness: Brightness.light,
+              surface: homePilotSplashBackground,
+            ),
+          ),
+          child: HomePilotSplashOverlay(
+            locale: locale,
+            displayDuration: widget.displayDuration,
+            fadeOutDuration: widget.fadeOutDuration,
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Non-blank, non-animated surface shown only when bootstrap outlives the
+/// fixed process splash timer.
+class HomePilotStartupSurface extends StatelessWidget {
+  const HomePilotStartupSurface({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = _supportedSplashLocale(
+      WidgetsBinding.instance.platformDispatcher.locale,
+    );
+    final l10n = lookupAppLocalizations(locale);
+    Widget surface = ColoredBox(
+      color: homePilotSplashBackground,
+      child: SafeArea(
+        child: Center(
+          child: Semantics(
+            container: true,
+            label: l10n.startupStartingHomePilot,
+            textDirection: _splashTextDirection(locale),
+            child: ExcludeSemantics(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/splash/homepilot_splash_icon_3d.png',
+                    width: 112,
+                    height: 112,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'HomePilot',
+                    textDirection: TextDirection.ltr,
+                    style: TextStyle(
+                      color: Color(0xFF0B1726),
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (Directionality.maybeOf(context) == null) {
+      surface = Directionality(
+        textDirection: _splashTextDirection(locale),
+        child: surface,
+      );
+    }
+    if (MediaQuery.maybeOf(context) == null) {
+      surface = MediaQuery.fromView(view: View.of(context), child: surface);
+    }
+    return surface;
+  }
+}
 
 /// Purely visual, isolated startup splash overlay controller for HomePilot.
 ///
@@ -10,12 +160,14 @@ import 'package:flutter/services.dart';
 class HomePilotSplashOverlay extends StatefulWidget {
   const HomePilotSplashOverlay({
     required this.child,
-    this.displayDuration = const Duration(milliseconds: 3200),
-    this.fadeOutDuration = const Duration(milliseconds: 250),
+    this.locale = const Locale('en'),
+    this.displayDuration = homePilotSplashDisplayDuration,
+    this.fadeOutDuration = homePilotSplashFadeOutDuration,
     super.key,
   });
 
   final Widget child;
+  final Locale locale;
   final Duration displayDuration;
   final Duration fadeOutDuration;
 
@@ -61,10 +213,15 @@ class _HomePilotSplashOverlayState extends State<HomePilotSplashOverlay> {
         widget.child,
         if (_showSplash)
           Positioned.fill(
-            child: AnimatedOpacity(
-              opacity: _isFadingOut ? 0.0 : 1.0,
-              duration: widget.fadeOutDuration,
-              child: const HomePilotAnimatedSplashScreen(),
+            child: BlockSemantics(
+              child: AnimatedOpacity(
+                opacity: _isFadingOut ? 0.0 : 1.0,
+                duration: widget.fadeOutDuration,
+                child: HomePilotAnimatedSplashScreen(
+                  key: const ValueKey('homepilot-animated-splash'),
+                  locale: widget.locale,
+                ),
+              ),
             ),
           ),
       ],
@@ -79,11 +236,13 @@ class HomePilotAnimatedSplashScreen extends StatefulWidget {
   const HomePilotAnimatedSplashScreen({
     super.key,
     this.assetPath = 'assets/splash/homepilot_splash_icon_3d.png',
-    this.duration = const Duration(milliseconds: 3200),
+    this.duration = homePilotSplashDisplayDuration,
+    this.locale = const Locale('en'),
   });
 
   final String assetPath;
   final Duration duration;
+  final Locale locale;
 
   @override
   State<HomePilotAnimatedSplashScreen> createState() =>
@@ -103,8 +262,6 @@ class _HomePilotAnimatedSplashScreenState
   late final Animation<Offset> _titleOffset;
   late final Animation<double> _progressValue;
   late final Animation<double> _footerOpacity;
-
-  static const Color _background = Color(0xFFF9FCF8);
 
   @override
   void initState() {
@@ -168,10 +325,17 @@ class _HomePilotAnimatedSplashScreenState
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (MediaQuery.disableAnimationsOf(context)) {
+      if (_intro.isAnimating) {
+        _intro.stop();
+      }
+      _intro.value = 1.0;
       if (_loop.isAnimating) {
         _loop.stop();
       }
     } else {
+      if (!_intro.isAnimating && !_intro.isCompleted) {
+        _intro.forward();
+      }
       if (!_loop.isAnimating) {
         _loop.repeat();
       }
@@ -188,10 +352,14 @@ class _HomePilotAnimatedSplashScreenState
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final l10n = lookupAppLocalizations(_supportedSplashLocale(widget.locale));
+    final compact = media.size.height < 520 || media.textScaler.scale(1) >= 1.8;
+    final minimumLogoSize = compact ? 84.0 : 140.0;
+    final logoHeightFraction = compact ? 0.26 : 0.38;
     final shortest = media.size.shortestSide;
     final logoSize = math.min(
-      shortest.clamp(140.0, 430.0),
-      (media.size.height * 0.38).clamp(140.0, 430.0),
+      shortest.clamp(minimumLogoSize, 430.0),
+      (media.size.height * logoHeightFraction).clamp(minimumLogoSize, 430.0),
     );
     final horizontalPadding = (media.size.width * 0.075).clamp(16.0, 44.0);
 
@@ -200,80 +368,86 @@ class _HomePilotAnimatedSplashScreenState
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: _background,
+        systemNavigationBarColor: homePilotSplashBackground,
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
       child: AbsorbPointer(
         absorbing: true,
         child: Semantics(
           container: true,
-          label: 'Starting HomePilot',
-          value: 'Works online and offline',
-          child: Scaffold(
-            backgroundColor: _background,
-            body: SafeArea(
-              child: AnimatedBuilder(
-                animation: Listenable.merge([_intro, _loop]),
-                builder: (context, _) {
-                  return Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      CustomPaint(
-                        painter: _HomePilotSplashBackgroundPainter(
-                          loopValue: _loop.value,
-                          introValue: _intro.value,
+          label: l10n.startupStartingHomePilot,
+          textDirection: _splashTextDirection(widget.locale),
+          child: ExcludeSemantics(
+            child: Scaffold(
+              backgroundColor: homePilotSplashBackground,
+              body: SafeArea(
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_intro, _loop]),
+                  builder: (context, _) {
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CustomPaint(
+                          painter: _HomePilotSplashBackgroundPainter(
+                            loopValue: _loop.value,
+                            introValue: _intro.value,
+                          ),
                         ),
-                      ),
 
-                      Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: horizontalPadding,
-                        ),
-                        child: Column(
-                          children: [
-                            const Spacer(flex: 9),
+                        Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
+                          child: Column(
+                            children: [
+                              const Spacer(flex: 9),
 
-                            Transform.translate(
-                              offset: Offset(0, _logoLift.value),
-                              child: FadeTransition(
-                                opacity: _logoOpacity,
-                                child: ScaleTransition(
-                                  scale: _logoScale,
-                                  child: _AnimatedSplashIcon(
-                                    assetPath: widget.assetPath,
-                                    size: logoSize,
-                                    loopValue: _loop.value,
+                              Transform.translate(
+                                offset: Offset(0, _logoLift.value),
+                                child: FadeTransition(
+                                  opacity: _logoOpacity,
+                                  child: ScaleTransition(
+                                    scale: _logoScale,
+                                    child: _AnimatedSplashIcon(
+                                      assetPath: widget.assetPath,
+                                      size: logoSize,
+                                      loopValue: _loop.value,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
 
-                            const SizedBox(height: 18),
+                              SizedBox(height: compact ? 8 : 18),
 
-                            FadeTransition(
-                              opacity: _titleOpacity,
-                              child: SlideTransition(
-                                position: _titleOffset,
-                                child: const _SplashTitle(),
+                              FadeTransition(
+                                opacity: _titleOpacity,
+                                child: SlideTransition(
+                                  position: _titleOffset,
+                                  child: _SplashTitle(
+                                    tagline: l10n.homePilotSplashTagline,
+                                    compact: compact,
+                                  ),
+                                ),
                               ),
-                            ),
 
-                            const Spacer(flex: 7),
+                              const Spacer(flex: 7),
 
-                            _LoadingSection(
-                              value: _progressValue.value,
-                              statusText: 'Starting HomePilot',
-                              footerText: 'Works online and offline',
-                              footerOpacity: _footerOpacity.value,
-                            ),
+                              _LoadingSection(
+                                value: _progressValue.value,
+                                statusText: l10n.startupStartingHomePilot,
+                                footerText: l10n.worksOnlineAndOffline,
+                                footerOpacity: _footerOpacity.value,
+                                compact: compact,
+                              ),
 
-                            const Spacer(flex: 3),
-                          ],
+                              const Spacer(flex: 3),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -364,7 +538,10 @@ class _AnimatedSplashIcon extends StatelessWidget {
 }
 
 class _SplashTitle extends StatelessWidget {
-  const _SplashTitle();
+  const _SplashTitle({required this.tagline, required this.compact});
+
+  final String tagline;
+  final bool compact;
 
   static const Color _navy = Color(0xFF0B1726);
   static const Color _green = Color(0xFF159A3B);
@@ -379,6 +556,7 @@ class _SplashTitle extends StatelessWidget {
       children: [
         RichText(
           textAlign: TextAlign.center,
+          textDirection: TextDirection.ltr,
           text: TextSpan(
             children: [
               TextSpan(
@@ -404,17 +582,19 @@ class _SplashTitle extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        const Text(
-          'Your tasks, routines, and reminders\nall in sync.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: _muted,
-            fontSize: 16.5,
-            height: 1.45,
-            fontWeight: FontWeight.w500,
+        if (!compact) ...[
+          const SizedBox(height: 12),
+          Text(
+            tagline,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _muted,
+              fontSize: 16.5,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -426,12 +606,14 @@ class _LoadingSection extends StatelessWidget {
     required this.statusText,
     required this.footerText,
     required this.footerOpacity,
+    required this.compact,
   });
 
   final double value;
   final String statusText;
   final String footerText;
   final double footerOpacity;
+  final bool compact;
 
   static const Color _green = Color(0xFF159A3B);
   static const Color _muted = Color(0xFF5F6B76);
@@ -487,7 +669,7 @@ class _LoadingSection extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(height: 18),
+        SizedBox(height: compact ? 8 : 18),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 240),
           child: Text(
@@ -502,18 +684,20 @@ class _LoadingSection extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        Opacity(
-          opacity: footerOpacity.clamp(0.0, 1.0),
-          child: Text(
-            footerText,
-            style: const TextStyle(
-              color: Color(0xFF7B858F),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w500,
+        if (!compact) ...[
+          const SizedBox(height: 8),
+          Opacity(
+            opacity: footerOpacity.clamp(0.0, 1.0),
+            child: Text(
+              footerText,
+              style: const TextStyle(
+                color: Color(0xFF7B858F),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -539,7 +723,11 @@ class _HomePilotSplashBackgroundPainter extends CustomPainter {
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [Color(0xFFF9FCF8), Color(0xFFF4FAF5), Color(0xFFFFFFFF)],
+        colors: [
+          homePilotSplashBackground,
+          Color(0xFFF4FAF5),
+          Color(0xFFFFFFFF),
+        ],
       ).createShader(rect);
     canvas.drawRect(rect, bg);
 

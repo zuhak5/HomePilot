@@ -325,12 +325,36 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showUndoToast(
     onFinalize: onFinalize,
     actionLabel: actionLabel ?? context.l10n.undo,
     duration: duration,
+    batchItemType: 'completion',
   );
 }
 
 ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
 showTaskMovedToTrashSnackBar(
   BuildContext context, {
+  required FutureOr<void> Function() onUndo,
+  FutureOr<void> Function()? onFinalize,
+  String? actionLabel,
+  Duration duration = const Duration(seconds: 5),
+  double? bottomOffset,
+  bool reserveFloatingActionButton = false,
+}) {
+  return showMovedToTrashSnackBar(
+    context,
+    content: Text(context.l10n.taskMovedToTrash),
+    onUndo: onUndo,
+    onFinalize: onFinalize,
+    actionLabel: actionLabel,
+    duration: duration,
+    bottomOffset: bottomOffset,
+    reserveFloatingActionButton: reserveFloatingActionButton,
+  );
+}
+
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+showMovedToTrashSnackBar(
+  BuildContext context, {
+  required Widget content,
   required FutureOr<void> Function() onUndo,
   FutureOr<void> Function()? onFinalize,
   String? actionLabel,
@@ -347,7 +371,7 @@ showTaskMovedToTrashSnackBar(
       : 0.0;
   return _showUndoSnackBar(
     context,
-    content: Text(context.l10n.taskMovedToTrash),
+    content: content,
     onUndo: onUndo,
     onFinalize: onFinalize,
     actionLabel: actionLabel ?? context.l10n.undo,
@@ -360,6 +384,10 @@ showTaskMovedToTrashSnackBar(
           math.max(safeBottom, keyboardBottom) +
               kHomePilotSnackBarBottomSpacing,
     ),
+    batchItemType: 'trash',
+    batchMessageBuilder: (count) => count == 1
+        ? Text(context.l10n.taskMovedToTrash)
+        : Text('${context.l10n.trashItemCount(count)} · ${context.l10n.trash}'),
   );
 }
 
@@ -372,6 +400,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _showUndoSnackBar(
   required Duration duration,
   EdgeInsetsGeometry? margin,
   String? batchItemType,
+  Widget Function(int count)? batchMessageBuilder,
 }) {
   final item = HkFeedbackItem(
     id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -381,150 +410,11 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _showUndoSnackBar(
     onUndo: onUndo,
     onFinalize: onFinalize,
     duration: duration,
-    batchItemType: batchItemType ?? 'trash',
+    batchItemType: batchItemType,
+    batchMessageBuilder: batchMessageBuilder,
+    margin: margin,
   );
   return FeedbackCoordinator.instance.show(context, item);
-}
-
-class TaskDeletionSnackBarContent extends StatelessWidget {
-  const TaskDeletionSnackBarContent({
-    required this.content,
-    required this.duration,
-    super.key,
-  });
-
-  final Widget content;
-  final Duration duration;
-
-  @override
-  Widget build(BuildContext context) {
-    return _TaskDeletionSnackBarContentBody(
-      content: content,
-      duration: duration,
-    );
-  }
-}
-
-class _TaskDeletionSnackBarContentBody extends StatefulWidget {
-  const _TaskDeletionSnackBarContentBody({
-    required this.content,
-    required this.duration,
-  });
-
-  final Widget content;
-  final Duration duration;
-
-  @override
-  State<_TaskDeletionSnackBarContentBody> createState() =>
-      _TaskDeletionSnackBarContentBodyState();
-}
-
-class _TaskDeletionSnackBarContentBodyState
-    extends State<_TaskDeletionSnackBarContentBody> {
-  late final DateTime _deadline = DateTime.now().add(widget.duration);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final snackBarColors = HkSnackBarColors.of(context);
-    final contentStyle =
-        theme.snackBarTheme.contentTextStyle ??
-        theme.textTheme.bodyMedium?.copyWith(
-          color: snackBarColors.foreground,
-        ) ??
-        TextStyle(color: snackBarColors.foreground);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        DefaultTextStyle.merge(style: contentStyle, child: widget.content),
-        const SizedBox(height: 8),
-        _UndoCountdownBar(deadline: _deadline, duration: widget.duration),
-      ],
-    );
-  }
-}
-
-class _UndoCountdownBar extends StatefulWidget {
-  const _UndoCountdownBar({required this.deadline, required this.duration});
-
-  final DateTime deadline;
-  final Duration duration;
-
-  @override
-  State<_UndoCountdownBar> createState() => _UndoCountdownBarState();
-}
-
-class _UndoCountdownBarState extends State<_UndoCountdownBar> {
-  static const _tick = Duration(milliseconds: 250);
-  Timer? _timer;
-  late Duration _remaining;
-
-  @override
-  void initState() {
-    super.initState();
-    _remaining = widget.duration;
-    _timer = Timer.periodic(_tick, (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        final nextRemaining = _remaining - _tick;
-        _remaining = nextRemaining.isNegative ? Duration.zero : nextRemaining;
-      });
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _UndoCountdownBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.duration != widget.duration) {
-      _remaining = widget.duration;
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final snackBarColors = HkSnackBarColors.of(context);
-    final clamped = _remaining;
-    final progress = clamped.inMilliseconds / widget.duration.inMilliseconds;
-    final displaySeconds = clamped == Duration.zero
-        ? 0
-        : (clamped.inMilliseconds + 999) ~/ 1000;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Align(
-          alignment: AlignmentDirectional.centerEnd,
-          child: Text(
-            '${displaySeconds}s',
-            key: const ValueKey('undo-countdown'),
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: snackBarColors.foreground,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
-        const SizedBox(height: 3),
-        LinearProgressIndicator(
-          key: const ValueKey('undo-progress'),
-          value: progress.clamp(0.0, 1.0),
-          minHeight: 3,
-          backgroundColor: snackBarColors.progressTrack,
-          valueColor: AlwaysStoppedAnimation<Color>(
-            snackBarColors.progressFill,
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 bool _reduceMotion(BuildContext context) {

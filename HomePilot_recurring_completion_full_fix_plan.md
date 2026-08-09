@@ -1,5 +1,7 @@
 # HomePilot Recurring Maintenance Completion — Full Fix Plan
 
+> **Historical plan:** This baseline-specific remediation plan is retained for traceability. It is not current operational guidance or release evidence. Current recurrence, synchronization, migration, and test sources are authoritative.
+
 **Repository:** `zuhak5/HomePilot`  
 **Target:** current `main` after release `1.4.6 (Build 32)`  
 **Primary affected flow:** recurring maintenance task `Complete` / sync / next recurrence / `Complete`  

@@ -2,17 +2,20 @@
 
 ## Purpose
 
-VersionDeck is the public static download site for verified HomePilot APK releases. It is not the build system and does not trust release notes alone. It independently verifies release artifacts before enabling downloads.
+VersionDeck is the public static site for verified HomePilot APK releases and HomePilot's external account-deletion page. The release area is not the build system and does not trust release notes alone; it independently verifies release artifacts before enabling downloads. The account-deletion area is a separate authenticated client of the protected Supabase deletion backend and must not affect release trust.
 
 The authoritative implementation is:
 
 - `download-site/`
 - `tool/generate_versiondeck_manifest.mjs`
 - `tool/versiondeck_apk_verifier.mjs`
+- `tool/build_account_deletion_site.mjs`
 - `tool/build_versiondeck_site.mjs`
 - `tool/validate_versiondeck.mjs`
 - current `tool/*.test.mjs` VersionDeck tests
 - `.github/workflows/deploy-download-site.yml`
+
+The deletion backend authority is [`supabase/functions/delete-account/index.ts`](../supabase/functions/delete-account/index.ts). Pages contains only public configuration and browser code; it never contains service-role credentials.
 
 ## Trust model
 
@@ -29,15 +32,23 @@ A release is downloadable only when the pipeline can verify the expected propert
 
 Live workflow status is informational. It must not grant download trust to an in-progress artifact.
 
+## Account-deletion surface
+
+The canonical page is `https://zuhak5.github.io/HomePilot/account-deletion.html`. Its browser flow uses Google OAuth with PKCE, consumes the callback verifier from `sessionStorage`, and keeps the resulting access token only in the current page's JavaScript memory. A page reload requires a new sign-in. Destructive controls remain hidden until identity lookup; the page then shows a masked account identity and keeps the delete button disabled until the user selects an explicit permanent-deletion confirmation.
+
+The page reports success only after `POST /functions/v1/delete-account` returns a successful response containing `deleted: true`, `status: "deleted"`, and the authenticated user's exact `user_id`. Redirect completion, Google sign-in, or a generic successful HTTP status is not deletion evidence. The browser page performs remote deletion only; it cannot erase installed-device databases, media, notifications, caches, secure storage, or user-exported backups.
+
+Public configuration is generated during the static build. See [`reference/configuration.md`](reference/configuration.md#public-browser-account-deletion) for the three required repository variables and their validation rules.
+
 ## Workflow triggers and release handoff
 
-VersionDeck retains separate triggers for distinct operational needs:
+VersionDeck keeps validation and production publication deliberately separate:
 
 - Pull requests validate VersionDeck source changes without deploying.
-- Relevant pushes to `main` rebuild the site after VersionDeck source or runbook changes.
-- Release lifecycle events rebuild the manifest after a release is edited, deleted, unpublished, promoted, or otherwise changed.
-- Manual dispatch supports an explicitly requested rebuild.
 - A `workflow_run` handoff starts VersionDeck after the protected **Build Production APK** workflow completes successfully on `main`.
+- Manual dispatch is a recovery path and requires the run ID of a successful **Build Production APK** run for the current `main` SHA.
+
+Push and GitHub Release events do not deploy Pages. This prevents a source push or the APK workflow's intermediate Release publication step from racing the required backend, AAB, APK, and final VersionDeck sequence.
 
 The automated production handoff is deliberately fail-closed:
 
@@ -45,10 +56,10 @@ The automated production handoff is deliberately fail-closed:
 2. The upstream event must be `workflow_dispatch`.
 3. The upstream branch must be `main`.
 4. The upstream conclusion must be `success`.
-5. The upstream build commit must remain an ancestor of the current `main`.
+5. The upstream build commit must exactly equal the current `main` SHA and the checked-out VersionDeck source.
 6. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
 
-Failed, cancelled, skipped, or non-production upstream runs do not deploy VersionDeck. Release lifecycle triggers remain necessary because operators can edit or remove releases independently of a new APK build. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
+Failed, cancelled, skipped, stale-SHA, or non-production upstream runs do not deploy VersionDeck. Release edits or removals require a reviewed recovery dispatch tied to the successful current-SHA APK run; they do not bypass artifact provenance. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
 
 The upstream production workflow is manual and protected. Do not broaden the `workflow_run` source to an untrusted pull-request workflow because downstream workflows can receive repository permissions unavailable to the upstream run.
 
@@ -62,24 +73,28 @@ For changes affecting VersionDeck:
 4. Run `tool/validate_versiondeck.mjs` on the generated artifact.
 5. Review accessibility, reduced motion, responsive behavior, stale/error/offline states, and service-worker changes.
 
+Pull-request builds must pass `--allow-inert-account-deletion-config true` explicitly to `tool/build_versiondeck_site.mjs`. This creates a disabled, non-production configuration only for static validation. Browser sign-in must remain disabled in that artifact, and the flag must never appear in the production build step.
+
 The workflow currently enumerates test files explicitly. When a new focused test file is added, update the canonical test command and workflow together so it cannot be skipped.
 
 ## Main/release deployment
 
 The deployment workflow:
 
-1. Validates the trigger and, for `workflow_run`, confirms the successful protected production-build handoff.
-2. Checks out the current `main` source and verifies it matches `origin/main`.
-3. Confirms a chained production-build commit remains in the current `main` history.
+1. Validates the trigger and confirms the successful protected production-build handoff (or the explicitly supplied recovery run ID).
+2. Checks out the APK run's source and verifies it exactly matches `origin/main`.
+3. Confirms the APK run, checked-out source, and deployment source are the same SHA.
 4. Confirms required GitHub and Android verification tools.
 5. Runs syntax checks and tests.
 6. Discovers releases and independently verifies candidate APKs.
 7. Generates the release manifest and diagnostics.
-8. Builds revisioned static assets.
+8. Requires and validates the three public account-deletion variables, then builds revisioned static assets. Missing or mismatched production values fail before site output is replaced or emitted.
 9. Validates the site.
 10. Uploads diagnostics and the Pages artifact.
 11. Deploys GitHub Pages with protected permissions. The Pages action may poll for up to 20 minutes before declaring a deployment timeout, while the deployment job allows additional time for the public-manifest check.
 12. Verifies the public manifest after deployment.
+
+The Pages workflow does not deploy the `delete-account` Edge Function and does not perform a destructive hosted browser test. Deploy and verify the compatible Edge Function first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.
 
 The Pages workflow uses the current Node.js 24-compatible major versions of `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`. Upgrade these actions together when GitHub publishes a new supported major so the artifact and deployment contracts remain aligned.
 
@@ -100,6 +115,9 @@ The Pages workflow uses the current Node.js 24-compatible major versions of `act
 - Expired, missing, malformed, or unverifiable release metadata must disable or clearly constrain downloads.
 - Offline UI must distinguish cached verified release data from live build status.
 - Do not cache secrets or GitHub tokens in static assets.
+- Treat `account-deletion.html` as a network-only navigation with `cache: "no-store"`. It must not overwrite the cached VersionDeck root and must never fall back to cached `index.html`.
+- Keep account-deletion HTML, CSS, JavaScript, and generated public configuration out of the application-shell precache. The build adds a source-revision query to deletion CSS, JavaScript, and configuration URLs.
+- When deletion navigation is offline under service-worker control, return the explicit network-required `503` response. Never render the cached release page as if it were the deletion flow.
 
 ## Build-status rules
 
@@ -127,9 +145,11 @@ Validate:
 - Do not bypass package, signer, checksum, ancestry, or provenance checks.
 - Do not expose a token in the public site to obtain richer live status.
 - If the production build fails or is cancelled, do not manually represent it as a verified release.
-- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually only after confirming the release evidence.
+- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually with that successful current-SHA APK run ID only after confirming the release evidence.
 - If `actions/deploy-pages` remains `deployment_in_progress` until its timeout, confirm that no Pages deployment is still active or queued, retain the existing live site, and rerun the VersionDeck workflow. Do not rebuild or republish the APK solely because Pages timed out.
 - If Pages deploys bad static behavior, correct source and redeploy; do not change verified release metadata independently.
+- If any required public deletion-site variable is absent or rejected, leave the current live site untouched and correct repository configuration. Never enable the inert pull-request flag in production.
+- If the hosted function, Google callback, CORS contract, or strict receipt check fails, do not describe browser deletion as operational. Retain the in-app method, correct the backend/configuration, and rerun hosted smoke validation.
 
 ## Post-deployment checks
 
@@ -142,6 +162,33 @@ Validate:
 - Verify service-worker update behavior.
 - Verify live build status does not replace stable download identity.
 
+### Account-deletion hosted smoke
+
+Use a disposable Google/Supabase account with non-sensitive test rows and private test media. Do not use a personal account, and do not put an access token, OAuth code, email address, user ID, or raw deletion response in logs, screenshots, workflow summaries, or retained artifacts.
+
+1. Confirm the reviewed `delete-account` function version is deployed to the intended Supabase project and that the canonical deletion URL is allowlisted in Supabase Auth redirect configuration.
+2. Confirm the repository variables documented in [`reference/configuration.md`](reference/configuration.md#public-browser-account-deletion) are set, then record the successful VersionDeck build and Pages deployment revisions.
+3. In a fresh browser profile, load the canonical deletion page. It must not show the unavailable-configuration state, and browser developer tools must show revisioned same-origin deletion assets with no service-role value.
+4. Verify the production preflight independently:
+
+   ```powershell
+   curl.exe --silent --show-error --dump-header - --output NUL --request OPTIONS `
+     --header "Origin: https://zuhak5.github.io" `
+     --header "Access-Control-Request-Method: POST" `
+     --header "Access-Control-Request-Headers: authorization,apikey,content-type" `
+     "https://iajvkvvvhwjdiuaufymh.supabase.co/functions/v1/delete-account"
+   ```
+
+   Expect HTTP `204`, `Access-Control-Allow-Origin: https://zuhak5.github.io`, `Vary: Origin`, and the documented methods and headers. Repeat with an unapproved origin and expect rejection with no allow-origin header. Do not use wildcard expectations.
+5. Start Google sign-in and verify the browser returns to the exact canonical callback, removes OAuth parameters from the address bar, shows a generic verified-identity state without displaying an email address, and leaves deletion disabled until the confirmation checkbox is selected.
+6. Submit deletion once. Confirm the browser reports success only after the strict receipt check. In protected backend tooling, verify the disposable Auth user, owned Postgres rows, and private `user-media` objects are removed. Redact the matching `user_id` from retained evidence.
+7. Confirm an installed test client for that deleted account observes a revoked/deleted session and follows local cleanup or recovery. Record this separately: the browser receipt alone cannot prove device-local cleanup.
+8. With a VersionDeck service worker already controlling the site, switch the browser offline and reload the deletion URL. Expect the explicit network-required response, never cached release content or a deletion-success state.
+
+If any hosted check fails, the external flow is not release-ready even when local Node, Deno, and static-site validation pass.
+
 ## Evidence
 
 Record the production workflow run, production source commit, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
+
+For account deletion, additionally record the Edge Function project/version, Supabase Auth callback configuration review, public-config validation, allowed and denied preflight results, revisioned-asset observation, disposable-account OAuth result, strict receipt validation with identifiers redacted, Auth/Postgres/Storage cleanup checks, device-local limitation/result, offline network-only result, operator, and timestamp. Clearly label local automated evidence separately from hosted-service and device evidence.

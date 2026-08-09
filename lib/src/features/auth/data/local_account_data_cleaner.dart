@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../../core/sync/local_sync_store.dart';
 
 typedef AccountDataDirectoryProvider = Future<Directory> Function();
+typedef AdditionalAccountDataCleaner = Future<void> Function(String userId);
 
 class LocalAccountDataCleaner {
   LocalAccountDataCleaner(
@@ -31,7 +32,10 @@ class LocalAccountDataCleaner {
   final AccountDataDirectoryProvider _documentsDirectory;
   final AccountDataDirectoryProvider _cacheDirectory;
 
-  Future<void> clearAfterCloudDeletion(String userId) async {
+  Future<void> clearAfterCloudDeletion(
+    String userId, {
+    AdditionalAccountDataCleaner? additionalCleanup,
+  }) async {
     final account = await _store.account();
     if (account.boundUserId != null && account.boundUserId != userId) {
       throw StateError('Local data belongs to a different cloud identity.');
@@ -40,16 +44,25 @@ class LocalAccountDataCleaner {
     final documents = await _documentsDirectory();
     await documents.create(recursive: true);
     final marker = _marker(documents);
-    await marker.writeAsString('pending', flush: true);
+    await marker.writeAsString(userId, flush: true);
     await _clear(documents: documents, expectedUserId: userId);
+    await additionalCleanup?.call(userId);
     if (await marker.exists()) await marker.delete();
   }
 
-  Future<bool> resumePendingCleanup() async {
+  Future<bool> resumePendingCleanup({
+    AdditionalAccountDataCleaner? additionalCleanup,
+  }) async {
     final documents = await _documentsDirectory();
     final marker = _marker(documents);
     if (!await marker.exists()) return false;
+    final recordedUserId = (await marker.readAsString()).trim();
+    final existingAccount = await _store.existingAccount();
+    final userId = recordedUserId == 'pending' || recordedUserId.isEmpty
+        ? existingAccount?.boundUserId
+        : recordedUserId;
     await _clear(documents: documents);
+    if (userId != null) await additionalCleanup?.call(userId);
     if (await marker.exists()) await marker.delete();
     return true;
   }

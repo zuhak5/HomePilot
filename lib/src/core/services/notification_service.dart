@@ -15,6 +15,7 @@ import '../config/app_config.dart';
 import '../database/app_database.dart';
 import '../domain/contracts.dart';
 import '../domain/models.dart';
+import 'app_permission_coordinator.dart';
 import '../domain/task_selectors.dart';
 import '../supabase/supabase_bootstrap.dart';
 import '../sync/background_sync_scheduler.dart';
@@ -121,12 +122,14 @@ class HomePilotNotificationScheduler implements NotificationScheduler {
     NotificationInboxRepository? notificationInboxRepository,
     SettingsRepository? settingsRepository,
     WeatherRepository? weatherRepository,
+    AppPermissionGateway? permissionGateway,
     FlutterLocalNotificationsPlugin? plugin,
     void Function(String payload)? onNotificationPayload,
   }) : _notificationInboxRepository = notificationInboxRepository,
        _scheduleStore = scheduleStore ?? MemoryReminderScheduleStore(),
        _settingsRepository = settingsRepository,
        _weatherRepository = weatherRepository,
+       _permissionGateway = permissionGateway,
        _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
        _onNotificationPayload = onNotificationPayload;
 
@@ -135,6 +138,7 @@ class HomePilotNotificationScheduler implements NotificationScheduler {
   final NotificationInboxRepository? _notificationInboxRepository;
   final SettingsRepository? _settingsRepository;
   final WeatherRepository? _weatherRepository;
+  final AppPermissionGateway? _permissionGateway;
   final FlutterLocalNotificationsPlugin _plugin;
   final void Function(String payload)? _onNotificationPayload;
   bool _initialized = false;
@@ -204,13 +208,13 @@ class HomePilotNotificationScheduler implements NotificationScheduler {
 
   @override
   Future<void> requestPermissions({bool exactAlarms = false}) async {
-    final android = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    await android?.requestNotificationsPermission();
+    final gateway = _permissionGateway;
+    if (gateway == null) {
+      throw StateError('Permission requests require an AppPermissionGateway.');
+    }
+    await gateway.request(AppPermissionKind.notifications);
     if (exactAlarms) {
-      await android?.requestExactAlarmsPermission();
+      await gateway.request(AppPermissionKind.exactAlarms);
     }
   }
 

@@ -4,12 +4,17 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { validateVersionDeckManifest } from "../download-site/manifest-schema.js";
+import { validateAccountDeletionPublicConfig } from "./build_account_deletion_site.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDirectory, "..");
 const site = path.resolve(root, process.argv[2] || "download-site");
 const requiredFiles = [
   "index.html",
+  "account-deletion.html",
+  "account-deletion.css",
+  "account-deletion.js",
+  "account-deletion-config.js",
   "styles.css",
   "enhancements.css",
   "security.css",
@@ -58,6 +63,7 @@ const requiredHtml = [
   'id="build-toast-dismiss"',
   'type="module" src="app.js"',
   "Content-Security-Policy",
+  'href="account-deletion.html"',
 ];
 for (const marker of requiredHtml) {
   if (!html.includes(marker)) throw new Error(`index.html is missing ${marker}`);
@@ -91,6 +97,103 @@ for (const directive of [
 ]) {
   if (!html.includes(directive)) throw new Error(`Content Security Policy is missing ${directive}`);
 }
+
+const accountDeletionHtml = await fs.readFile(
+  path.join(site, "account-deletion.html"),
+  "utf8",
+);
+for (const marker of [
+  'id="btn-authenticate"',
+  'id="btn-delete"',
+  'id="confirm-deletion"',
+  'id="authenticated-identity"',
+  "https://github.com/zuhak5/HomePilot/blob/main/PRIVACY.md",
+  "https://github.com/zuhak5/HomePilot/issues",
+]) {
+  if (!accountDeletionHtml.includes(marker)) {
+    throw new Error(`account-deletion.html is missing ${marker}`);
+  }
+}
+for (const asset of [
+  "account-deletion.css",
+  "account-deletion-config.js",
+  "account-deletion.js",
+]) {
+  if (!new RegExp(`${asset.replaceAll(".", "\\.")}\\?v=[a-f\\d]{40}`, "i").test(accountDeletionHtml)) {
+    throw new Error(`account-deletion.html must load a revisioned ${asset} asset.`);
+  }
+}
+if (
+  accountDeletionHtml.indexOf("account-deletion-config.js") >
+    accountDeletionHtml.indexOf("account-deletion.js")
+) {
+  throw new Error("Account-deletion public config must load before the page module.");
+}
+if (/<script(?![^>]*\bsrc=)/i.test(accountDeletionHtml)) {
+  throw new Error("Inline scripts are not allowed on the account-deletion page.");
+}
+if (/<style\b/i.test(accountDeletionHtml)) {
+  throw new Error("Inline styles are not allowed on the account-deletion page.");
+}
+if (/\son[a-z]+\s*=/i.test(accountDeletionHtml)) {
+  throw new Error("Inline event handlers are not allowed on the account-deletion page.");
+}
+for (const directive of [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src https://iajvkvvvhwjdiuaufymh.supabase.co",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-src 'none'",
+]) {
+  if (!accountDeletionHtml.includes(directive)) {
+    throw new Error(`Account-deletion Content Security Policy is missing ${directive}`);
+  }
+}
+if (/['"]unsafe-(?:inline|eval)['"]/.test(accountDeletionHtml)) {
+  throw new Error("Account-deletion Content Security Policy must not allow unsafe scripts or styles.");
+}
+
+const accountDeletionScript = await fs.readFile(
+  path.join(site, "account-deletion.js"),
+  "utf8",
+);
+for (const marker of [
+  "/auth/v1/authorize",
+  "/auth/v1/token?grant_type=pkce",
+  "/auth/v1/user",
+  "/functions/v1/delete-account",
+  'receipt.deleted !== true',
+  'receipt.status !== "deleted"',
+  "receipt.user_id !== expectedUserId",
+]) {
+  if (!accountDeletionScript.includes(marker)) {
+    throw new Error(`account-deletion.js is missing ${marker}`);
+  }
+}
+for (const forbidden of ["localStorage", "setTimeout(", "console."]) {
+  if (accountDeletionScript.includes(forbidden)) {
+    throw new Error(`account-deletion.js contains forbidden browser behavior: ${forbidden}`);
+  }
+}
+
+const accountDeletionConfigSource = await fs.readFile(
+  path.join(site, "account-deletion-config.js"),
+  "utf8",
+);
+const accountDeletionConfigMatch = accountDeletionConfigSource.match(
+  /^globalThis\.HOME_PILOT_ACCOUNT_DELETION_CONFIG = Object\.freeze\(([\s\S]+)\);\s*$/,
+);
+if (!accountDeletionConfigMatch) {
+  throw new Error("Generated account-deletion public config has an unexpected format.");
+}
+const accountDeletionConfig = JSON.parse(accountDeletionConfigMatch[1]);
+validateAccountDeletionPublicConfig(
+  accountDeletionConfig,
+  { allowInert: true },
+);
 
 const buildStatusUiCss = await fs.readFile(path.join(site, "build-status-ui.css"), "utf8");
 for (const marker of [
@@ -147,6 +250,19 @@ for (const asset of [
 }
 if (!serviceWorker.includes('fetch(request, { cache: "no-store" })')) {
   throw new Error("Service worker must fetch releases.json without storage caching.");
+}
+for (const marker of [
+  'relativePath === "account-deletion.html"',
+  "networkOnlyAccountDeletionNavigation(request)",
+  'relativePath === "" || relativePath === "index.html"',
+  "Account deletion requires a network connection",
+]) {
+  if (!serviceWorker.includes(marker)) {
+    throw new Error(`Service worker is missing account-deletion isolation: ${marker}`);
+  }
+}
+if (appShellMatch[1].includes("account-deletion")) {
+  throw new Error("Account-deletion assets must not be stored in the offline app shell.");
 }
 
 const buildInfo = JSON.parse(await fs.readFile(path.join(site, "build-info.json"), "utf8"));

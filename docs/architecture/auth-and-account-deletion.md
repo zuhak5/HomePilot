@@ -49,7 +49,7 @@ Sign-out is not account deletion. Cloud data remains unless the deletion workflo
 
 Account deletion must remove the authenticated cloud account and associated private data while preventing another Google identity, stale session, queued synchronization work, or partial cleanup from producing inconsistent results.
 
-## Deletion sequence
+## In-app deletion sequence
 
 1. Explain consequences and obtain explicit confirmation.
 2. Require recent Google reauthentication.
@@ -63,6 +63,30 @@ Account deletion must remove the authenticated cloud account and associated priv
 10. The client verifies the result and completes local database, media, session, notification, cache, and provider cleanup.
 11. Restart recovery finishes local cleanup when cloud deletion succeeded but the client stopped before completion.
 
+## Browser deletion sequence
+
+The public account-deletion page is a separate, remote-only client of the same protected backend. Its executable contract is [`download-site/account-deletion.js`](../../download-site/account-deletion.js); it does not reuse a session from an installed HomePilot application.
+
+1. The production static-site build injects the public Supabase URL, public publishable/anonymous key, and canonical callback URL. If that public configuration is missing, disabled, malformed, or points elsewhere, the page keeps sign-in disabled and reports that deletion is unavailable.
+2. The page creates a random PKCE verifier and SHA-256 challenge. It keeps the verifier temporarily in `sessionStorage` so the OAuth callback can consume it; it does not store an access token or refresh token there.
+3. The browser redirects to the Supabase Google authorization endpoint with the PKCE challenge and the exact canonical deletion-page callback.
+4. On callback, the page removes OAuth parameters from the address bar, consumes and removes the verifier, exchanges the authorization code, and verifies the returned user through Supabase Auth.
+5. The access token remains only in the current page's JavaScript memory. Reloading or closing the page requires a new Google sign-in.
+6. The page shows a masked account identity and requires a separate permanent-deletion checkbox before enabling the destructive action.
+7. The page sends `POST /functions/v1/delete-account` with the bearer token, public API key, and `{ "confirmation": "delete-my-account" }`.
+8. Success is accepted only for a successful HTTP response whose JSON contains all three required values consistent with the verified account: `deleted` is `true`, `status` is `deleted`, and `user_id` equals the user ID returned by the authenticated-user lookup. Missing, malformed, pending, or mismatched receipts remain failures.
+9. After a valid receipt, the page attempts local Supabase sign-out, discards its in-memory identity and token, and reports remote deletion complete without displaying backend identifiers.
+
+The browser can remove the Supabase account, synchronized Postgres data, and private Supabase Storage handled by the backend. It cannot directly inspect or erase Drift data, media, notifications, secure storage, caches, or exported backups on an installed device. A subsequently opened installation must handle the revoked/deleted session and finish its ordinary local cleanup or recovery path. Therefore a successful browser receipt is evidence of remote deletion, not evidence that every device-local copy or user-exported backup was erased.
+
+## Browser security boundaries
+
+- The generated page receives only public Supabase configuration. Service-role credentials remain exclusively in the Edge Function environment.
+- OAuth PKCE protects the authorization-code exchange; the access token is never written to persistent browser storage or logged.
+- CORS limits which supported browser origins can read the function response, but it is not authorization. The Edge Function still derives the user from the verified bearer token, requires confirmation, and checks recent session state.
+- The displayed identity is masked. Operators must not capture access tokens, OAuth codes, full email addresses, user IDs, or response bodies containing identifiers in smoke-test evidence.
+- An offline account-deletion navigation fails with a network-required response. It must never receive the cached VersionDeck home page or claim deletion succeeded.
+
 ## Partial failure handling
 
 ### Reauthentication cancelled or wrong account
@@ -72,6 +96,8 @@ Do not call the deletion function. Restore ordinary account state without deleti
 ### Offline before backend deletion
 
 Do not pretend deletion succeeded. Keep the account and local data intact, and allow retry after connectivity returns.
+
+For the browser flow, an unavailable network or unreadable/mismatched receipt leaves the page in a retryable failure state. The browser must not infer completion from a redirect, a successful Google interaction, or an HTTP response alone.
 
 ### Remote cleanup partially fails
 
@@ -104,6 +130,8 @@ Review at least:
 ## Tests
 
 Cover successful deletion, cancellation, wrong Google account, stale session, revoked session, offline start, backend retry, private-media failure, duplicate deletion request, cloud success/local failure, process restart, and pending synchronization work.
+
+Browser-focused coverage additionally verifies PKCE request construction, code exchange, authenticated-user lookup, exact receipt matching, best-effort sign-out, public-config rejection, confirmation gating, revisioned assets, service-worker isolation, allowed and denied CORS origins, and successful native requests without an `Origin` header. A hosted disposable-account test is still required because local tests cannot prove Google OAuth configuration, hosted Edge Function deployment, Auth deletion, Postgres cleanup, or private Storage cleanup.
 
 ## Privacy and support
 

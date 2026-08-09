@@ -435,6 +435,30 @@ abstract class AppLocalizations {
   /// **'Needs access'**
   String get needsAccess;
 
+  /// No description provided for @limited.
+  ///
+  /// In en, this message translates to:
+  /// **'Limited'**
+  String get limited;
+
+  /// No description provided for @unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get unavailable;
+
+  /// No description provided for @configuredManually.
+  ///
+  /// In en, this message translates to:
+  /// **'Configured manually'**
+  String get configuredManually;
+
+  /// No description provided for @approximateTiming.
+  ///
+  /// In en, this message translates to:
+  /// **'Approximate timing'**
+  String get approximateTiming;
+
   /// No description provided for @preferences.
   ///
   /// In en, this message translates to:
@@ -4815,6 +4839,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Starting HomePilot'**
   String get startupStartingHomePilot;
+
+  /// Decorative tagline shown on the process startup splash.
+  ///
+  /// In en, this message translates to:
+  /// **'Your tasks, routines, and reminders\nall in sync.'**
+  String get homePilotSplashTagline;
 
   /// No description provided for @startupLoadedPreferences.
   ///

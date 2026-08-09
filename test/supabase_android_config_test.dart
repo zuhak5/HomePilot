@@ -28,6 +28,32 @@ void main() {
     expect(gradle, isNot(contains('authRedirectScheme')));
   });
 
+  test('Google Services and direct Firebase Analytics stay removed', () {
+    final appGradle = File('android/app/build.gradle.kts').readAsStringSync();
+    final rootGradle = File('android/build.gradle.kts').readAsStringSync();
+    final settingsGradle = File(
+      'android/settings.gradle.kts',
+    ).readAsStringSync();
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final gitignore = File('.gitignore').readAsStringSync();
+
+    for (final gradle in [appGradle, rootGradle, settingsGradle]) {
+      expect(gradle, isNot(contains('com.google.firebase:firebase-analytics')));
+      expect(gradle, isNot(contains('com.google.gms.google-services')));
+      expect(
+        gradle.contains('google-services.json') && gradle.contains('.exists'),
+        isFalse,
+      );
+    }
+    expect(pubspec, isNot(contains('firebase_analytics:')));
+    expect(
+      File('android/app/google-services.json.example').existsSync(),
+      isFalse,
+    );
+    expect(gitignore, contains('/android/app/google-services.json'));
+    expect(gitignore, contains('/android/app/src/*/google-services.json'));
+  });
+
   test('production Android builds reject missing Supabase Dart defines', () {
     final gradle = File('android/app/build.gradle.kts').readAsStringSync();
 

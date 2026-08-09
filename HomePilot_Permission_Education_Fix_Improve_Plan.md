@@ -1,5 +1,7 @@
 # HomePilot Permission Education / Permission Onboarding — Full Fix & Improvement Plan
 
+> **Historical plan:** This baseline-specific proposal is retained for traceability. It is not the current permission contract or evidence of implementation. Current behavior is defined by the permission domain/controller/gateway sources, their tests, `docs/reference/routes-and-permissions.md`, and `PRIVACY.md`.
+
 **Repository:** `zuhak5/HomePilot`  
 **Baseline reviewed:** `main`  
 **Application baseline:** `1.4.3+28`  

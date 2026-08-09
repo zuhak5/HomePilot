@@ -56,6 +56,10 @@
   "allowed": "Allowed",
   "blocked": "Blocked",
   "needsAccess": "Needs access",
+  "limited": "Limited",
+  "unavailable": "Unavailable",
+  "configuredManually": "Configured manually",
+  "approximateTiming": "Approximate timing",
   "preferences": "Preferences",
   "enabled": "Enabled",
   "maintenanceWeatherAndDigestAlerts": "Maintenance, weather, and digest alerts",
@@ -1207,6 +1211,10 @@
   "backupProfilePreviewWarning": "Profile settings could not be previewed.",
   "backupGenericWarning": "This backup contains a compatibility warning. Review it before restoring.",
   "startupStartingHomePilot": "Starting HomePilot",
+  "homePilotSplashTagline": "Your tasks, routines, and reminders\nall in sync.",
+  "@homePilotSplashTagline": {
+    "description": "Decorative tagline shown on the process startup splash."
+  },
   "startupLoadedPreferences": "Loaded preferences",
   "startupOpeningHomePilot": "Opening HomePilot",
   "startupRestoringSession": "Restoring session",
@@ -1458,8 +1466,8 @@
   },
   "exactAlarmEducationTitle": "Keep reminders on time",
   "enableAlarmsAndRemindersOnboarding": "Enable reminders",
-  "permissionSetup": "Location, notifications, and reminders setup",
-  "permissionSetupSubtitle": "Review how HomePilot uses location and reminders.",
+  "permissionSetup": "Permissions & setup",
+  "permissionSetupSubtitle": "Choose a weather area, then control device reminders and optional precise timing.",
   "permissionsAlreadyEnabled": "Location, notifications, and reminders are already set up.",
   "permissionSetupFinishLater": "Finish later",
   "permissionSetupChooseLocation": "Choose location",
@@ -1472,4 +1480,18 @@
   "permissionSetupUseApproximateTiming": "Use approximate timing",
   "permissionSetupAllowPreciseTiming": "Allow precise timing",
   "permissionSetupManageInSettings": "Manage in settings"
+  ,"permissionSetupChangeLocation": "Change location"
+  ,"permissionSelectedArea": "Selected area: {area}"
+  ,"@permissionSelectedArea": {"placeholders": {"area": {"type": "String"}}}
+  ,"permissionUsingCurrentLocation": "Using current location"
+  ,"permissionLocationAccessRequired": "Location access is required to use the current location."
+  ,"permissionNotificationAccessRequired": "Android notification access is required for device reminders."
+  ,"permissionDeviceRemindersOff": "Device reminders are off in HomePilot."
+  ,"permissionExactRequiresDeviceReminders": "Turn on device reminders before enabling precise timing."
+  ,"permissionActionCouldNotComplete": "That action could not be completed. Try again."
+  ,"permissionSettingsCouldNotOpen": "Android settings could not be opened. Try again from device settings."
+  ,"homePilotAlerts": "HomePilot alerts"
+  ,"homePilotAlertsDescription": "Controls every HomePilot alert channel. Device reminders still require Android access."
+  ,"weatherAlertsInboxDescription": "Weather warnings shown in HomePilot's inbox; device delivery follows the reminder setting."
+  ,"fix": "Fix"
 }

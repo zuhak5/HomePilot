@@ -56,6 +56,22 @@ Protected workflows consume environment secrets and variables for production con
 
 VersionDeck static assets contain no private token. Its deployment workflow uses the ephemeral GitHub token server-side in Actions to discover and verify releases before generating public data.
 
+### Public browser account deletion
+
+The VersionDeck build generates `account-deletion-config.js` from three repository-level GitHub Actions variables consumed by [`.github/workflows/deploy-download-site.yml`](../../.github/workflows/deploy-download-site.yml):
+
+| Variable | Required production value | Exposure and validation |
+| --- | --- | --- |
+| `PUBLIC_SUPABASE_URL` | `https://iajvkvvvhwjdiuaufymh.supabase.co` | Public project URL. Any other URL is rejected. |
+| `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The hosted project's public publishable key, or legacy anonymous JWT | Intentionally browser-distributed. It must validate as a public `sb_publishable_...` key or an anonymous-role JWT; a privileged key is rejected because it does not satisfy that shape. Never substitute a service-role credential. |
+| `ACCOUNT_DELETION_SITE_URL` | `https://zuhak5.github.io/HomePilot/account-deletion.html` | Exact Google OAuth callback and canonical public page. Any other URL is rejected. |
+
+[`tool/build_account_deletion_site.mjs`](../../tool/build_account_deletion_site.mjs) is authoritative for this schema and its fixed endpoints. [`tool/build_versiondeck_site.mjs`](../../tool/build_versiondeck_site.mjs) validates the configuration before replacing or emitting the site output, writes only the known public fields, and includes the generated file in the hashed asset inventory. There is no production fallback: missing, empty, malformed, disabled, or mismatched values fail the build.
+
+Pull-request validation passes `--allow-inert-account-deletion-config true` explicitly. That mode generates a fixed disabled `example.invalid` configuration so static markup and browser logic can be tested without production values. It must not be used by the production deployment step. The page itself also validates the generated object and remains disabled if configuration is absent or invalid.
+
+The publishable key is not a secret and is protected by RLS, authenticated Edge Function checks, and server-held service-role credentials rather than concealment. Nevertheless, do not print the real value unnecessarily in workflow summaries or test evidence, and never place a service-role key in GitHub repository variables, static assets, Flutter configuration, or committed examples.
+
 ## Validation
 
 Safe production-shape validation:

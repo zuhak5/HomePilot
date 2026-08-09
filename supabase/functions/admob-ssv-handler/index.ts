@@ -264,7 +264,9 @@ export async function handleAdmobSsv(
         return respond(400, { error: "invalid_timestamp" });
       }
       emit("info", "debug_callback_accepted", {
-        transaction_fingerprint: await identifierFingerprint(parsed.transactionId),
+        transaction_fingerprint: await identifierFingerprint(
+          parsed.transactionId,
+        ),
         database_operation: "skipped",
         key_id: parsed.keyId,
         reason: "signed_admob_configuration_test",

@@ -13,15 +13,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-release-source:
+    name: Require current main release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Reject a non-main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Production APK releases must be dispatched from main, not $GITHUB_REF." >&2
+            exit 1
+          fi
+
+      - name: Check out selected source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require selected SHA to equal current origin/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "$GITHUB_SHA"
+          if [[ "$source_sha" != "$remote_sha" ]]; then
+            echo "Selected source $source_sha is not current origin/main $remote_sha." >&2
+            exit 1
+          fi
+
   build-production-apk:
     name: Build signed production APK
-    if: github.ref == 'refs/heads/main'
+    needs: validate-release-source
     runs-on: windows-latest
     timeout-minutes: 60
     environment: production
 
     permissions:
       contents: write
+      actions: read
       id-token: write
       attestations: write
 
@@ -31,15 +66,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify release commit belongs to main
+      - name: Revalidate exact release source
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           git fetch origin main --no-tags
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Production releases must be built from a commit contained in origin/main."
+          if ($LASTEXITCODE -ne 0) { throw "Could not refresh origin/main." }
+          $SourceSha = (git rev-parse HEAD).Trim()
+          $MainSha = (git rev-parse origin/main).Trim()
+          if ($SourceSha -ne $env:GITHUB_SHA) {
+            throw "Checked-out source $SourceSha differs from GITHUB_SHA $env:GITHUB_SHA."
           }
+          if ($SourceSha -ne $MainSha) {
+            throw "Production releases require exact current origin/main $MainSha, got $SourceSha."
+          }
+          "- Exact source SHA: ``$SourceSha``" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -51,9 +92,20 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.44.7"
+          flutter-version: "3.44.8"
           channel: stable
           cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.3"
 
       - name: Show tool versions
         shell: pwsh
@@ -63,6 +115,43 @@ jobs:
           java -version
           node --version
           npm --version
+
+      - name: Run release security contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          npm ci
+          node tool/validate_google_release_contracts.mjs
+          deno check --frozen supabase/functions/admob-ssv-handler/index.ts
+          deno check --frozen supabase/functions/delete-account/index.ts
+          deno test --frozen --allow-env --allow-net `
+            supabase/functions/admob-ssv-handler/index_test.ts `
+            supabase/functions/delete-account/index_test.ts
+
+      - name: Require backend database gate for this SHA
+        id: backend_gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Runs = gh api `
+            "repos/$env:GITHUB_REPOSITORY/actions/workflows/validate-google-backend.yml/runs?head_sha=$env:GITHUB_SHA&status=completed&per_page=20" |
+            ConvertFrom-Json
+          $Passed = @($Runs.workflow_runs | Where-Object {
+            $_.path -eq ".github/workflows/validate-google-backend.yml" -and
+            $_.head_sha -eq $env:GITHUB_SHA -and
+            $_.head_branch -eq "main" -and
+            $_.event -in @("push", "workflow_dispatch") -and
+            $_.conclusion -eq "success"
+          })
+          if ($Passed.Count -eq 0) {
+            throw "The exact Google/backend/database workflow has not passed on main for $env:GITHUB_SHA."
+          }
+          $Gate = $Passed | Sort-Object created_at -Descending | Select-Object -First 1
+          "run_id=$($Gate.id)" >> $env:GITHUB_OUTPUT
+          "run_url=$($Gate.html_url)" >> $env:GITHUB_OUTPUT
+          "- Backend gate: [$($Gate.id)]($($Gate.html_url)) for ``$($Gate.head_sha)``" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Prepare release metadata
         id: metadata
@@ -99,6 +188,67 @@ jobs:
 
           Write-Host "Prepared HomePilot $VersionName ($BuildNumber)."
           Write-Host "Prepared Sentry release $SentryRelease."
+
+      - name: Initialize APK diagnostics
+        shell: pwsh
+        env:
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $EvidenceDirectory = Join-Path $PWD "release\apk-evidence"
+          New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+          $Context = [ordered]@{
+            workflow = $env:GITHUB_WORKFLOW
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            source_sha = $env:GITHUB_SHA
+            backend_gate_run_id = "${{ steps.backend_gate.outputs.run_id }}"
+            backend_gate_run_url = "${{ steps.backend_gate.outputs.run_url }}"
+            artifact_type = "apk"
+            version_name = $env:VERSION_NAME
+            version_code = $env:BUILD_NUMBER
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            (Join-Path $EvidenceDirectory "workflow-context.json"),
+            $Context,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+
+      - name: Reject an existing release tag before mutation
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PreviousPreference = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          & git ls-remote --exit-code --refs origin "refs/tags/$env:RELEASE_TAG" *> $null
+          $TagExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $PreviousPreference
+          if ($TagExitCode -eq 0) {
+            throw "Git tag already exists: $env:RELEASE_TAG"
+          }
+          if ($TagExitCode -ne 2) {
+            throw "Could not determine whether Git tag $env:RELEASE_TAG exists."
+          }
+
+          $EncodedTag = [System.Uri]::EscapeDataString($env:RELEASE_TAG)
+          $ReleaseResponse = Invoke-WebRequest `
+            -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$EncodedTag" `
+            -Headers @{
+              Accept = "application/vnd.github+json"
+              Authorization = "Bearer $env:GH_TOKEN"
+              "X-GitHub-Api-Version" = "2022-11-28"
+            } `
+            -SkipHttpErrorCheck
+          if ($ReleaseResponse.StatusCode -eq 200) {
+            throw "GitHub Release already exists: $env:RELEASE_TAG"
+          }
+          if ($ReleaseResponse.StatusCode -ne 404) {
+            throw "Could not determine whether GitHub Release $env:RELEASE_TAG exists (HTTP $($ReleaseResponse.StatusCode))."
+          }
 
       - name: Create production configuration
         shell: pwsh
@@ -237,6 +387,8 @@ jobs:
           $SourceApk = Join-Path $PWD "build\app\outputs\flutter-apk\app-release.apk"
           $ReleaseDirectory = Join-Path $PWD "release"
           New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
+          $EvidenceDirectory = Join-Path $ReleaseDirectory "apk-evidence"
+          New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 
           $ReleaseApk = Join-Path $ReleaseDirectory $env:APK_NAME
           Copy-Item -LiteralPath $SourceApk -Destination $ReleaseApk -Force
@@ -269,6 +421,8 @@ jobs:
           $ExpectedPackage = "com.homepilot.app"
           $ExpectedSigner = "3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51"
           $ExpectedSignerNormalized = ($ExpectedSigner -replace '[^0-9A-Fa-f]', '').ToLowerInvariant()
+          $EvidenceDirectory = Join-Path $PWD "release\apk-evidence"
+          New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 
           $BuildTools = Get-ChildItem (Join-Path $env:ANDROID_HOME "build-tools") -Directory |
             Sort-Object { [version]$_.Name } -Descending |
@@ -284,6 +438,11 @@ jobs:
           }
 
           $SignatureOutput = (& $ApkSigner verify --verbose --print-certs $env:APK_PATH 2>&1 | Out-String)
+          [System.IO.File]::WriteAllText(
+            (Join-Path $EvidenceDirectory "apk-signature-verification.txt"),
+            $SignatureOutput,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
           if ($LASTEXITCODE -ne 0) {
             throw "APK signature verification failed.`n$SignatureOutput"
           }
@@ -296,6 +455,11 @@ jobs:
           }
 
           $Badging = (& $Aapt2 dump badging $env:APK_PATH 2>&1 | Out-String)
+          [System.IO.File]::WriteAllText(
+            (Join-Path $EvidenceDirectory "apk-badging.txt"),
+            $Badging,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
           if ($LASTEXITCODE -ne 0) {
             throw "APK metadata inspection failed.`n$Badging"
           }
@@ -332,6 +496,48 @@ jobs:
           Write-Host "Verified signer SHA-256 $ExpectedSigner."
           Write-Host "Verified APK SHA-256 $ActualHash."
 
+      - name: Collect APK manifest and dependency evidence
+        id: evidence
+        shell: pwsh
+        env:
+          APK_PATH: ${{ steps.release.outputs.apk_path }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version_name }}
+          EXPECTED_BUILD: ${{ steps.release.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $EvidencePath = Join-Path $PWD "release\apk-evidence"
+          & ".\tool\collect_android_release_evidence.ps1" `
+            -ArtifactType apk `
+            -ArtifactPath $env:APK_PATH `
+            -OutputDirectory $EvidencePath `
+            -ExpectedVersion $env:EXPECTED_VERSION `
+            -ExpectedBuild $env:EXPECTED_BUILD
+          "evidence_path=$EvidencePath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload APK diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HomePilot-production-apk-evidence-${{ github.run_number }}
+          path: release/apk-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Recheck release tag before Sentry mutation
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          & git ls-remote --exit-code --refs origin "refs/tags/$env:RELEASE_TAG" *> $null
+          $TagExitCode = $LASTEXITCODE
+          if ($TagExitCode -eq 0) {
+            throw "Git tag appeared before Sentry publication: $env:RELEASE_TAG"
+          }
+          if ($TagExitCode -ne 2) {
+            throw "Could not recheck Git tag $env:RELEASE_TAG before Sentry publication."
+          }
+
       - name: Publish and verify Sentry release
         shell: pwsh
         env:
@@ -351,7 +557,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: HomePilot-production-apk-${{ github.run_number }}
-          path: ${{ steps.release.outputs.apk_path }}
+          path: |
+            ${{ steps.release.outputs.apk_path }}
+            ${{ steps.release.outputs.checksum_path }}
           if-no-files-found: error
           retention-days: 30
 

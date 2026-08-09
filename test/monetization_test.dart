@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:homepilot/src/features/monetization/ad_cache.dart';
+import 'package:homepilot/src/features/monetization/ad_retry_policy.dart';
+import 'package:homepilot/src/features/monetization/ad_runtime.dart';
 import 'package:homepilot/src/features/monetization/monetization.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -174,11 +177,201 @@ void main() {
     expect(config.creationIsFree, isFalse);
   });
 
-  test('ad preloader retry delay backs off and caps at one minute', () {
+  test('legacy retry delay is epoch bounded', () {
     expect(adRetryDelayForFailure(1), const Duration(seconds: 2));
     expect(adRetryDelayForFailure(2), const Duration(seconds: 4));
-    expect(adRetryDelayForFailure(6), const Duration(seconds: 60));
-    expect(adRetryDelayForFailure(99), const Duration(seconds: 60));
+    expect(adRetryDelayForFailure(3), const Duration(seconds: 8));
+    expect(adRetryDelayForFailure(4), Duration.zero);
+    expect(adRetryDelayForFailure(99), Duration.zero);
+  });
+
+  group('ad runtime safety contracts', () {
+    const eligible = AdRuntimeEligibility(
+      platformSupported: true,
+      appResumed: true,
+      consentUpdated: true,
+      canRequestAds: true,
+      adsEnabled: true,
+      nativeAdsEnabled: true,
+      interstitialAdsEnabled: true,
+      rewardedAdsEnabled: true,
+      rewardedInterstitialEnabled: true,
+    );
+
+    test('requires every global gate and each format kill switch', () {
+      for (final format in AdFormat.values) {
+        expect(eligible.allows(format), isTrue);
+      }
+      const blockedBeforeConsentRefresh = AdRuntimeEligibility(
+        platformSupported: true,
+        appResumed: true,
+        consentUpdated: false,
+        canRequestAds: true,
+        adsEnabled: true,
+        nativeAdsEnabled: true,
+        interstitialAdsEnabled: true,
+        rewardedAdsEnabled: true,
+        rewardedInterstitialEnabled: true,
+      );
+      const blockedInBackground = AdRuntimeEligibility(
+        platformSupported: true,
+        appResumed: false,
+        consentUpdated: true,
+        canRequestAds: true,
+        adsEnabled: true,
+        nativeAdsEnabled: true,
+        interstitialAdsEnabled: true,
+        rewardedAdsEnabled: true,
+        rewardedInterstitialEnabled: true,
+      );
+      for (final format in AdFormat.values) {
+        expect(blockedBeforeConsentRefresh.allows(format), isFalse);
+        expect(blockedInBackground.allows(format), isFalse);
+      }
+      const nativeDisabled = AdRuntimeEligibility(
+        platformSupported: true,
+        appResumed: true,
+        consentUpdated: true,
+        canRequestAds: true,
+        adsEnabled: true,
+        nativeAdsEnabled: false,
+        interstitialAdsEnabled: true,
+        rewardedAdsEnabled: true,
+        rewardedInterstitialEnabled: true,
+      );
+      expect(nativeDisabled.allows(AdFormat.native), isFalse);
+      expect(nativeDisabled.allows(AdFormat.interstitial), isTrue);
+    });
+
+    test('generation advances only for material transitions', () {
+      final controller = AdRuntimeController();
+      final first = controller.apply(eligible);
+      final duplicate = controller.apply(eligible);
+      final blocked = controller.apply(const AdRuntimeEligibility.blocked());
+
+      expect(first.changed, isTrue);
+      expect(first.generation, 1);
+      expect(duplicate.changed, isFalse);
+      expect(duplicate.generation, 1);
+      expect(blocked.generation, 2);
+      expect(blocked.lost(AdFormat.rewarded), isTrue);
+    });
+
+    test('retry classification and budgets fail dormant', () {
+      const policy = AdRetryPolicy();
+      expect(
+        classifyAdLoadFailure(code: 2, domain: 'mobile-ads'),
+        AdLoadFailureKind.network,
+      );
+      expect(
+        classifyAdLoadFailure(code: 3, domain: 'mobile-ads'),
+        AdLoadFailureKind.noFill,
+      );
+      expect(
+        classifyAdLoadFailure(code: 1, domain: 'mobile-ads'),
+        AdLoadFailureKind.invalidRequest,
+      );
+
+      final lowerJitter = policy.decide(
+        failure: AdLoadFailureKind.network,
+        failedAttempt: 1,
+        jitterUnit: 0,
+      );
+      final upperJitter = policy.decide(
+        failure: AdLoadFailureKind.network,
+        failedAttempt: 1,
+        jitterUnit: 1,
+      );
+      expect(lowerJitter.delay, const Duration(milliseconds: 1600));
+      expect(upperJitter.delay, const Duration(milliseconds: 2400));
+      expect(
+        policy
+            .decide(failure: AdLoadFailureKind.network, failedAttempt: 4)
+            .dormant,
+        isTrue,
+      );
+      expect(
+        policy
+            .decide(failure: AdLoadFailureKind.noFill, failedAttempt: 1)
+            .dormant,
+        isTrue,
+      );
+      expect(
+        policy
+            .decide(failure: AdLoadFailureKind.internal, failedAttempt: 2)
+            .dormant,
+        isTrue,
+      );
+    });
+
+    test('cache is fresh until, but not at, 55 minutes', () {
+      final loadedAt = DateTime.utc(2026, 8, 1, 12);
+      final cached = CachedAd(value: Object(), loadedAt: loadedAt);
+
+      expect(
+        cached.isFresh(loadedAt.add(const Duration(minutes: 54, seconds: 59))),
+        isTrue,
+      );
+      expect(
+        cached.isFresh(loadedAt.add(const Duration(minutes: 55))),
+        isFalse,
+      );
+    });
+
+    test('reward presentation rechecks lifecycle generation before show', () {
+      expect(
+        rewardPresentationIsCurrent(
+          disposed: false,
+          requestGeneration: 7,
+          currentGeneration: 7,
+          formatAllowed: true,
+        ),
+        isTrue,
+      );
+      expect(
+        rewardPresentationIsCurrent(
+          disposed: false,
+          requestGeneration: 7,
+          currentGeneration: 8,
+          formatAllowed: true,
+        ),
+        isFalse,
+      );
+      expect(
+        rewardPresentationIsCurrent(
+          disposed: false,
+          requestGeneration: 7,
+          currentGeneration: 7,
+          formatAllowed: false,
+        ),
+        isFalse,
+      );
+      expect(
+        rewardPresentationIsCurrent(
+          disposed: true,
+          requestGeneration: 7,
+          currentGeneration: 7,
+          formatAllowed: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('leases dispose exactly once and serialize fullscreen ownership', () {
+      var releases = 0;
+      final lease = AdLease(Object(), (_) => releases++);
+      lease.release();
+      lease.release();
+      expect(releases, 1);
+
+      final gate = FullScreenAdGate();
+      final first = gate.tryAcquire();
+      expect(first, isNotNull);
+      expect(gate.tryAcquire(), isNull);
+      first!.release();
+      first.release();
+      expect(gate.tryAcquire(), isNotNull);
+    });
   });
 
   test('native ads unmount whenever a modal route obscures the page', () {
@@ -215,6 +408,36 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      nativeAdPlacementEnabled(
+        routeIsCurrent: true,
+        configEnabled: false,
+        consentGranted: false,
+        adsInitialized: false,
+        platformSupported: false,
+        enabledOverride: true,
+      ),
+      isFalse,
+    );
+  });
+
+  test('native production placement mapping rejects unknown names', () {
+    const production = HomePilotAdUnits(production: true);
+    const secondaryPlacements = [
+      'assets',
+      'room_detail',
+      'thing_detail',
+      'maintenance',
+      'calendar',
+      'more',
+      'search',
+      'notifications',
+      'statistics',
+    ];
+    for (final placement in secondaryPlacements) {
+      expect(production.native(placement), contains('5230396474'));
+    }
+    expect(() => production.native('typo'), throwsArgumentError);
   });
 
   test('pending reward claim preserves recovery metadata', () {
@@ -269,6 +492,30 @@ void main() {
       ).called(1);
     },
   );
+
+  test('offline draft account cleanup preserves other accounts', () async {
+    final secureStorage = _MockSecureStorage();
+    final stored = <String, String>{
+      'homepilot_creation_draft_v1_task_user-1_asset-a': '{}',
+      'homepilot_creation_draft_v1_asset_user-1_room-a': '{}',
+      'homepilot_creation_draft_v1_asset_copy_user-1_asset-b': '{}',
+      'homepilot_creation_draft_v1_task_user-10_asset-c': '{}',
+      'unrelated': '{}',
+    };
+    when(() => secureStorage.readAll()).thenAnswer((_) async => stored);
+    when(() => secureStorage.delete(key: any(named: 'key'))).thenAnswer((
+      invocation,
+    ) async {
+      stored.remove(invocation.namedArguments[#key] as String);
+    });
+
+    await OfflineCreationDraftStore(secureStorage).clearForAccount('user-1');
+
+    expect(stored.keys, {
+      'homepilot_creation_draft_v1_task_user-10_asset-c',
+      'unrelated',
+    });
+  });
 
   testWidgets('native slot reserves 112dp then collapses after no-fill', (
     tester,

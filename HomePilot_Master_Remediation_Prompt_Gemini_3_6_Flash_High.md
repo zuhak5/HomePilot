@@ -1,5 +1,7 @@
 # HomePilot — Master Remediation, Hardening, UX, Google Play, and Release Implementation Prompt
 
+> **Historical plan:** This document targets an older baseline and executor. It is retained as planning history only; it is not a current runbook, implementation source of truth, completion record, or release evidence. Use executable sources, current tests, and the maintained documentation under `docs/` for present behavior.
+
 **Target executor:** Antigravity AI Agent — **Gemini 3.6 Flash** — **High effort**  
 **Repository:** `zuhak5/HomePilot`  
 **Target branch:** `main` as the source baseline; implement on a dedicated working branch  

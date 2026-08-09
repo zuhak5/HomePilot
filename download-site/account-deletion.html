@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <meta name="description" content="HomePilot Account & Data Deletion Request Page. Permanently delete your HomePilot cloud account and associated data without reinstalling the app.">
+  <meta name="description" content="Permanently delete your HomePilot cloud account and associated data without reinstalling the app.">
   <meta name="color-scheme" content="light dark">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <title>Account Deletion — HomePilot</title>
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://iajvkvvvhwjdiuaufymh.supabase.co; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; manifest-src 'none'; upgrade-insecure-requests">
+  <link rel="canonical" href="https://zuhak5.github.io/HomePilot/account-deletion.html">
+  <title>Account Deletion &mdash; HomePilot</title>
   <link rel="icon" href="assets/versiondeck-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="account-deletion.css">
+  <link rel="stylesheet" href="account-deletion.css?v=__ACCOUNT_DELETION_ASSET_REVISION__">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -23,51 +25,61 @@
       </a>
       <nav class="topbar-actions" aria-label="Navigation">
         <a href="./">Releases</a>
-        <a href="https://github.com/zuhak5/HomePilot" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/zuhak5/HomePilot/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <a href="https://github.com/zuhak5/HomePilot/issues" target="_blank" rel="noopener noreferrer">Support</a>
       </nav>
     </div>
   </header>
 
   <main id="main" class="container deletion-container">
-    <section class="card deletion-card">
-      <h1>HomePilot Account &amp; Data Deletion</h1>
+    <section class="card deletion-card" aria-labelledby="deletion-heading">
+      <h1 id="deletion-heading">HomePilot Account &amp; Data Deletion</h1>
       <p class="lead">
-        Request permanent deletion of your HomePilot cloud account and associated synchronized data.
+        Sign in with the Google account linked to HomePilot to permanently delete its cloud account and synchronized data.
       </p>
 
       <div class="info-box">
         <h2>What will be deleted?</h2>
         <ul>
-          <li><strong>Cloud Database Records:</strong> Your synchronized home structures, tasks, rooms, assets, and schedule configurations.</li>
-          <li><strong>Private Media Files:</strong> Photos and documents uploaded to your private cloud storage bucket.</li>
-          <li><strong>Account Binding:</strong> Your Google authentication association and user identity records.</li>
+          <li>Your HomePilot authentication account and its link to your Google identity.</li>
+          <li>Your synchronized homes, rooms, assets, maintenance records, and related cloud data.</li>
+          <li>Your photos and other media stored in HomePilot private cloud storage.</li>
         </ul>
 
-        <h2>Data Retention Disclosures</h2>
+        <h2>What is outside this request?</h2>
         <p>
-          Server-verified AdMob reward transaction logs are retained for fraud prevention, audit compliance, and accounting consistency as required by law and platform agreements.
+          Backups you exported outside HomePilot are not controlled by this request. Data independently processed by Google or other service providers is governed by their policies. This browser flow cannot remove HomePilot authorization from your Google Account; you may revoke it separately in your Google Account settings.
         </p>
       </div>
 
       <div class="instructions-box">
-        <h2>How to Delete Your Account</h2>
-        <p>You can delete your account using either method below:</p>
-        <ol>
-          <li><strong>In-App Deletion:</strong> Open HomePilot &rarr; Settings &rarr; Account &rarr; Delete Account.</li>
-          <li><strong>Web Deletion (This Page):</strong> Authenticate with Google below to verify ownership and confirm deletion.</li>
-        </ol>
+        <h2>Other deletion method</h2>
+        <p>You can also delete your account in HomePilot under Settings &rarr; Account &rarr; Delete Account.</p>
       </div>
 
       <div class="action-box">
-        <h2>Web Account Deletion Form</h2>
-        <div id="deletion-status" role="status" aria-live="polite"></div>
-        <form id="deletion-form">
-          <p>Click below to sign in with your Google account to confirm identity before deletion:</p>
+        <h2>Delete from the web</h2>
+        <p id="deletion-status" class="status-message" role="status" aria-live="polite">
+          Sign in to verify ownership before continuing.
+        </p>
+
+        <form id="deletion-form" novalidate>
           <button type="button" id="btn-authenticate" class="btn primary-btn">
-            Sign in with Google to Verify
+            Continue with Google
           </button>
+
+          <p id="authenticated-identity" class="authenticated-identity" hidden></p>
+
+          <fieldset id="deletion-confirmation" class="confirmation-group" hidden>
+            <legend>Permanent deletion confirmation</legend>
+            <label for="confirm-deletion" class="confirmation-label">
+              <input type="checkbox" id="confirm-deletion">
+              <span>I understand that this permanently deletes my HomePilot cloud account and synchronized data and cannot be undone.</span>
+            </label>
+          </fieldset>
+
           <button type="button" id="btn-delete" class="btn danger-btn" hidden disabled>
-            Permanently Delete My Account
+            Permanently delete my account
           </button>
         </form>
       </div>
@@ -76,10 +88,16 @@
 
   <footer class="footer">
     <div class="container footer-inner">
-      <p>HomePilot — Household asset organization and maintenance application.</p>
+      <p>HomePilot &mdash; Household asset organization and maintenance.</p>
+      <p>
+        <a href="https://github.com/zuhak5/HomePilot/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">Privacy policy</a>
+        <span aria-hidden="true">&middot;</span>
+        <a href="https://github.com/zuhak5/HomePilot/issues" target="_blank" rel="noopener noreferrer">Contact support</a>
+      </p>
     </div>
   </footer>
 
-  <script type="module" src="account-deletion.js"></script>
+  <script src="account-deletion-config.js?v=__ACCOUNT_DELETION_ASSET_REVISION__"></script>
+  <script type="module" src="account-deletion.js?v=__ACCOUNT_DELETION_ASSET_REVISION__"></script>
 </body>
 </html>

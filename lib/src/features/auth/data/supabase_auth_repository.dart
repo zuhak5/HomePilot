@@ -6,6 +6,7 @@ import '../../../core/observability/sentry_logger_bridge.dart';
 import '../../../core/observability/sentry_scope.dart';
 import '../../../core/observability/sentry_tracing.dart';
 import '../../../core/supabase/supabase_failure.dart';
+import '../../../core/utils/redacting_logger.dart';
 import '../domain/auth_repository.dart';
 import 'native_google_sign_in.dart';
 
@@ -157,33 +158,23 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
 
-      await onAccountDeletionPrepared(originalUserId);
       deletionPrepared = true;
+      await onAccountDeletionPrepared(originalUserId);
       final response = await _client.functions.invoke(
         'delete-account',
         body: const {'confirmation': 'delete-my-account'},
       );
       final data = response.data;
-      if (data is! Map || data['deleted'] != true) {
-        throw const SupabaseFailure(
-          kind: SupabaseFailureKind.unknown,
-          message: 'The cloud account could not be deleted.',
-        );
-      }
-      cloudDeleted = true;
-      final deletedUserId = data['user_id'] is String
-          ? data['user_id'] as String
-          : originalUserId;
-      final status = data['status'];
-      if (deletedUserId != originalUserId ||
-          (status != null &&
-              status != 'deleted' &&
-              status != 'already_deleted')) {
+      if (data is! Map ||
+          data['deleted'] != true ||
+          data['status'] != 'deleted' ||
+          data['user_id'] != originalUserId) {
         throw const SupabaseFailure(
           kind: SupabaseFailureKind.unknown,
           message: 'The cloud account deletion receipt was invalid.',
         );
       }
+      cloudDeleted = true;
       try {
         await traceHomePilotOperation<void>(
           'auth.account_delete.local_cleanup',
@@ -203,7 +194,6 @@ class SupabaseAuthRepository implements AuthRepository {
       }
     } on Object catch (error) {
       if (cloudDeleted) {
-        await _clearLocalAuthentication(isAccountDeletion: true);
         throw SupabaseFailure.from(error);
       }
       final functionErrorCode = _functionErrorCode(error);
@@ -256,6 +246,10 @@ class SupabaseAuthRepository implements AuthRepository {
         try {
           await _googleSignIn.disconnect();
         } on Object {
+          AppLogger.warning(
+            'auth_google_disconnect_failed',
+            fields: const {'provider': 'google', 'fallback': 'sign_out'},
+          );
           await _googleSignIn.signOut();
         }
       } else {

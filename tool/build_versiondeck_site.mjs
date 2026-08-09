@@ -3,6 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+  accountDeletionConfigFromEnvironment,
+  validateAccountDeletionPublicConfig,
+  writeAccountDeletionConfig,
+} from "./build_account_deletion_site.mjs";
 
 function parseArguments(argv) {
   const values = {};
@@ -31,13 +36,43 @@ async function sha256(filePath) {
   return crypto.createHash("sha256").update(await fs.readFile(filePath)).digest("hex");
 }
 
-export async function buildVersionDeckSite({ source, output, revision }) {
+export async function buildVersionDeckSite({
+  source,
+  output,
+  revision,
+  accountDeletionConfig,
+  allowInertAccountDeletionConfig = false,
+}) {
   if (!/^[a-f\d]{40}$/i.test(revision || "")) {
     throw new Error("VersionDeck build revision must be a full commit SHA.");
   }
+  const publicConfig = accountDeletionConfig == null
+    ? accountDeletionConfigFromEnvironment(process.env, {
+      allowInert: allowInertAccountDeletionConfig,
+    })
+    : validateAccountDeletionPublicConfig(accountDeletionConfig, {
+      allowInert: allowInertAccountDeletionConfig,
+    });
   await fs.rm(output, { recursive: true, force: true });
   await fs.cp(source, output, { recursive: true });
   await fs.rm(path.join(output, "release-diagnostics.json"), { force: true });
+  await writeAccountDeletionConfig(output, publicConfig, {
+    allowInert: allowInertAccountDeletionConfig,
+  });
+
+  const accountDeletionPagePath = path.join(output, "account-deletion.html");
+  const accountDeletionPage = await fs.readFile(accountDeletionPagePath, "utf8");
+  if (!accountDeletionPage.includes("__ACCOUNT_DELETION_ASSET_REVISION__")) {
+    throw new Error("Account-deletion asset revision placeholder is missing.");
+  }
+  await fs.writeFile(
+    accountDeletionPagePath,
+    accountDeletionPage.replaceAll(
+      "__ACCOUNT_DELETION_ASSET_REVISION__",
+      revision.toLowerCase(),
+    ),
+    "utf8",
+  );
 
   const serviceWorkerPath = path.join(output, "sw.js");
   const serviceWorker = await fs.readFile(serviceWorkerPath, "utf8");
@@ -82,8 +117,16 @@ async function main() {
     source: path.resolve(root, args.source || "download-site"),
     output: path.resolve(root, args.output || ".versiondeck-site"),
     revision: args.revision || process.env.GITHUB_SHA,
+    allowInertAccountDeletionConfig:
+      parseBoolean(args["allow-inert-account-deletion-config"]),
   });
   console.log(`Built VersionDeck site with ${result.files} files at revision ${result.revision}.`);
+}
+
+function parseBoolean(value) {
+  if (value == null || value === "false") return false;
+  if (value === "true") return true;
+  throw new Error("Boolean arguments must be either true or false.");
 }
 
 const invokedAsScript = process.argv[1] &&

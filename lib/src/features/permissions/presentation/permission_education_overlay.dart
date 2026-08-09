@@ -8,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../../../src/core/domain/models.dart';
 import '../../../../src/ui/app_theme.dart';
 import '../application/permission_education_controller.dart';
+import '../domain/capability_snapshots.dart';
 import '../domain/permission_capability.dart';
 
 class PermissionEducationOverlayWrapper extends ConsumerWidget {
@@ -39,6 +40,13 @@ class PermissionEducationOverlayWrapper extends ConsumerWidget {
       activeCapability: state.activeCapability!,
       relevantCapabilities: state.relevantCapabilities,
       isBusy: state.isBusy,
+      status: state.capabilityStatuses[state.activeCapability],
+      weather: state.setupSnapshot?.weather,
+      notifications: state.setupSnapshot?.notifications,
+      operationFailure:
+          state.operationFailure?.capability == state.activeCapability
+          ? state.operationFailure
+          : null,
       targetLink: targetLink,
       targetRect: targetRect,
       onUseCurrentLocation: () {
@@ -64,6 +72,9 @@ class PermissionEducationOverlayWrapper extends ConsumerWidget {
       onFinishLater: () {
         notifier.finishLater();
       },
+      onOpenSettings: () {
+        notifier.openSettingsFor(state.activeCapability!);
+      },
     );
   }
 }
@@ -79,6 +90,11 @@ class PermissionEducationOverlayWidget extends StatefulWidget {
     required this.onEnableExactTiming,
     required this.onDefer,
     required this.onFinishLater,
+    this.status,
+    this.weather,
+    this.notifications,
+    this.operationFailure,
+    this.onOpenSettings,
     this.targetLink,
     this.targetRect,
     super.key,
@@ -93,6 +109,11 @@ class PermissionEducationOverlayWidget extends StatefulWidget {
   final VoidCallback onEnableExactTiming;
   final VoidCallback onDefer;
   final VoidCallback onFinishLater;
+  final CapabilityStatus? status;
+  final WeatherAreaCapabilitySnapshot? weather;
+  final NotificationCapabilitySnapshot? notifications;
+  final PermissionOperationFailure? operationFailure;
+  final VoidCallback? onOpenSettings;
   final LayerLink? targetLink;
   final Rect? targetRect;
 
@@ -224,6 +245,10 @@ class _PermissionEducationOverlayWidgetState
                           animation: _controller,
                           reduceMotion: reduceMotion,
                           isBusy: widget.isBusy,
+                          status: widget.status,
+                          weather: widget.weather,
+                          notifications: widget.notifications,
+                          operationFailure: widget.operationFailure,
                           onUseCurrentLocation: widget.onUseCurrentLocation,
                           onChooseLocationManually:
                               widget.onChooseLocationManually,
@@ -231,6 +256,7 @@ class _PermissionEducationOverlayWidgetState
                           onEnableExactTiming: widget.onEnableExactTiming,
                           onDefer: widget.onDefer,
                           onFinishLater: widget.onFinishLater,
+                          onOpenSettings: widget.onOpenSettings,
                         ),
                       ),
                     ),
@@ -259,6 +285,11 @@ class _PermissionCapabilityCard extends StatelessWidget {
     required this.onEnableExactTiming,
     required this.onDefer,
     required this.onFinishLater,
+    required this.status,
+    required this.weather,
+    required this.notifications,
+    required this.operationFailure,
+    required this.onOpenSettings,
     super.key,
   });
 
@@ -274,10 +305,24 @@ class _PermissionCapabilityCard extends StatelessWidget {
   final VoidCallback onEnableExactTiming;
   final VoidCallback onDefer;
   final VoidCallback onFinishLater;
+  final CapabilityStatus? status;
+  final WeatherAreaCapabilitySnapshot? weather;
+  final NotificationCapabilitySnapshot? notifications;
+  final PermissionOperationFailure? operationFailure;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final nextAction = status?.nextAction ?? PermissionNextAction.request;
+    final opensSettings = nextAction == PermissionNextAction.openAppSettings ||
+        nextAction == PermissionNextAction.openLocationSettings ||
+        nextAction == PermissionNextAction.openExactAlarmSettings;
+    final statusMessage = _statusMessage(context);
+    final exactIsGated =
+        capability == PermissionCapability.exactReminderTiming &&
+        notifications != null &&
+        !notifications!.preferences.allowsLocalReminders;
 
     final title = switch (capability) {
       PermissionCapability.deviceLocation =>
@@ -386,6 +431,33 @@ class _PermissionCapabilityCard extends StatelessWidget {
                     height: 1.35,
                   ),
                 ),
+                if (statusMessage != null) ...[
+                  const SizedBox(height: HkSpacing.xs),
+                  Text(
+                    statusMessage,
+                    key: const ValueKey('permission-overlay-status'),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                if (operationFailure != null) ...[
+                  const SizedBox(height: HkSpacing.xs),
+                  Text(
+                    operationFailure!.kind ==
+                            PermissionOperationFailureKind.settings
+                        ? context.l10n.permissionSettingsCouldNotOpen
+                        : context.l10n.permissionActionCouldNotComplete,
+                    key: const ValueKey('permission-overlay-error'),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: HkSpacing.sm),
                 Container(
                   padding: const EdgeInsets.all(HkSpacing.sm),
@@ -426,14 +498,24 @@ class _PermissionCapabilityCard extends StatelessWidget {
                 const SizedBox(height: HkSpacing.md),
                 if (capability == PermissionCapability.deviceLocation) ...[
                   FilledButton.icon(
-                    onPressed: isBusy ? null : onUseCurrentLocation,
+                    onPressed: isBusy
+                        ? null
+                        : opensSettings
+                        ? onOpenSettings
+                        : onUseCurrentLocation,
                     icon: isBusy
                         ? const SizedBox.square(
                             dimension: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Symbols.my_location_rounded),
-                    label: Text(context.l10n.permissionSetupUseCurrentLocation),
+                    label: Text(
+                      nextAction == PermissionNextAction.openLocationSettings
+                          ? context.l10n.turnOnLocationServices
+                          : opensSettings
+                          ? context.l10n.permissionSetupManageInSettings
+                          : context.l10n.permissionSetupUseCurrentLocation,
+                    ),
                   ),
                   const SizedBox(height: HkSpacing.xs),
                   Row(
@@ -468,7 +550,11 @@ class _PermissionCapabilityCard extends StatelessWidget {
                       Expanded(
                         flex: 2,
                         child: FilledButton.icon(
-                          onPressed: isBusy ? null : onEnableNotifications,
+                          onPressed: isBusy
+                              ? null
+                              : opensSettings
+                              ? onOpenSettings
+                              : onEnableNotifications,
                           icon: isBusy
                               ? const SizedBox.square(
                                   dimension: 18,
@@ -479,9 +565,9 @@ class _PermissionCapabilityCard extends StatelessWidget {
                               : const Icon(
                                   Symbols.notifications_active_rounded,
                                 ),
-                          label: Text(
-                            context.l10n.enableNotificationsOnboarding,
-                          ),
+                          label: Text(opensSettings
+                              ? context.l10n.permissionSetupManageInSettings
+                              : context.l10n.enableNotificationsOnboarding),
                         ),
                       ),
                     ],
@@ -501,7 +587,11 @@ class _PermissionCapabilityCard extends StatelessWidget {
                       Expanded(
                         flex: 2,
                         child: FilledButton.icon(
-                          onPressed: isBusy ? null : onEnableExactTiming,
+                          onPressed: isBusy || exactIsGated
+                              ? null
+                              : opensSettings
+                              ? onOpenSettings
+                              : onEnableExactTiming,
                           icon: isBusy
                               ? const SizedBox.square(
                                   dimension: 18,
@@ -510,9 +600,11 @@ class _PermissionCapabilityCard extends StatelessWidget {
                                   ),
                                 )
                               : const Icon(Symbols.alarm_on_rounded),
-                          label: Text(
-                            context.l10n.permissionSetupAllowPreciseTiming,
-                          ),
+                          label: Text(opensSettings
+                              ? context.l10n.permissionSetupManageInSettings
+                              : exactIsGated
+                              ? context.l10n.permissionExactRequiresDeviceReminders
+                              : context.l10n.permissionSetupAllowPreciseTiming),
                         ),
                       ),
                     ],
@@ -524,6 +616,36 @@ class _PermissionCapabilityCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String? _statusMessage(BuildContext context) {
+    if (capability == PermissionCapability.deviceLocation) {
+      if (weather?.mode == WeatherAreaMode.manual &&
+          weather?.selectedArea != null) {
+        return context.l10n.permissionSelectedArea(
+          weather!.selectedArea!.label,
+        );
+      }
+      if (weather?.locationServiceEnabled == false) {
+        return context.l10n.locationServicesAreOff;
+      }
+      if (status?.permissionState == AppPermissionState.permanentlyDenied) {
+        return context.l10n.blocked;
+      }
+      if (status?.permissionState == AppPermissionState.restricted ||
+          status?.permissionState == AppPermissionState.unavailable) {
+        return context.l10n.deviceLocationIsUnavailable;
+      }
+    }
+    if (capability == PermissionCapability.notifications &&
+        status?.effectiveState == EffectiveCapabilityState.blocked) {
+      return context.l10n.permissionNotificationAccessRequired;
+    }
+    if (capability == PermissionCapability.exactReminderTiming &&
+        notifications?.usesApproximateTiming == true) {
+      return context.l10n.approximateTiming;
+    }
+    return null;
   }
 }
 

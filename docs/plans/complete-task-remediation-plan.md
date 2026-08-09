@@ -1,5 +1,7 @@
 # Complete Task Remediation Plan
 
+> **Historical implementation record:** The status below applies to the named historical baseline and audit only. This file is not a current runbook or release-validation artifact; executable Flutter, synchronization, migration, and test sources remain authoritative.
+
 **Status:** Completed; all implementation, RPC migration, Flutter state, operation journaling, notification inbox reconciliation, and automated test validations are fully executed and verified.  
 **Repository:** `zuhak5/HomePilot`  
 **Baseline branch:** `main`  

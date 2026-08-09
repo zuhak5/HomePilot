@@ -33,6 +33,7 @@
                 android:orientation="horizontal">
 
                 <TextView
+                    android:id="@+id/homepilot_ad_badge"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:background="@drawable/homepilot_native_ad_badge"
@@ -41,11 +42,12 @@
                     android:paddingRight="5dp"
                     android:paddingBottom="2dp"
                     android:text="@string/native_ad_label"
-                    android:textColor="@color/homepilot_ad_primary"
+                    android:textColor="@color/homepilot_ad_badge_text"
                     android:textSize="10sp"
                     android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/homepilot_ad_sponsored"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
@@ -95,7 +97,11 @@
             android:background="@drawable/homepilot_native_ad_cta"
             android:gravity="center"
             android:maxLines="1"
-            android:textColor="@color/homepilot_ad_primary"
+            android:paddingStart="12dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="7dp"
+            android:textColor="@color/homepilot_ad_cta_text"
             android:textSize="13sp"
             android:textStyle="bold" />
     </LinearLayout>

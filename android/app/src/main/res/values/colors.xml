@@ -2,9 +2,12 @@
 <resources>
     <color name="splash_background">#F9FCF8</color>
     <color name="ic_launcher_background">#06213F</color>
-    <color name="homepilot_ad_surface">#FFFFFF</color>
+    <color name="homepilot_ad_surface">#F7F9FC</color>
     <color name="homepilot_ad_border">#DDE3EA</color>
-    <color name="homepilot_ad_primary">#22B953</color>
     <color name="homepilot_ad_text_primary">#10213A</color>
     <color name="homepilot_ad_text_secondary">#526174</color>
+    <color name="homepilot_ad_badge_background">#DDF7E5</color>
+    <color name="homepilot_ad_badge_text">#064D29</color>
+    <color name="homepilot_ad_cta_background">#22B953</color>
+    <color name="homepilot_ad_cta_text">#FFFFFF</color>
 </resources>

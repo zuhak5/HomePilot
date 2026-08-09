@@ -28,7 +28,14 @@ class HkFeedbackItem {
     this.duration = const Duration(seconds: 4),
     this.batchCount = 1,
     this.batchItemType,
+    this.batchMessageBuilder,
+    this.semanticLabel,
+    this.batchSemanticLabelBuilder,
+    this.actionSuccessMessage,
+    this.batchActionSuccessMessageBuilder,
+    this.actionFailureMessage,
     this.bottomOffset,
+    this.margin,
     this.reserveFloatingActionButton = false,
   });
 
@@ -44,7 +51,14 @@ class HkFeedbackItem {
   final Duration duration;
   final int batchCount;
   final String? batchItemType;
+  final Widget Function(int count)? batchMessageBuilder;
+  final String? semanticLabel;
+  final String Function(int count)? batchSemanticLabelBuilder;
+  final Widget? actionSuccessMessage;
+  final Widget Function(int count)? batchActionSuccessMessageBuilder;
+  final Widget? actionFailureMessage;
   final double? bottomOffset;
+  final EdgeInsetsGeometry? margin;
   final bool reserveFloatingActionButton;
 
   HkFeedbackItem copyWith({
@@ -60,7 +74,14 @@ class HkFeedbackItem {
     Duration? duration,
     int? batchCount,
     String? batchItemType,
+    Widget Function(int count)? batchMessageBuilder,
+    String? semanticLabel,
+    String Function(int count)? batchSemanticLabelBuilder,
+    Widget? actionSuccessMessage,
+    Widget Function(int count)? batchActionSuccessMessageBuilder,
+    Widget? actionFailureMessage,
     double? bottomOffset,
+    EdgeInsetsGeometry? margin,
     bool? reserveFloatingActionButton,
   }) {
     return HkFeedbackItem(
@@ -76,9 +97,33 @@ class HkFeedbackItem {
       duration: duration ?? this.duration,
       batchCount: batchCount ?? this.batchCount,
       batchItemType: batchItemType ?? this.batchItemType,
+      batchMessageBuilder: batchMessageBuilder ?? this.batchMessageBuilder,
+      semanticLabel: semanticLabel ?? this.semanticLabel,
+      batchSemanticLabelBuilder:
+          batchSemanticLabelBuilder ?? this.batchSemanticLabelBuilder,
+      actionSuccessMessage:
+          actionSuccessMessage ?? this.actionSuccessMessage,
+      batchActionSuccessMessageBuilder:
+          batchActionSuccessMessageBuilder ??
+          this.batchActionSuccessMessageBuilder,
+      actionFailureMessage:
+          actionFailureMessage ?? this.actionFailureMessage,
       bottomOffset: bottomOffset ?? this.bottomOffset,
+      margin: margin ?? this.margin,
       reserveFloatingActionButton:
           reserveFloatingActionButton ?? this.reserveFloatingActionButton,
     );
   }
+}
+
+class HkFeedbackPartialSuccess implements Exception {
+  const HkFeedbackPartialSuccess(this.message);
+
+  final Widget message;
+}
+
+class HkFeedbackAggregateFailure implements Exception {
+  const HkFeedbackAggregateFailure(this.errors);
+
+  final List<Object> errors;
 }

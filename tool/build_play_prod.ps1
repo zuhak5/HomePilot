@@ -197,10 +197,12 @@ try {
     Assert-NoIntegrationTestRegistrant
     Invoke-Flutter -Arguments (@('build', 'appbundle', '--flavor', 'prod', '--release') + $productionDefines)
     Assert-NoIntegrationTestRegistrant
-    Copy-Item `
-        (Join-Path $workspace 'build\app\outputs\bundle\prodRelease\app-prod-release.aab') `
-        (Join-Path $workspace 'build\app\outputs\bundle\prodRelease\app-release.aab') `
-        -Force
+    $bundleDirectory = Join-Path $workspace 'build\app\outputs\bundle\prodRelease'
+    $bundles = @(Get-ChildItem -LiteralPath $bundleDirectory -File -Filter '*.aab')
+    if ($bundles.Count -ne 1) {
+        throw "Expected exactly one prodRelease AAB, found $($bundles.Count)."
+    }
+    Write-Host "Created production AAB: $($bundles[0].FullName)"
 }
 finally {
     Pop-Location

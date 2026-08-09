@@ -1,85 +1,161 @@
 .deletion-container {
-  max-width: 720px;
+  max-width: 760px;
   margin-top: 2rem;
   margin-bottom: 4rem;
 }
 
 .deletion-card {
-  padding: 2rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
   border-radius: 12px;
 }
 
 .deletion-card h1 {
-  font-size: 1.875rem;
-  font-weight: 700;
   margin-bottom: 0.5rem;
+  font-size: clamp(1.65rem, 5vw, 1.875rem);
+  font-weight: 700;
 }
 
 .lead {
-  font-size: 1.125rem;
+  margin-bottom: 1.5rem;
   color: var(--text-secondary, #9ca3af);
-  margin-bottom: 1.5rem;
+  font-size: 1.125rem;
 }
 
-.info-box, .instructions-box, .action-box {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+.info-box,
+.instructions-box,
+.action-box {
+  margin-bottom: 1.5rem;
   padding: 1.25rem;
-  margin-bottom: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.info-box h2, .instructions-box h2, .action-box h2 {
-  font-size: 1.25rem;
+.info-box h2,
+.instructions-box h2,
+.action-box h2 {
   margin-bottom: 0.75rem;
   color: var(--text-primary, #f9fafb);
+  font-size: 1.25rem;
 }
 
-.info-box ul, .instructions-box ol {
-  padding-left: 1.25rem;
+.info-box h2:not(:first-child) {
+  margin-top: 1.25rem;
+}
+
+.info-box ul {
   margin-bottom: 0.75rem;
+  padding-left: 1.25rem;
 }
 
-.info-box li, .instructions-box li {
+.info-box li {
   margin-bottom: 0.5rem;
   line-height: 1.5;
 }
 
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
   padding: 0.75rem 1.5rem;
+  border: 0;
   border-radius: 6px;
-  font-weight: 600;
-  font-size: 1rem;
   cursor: pointer;
-  border: none;
-  transition: background-color 0.2s ease;
+  font: inherit;
+  font-weight: 700;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.deletion-card [hidden] {
+  display: none !important;
+}
+
+.btn:focus-visible,
+.confirmation-label:focus-within,
+.footer a:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 3px;
 }
 
 .primary-btn {
-  background-color: #159a3b;
+  background-color: #16883a;
   color: #ffffff;
 }
 
-.primary-btn:hover {
-  background-color: #117e30;
+.primary-btn:hover:not(:disabled) {
+  background-color: #126f31;
 }
 
 .danger-btn {
-  background-color: #dc2626;
+  margin-top: 1rem;
+  background-color: #c81e1e;
   color: #ffffff;
 }
 
-.danger-btn:hover {
-  background-color: #b91c1c;
+.danger-btn:hover:not(:disabled) {
+  background-color: #a71919;
 }
 
-.danger-btn:disabled {
-  opacity: 0.5;
+.btn:disabled {
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
-#deletion-status {
+.status-message {
+  min-height: 1.5rem;
   margin-bottom: 1rem;
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.status-message.is-error {
+  color: #fca5a5;
+}
+
+.status-message.is-success {
+  color: #6ee7b7;
+}
+
+.authenticated-identity {
+  margin-top: 1rem;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary, #d1d5db);
+}
+
+.confirmation-group {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  border-radius: 8px;
+}
+
+.confirmation-group legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+}
+
+.confirmation-label {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  line-height: 1.5;
+}
+
+.confirmation-label input {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .btn {
+    width: 100%;
+  }
 }

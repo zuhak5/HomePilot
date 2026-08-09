@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -65,6 +66,7 @@ import 'src/features/auth/presentation/authentication_gate.dart';
 import 'src/features/auth/presentation/auth_providers.dart';
 import 'src/features/monetization/monetization.dart';
 import 'src/features/maintenance/application/task_creation_controller.dart';
+import 'src/features/maintenance/data/task_creation_operation_store.dart';
 import 'src/features/maintenance/domain/task_creation.dart';
 import 'src/features/maintenance/presentation/task_completion_controller.dart';
 import 'src/i18n/dynamic_text.dart';
@@ -74,6 +76,7 @@ import 'src/ui/components.dart' as hk_ui;
 import 'src/ui/full_bleed_illustration_background.dart';
 import 'src/ui/full_canvas_system_ui.dart';
 import 'src/features/permissions/application/permission_education_controller.dart';
+import 'src/features/permissions/domain/capability_snapshots.dart';
 import 'src/features/permissions/domain/permission_capability.dart';
 import 'src/features/permissions/presentation/permission_education_overlay.dart';
 import 'src/features/permissions/presentation/permission_setup_screen.dart';
@@ -132,7 +135,6 @@ const _themeTransitionDuration = Duration(milliseconds: 620);
 const _themeTransitionCurve = Curves.easeInOutCubic;
 const _routeTransitionDuration = Duration(milliseconds: 260);
 const _routeTransitionReverseDuration = Duration(milliseconds: 180);
-const minimumNativeSplashDuration = Duration(milliseconds: 3200);
 const _preferredOrientations = <DeviceOrientation>[
   DeviceOrientation.portraitUp,
 ];
@@ -142,11 +144,6 @@ List<DeviceOrientation> preferredAppOrientations() => _preferredOrientations;
 
 Future<void> configurePreferredOrientations() {
   return SystemChrome.setPreferredOrientations(_preferredOrientations);
-}
-
-@visibleForTesting
-Duration remainingNativeSplashDuration(Duration _) {
-  return Duration.zero;
 }
 
 typedef StartupThemeLoader = Future<ThemeStartupSettings> Function();
@@ -166,8 +163,6 @@ class HomePilotBootstrap extends StatefulWidget {
     this.database,
     this.appConfig,
     this.supabaseClient,
-    required this.elapsedBeforeFirstFrame,
-    this.minimumSplashDuration = minimumNativeSplashDuration,
     this.startupThemeLoader,
     this.appBuilder,
     super.key,
@@ -178,8 +173,6 @@ class HomePilotBootstrap extends StatefulWidget {
   final AppDatabase? database;
   final AppConfig? appConfig;
   final SupabaseClient? supabaseClient;
-  final Duration elapsedBeforeFirstFrame;
-  final Duration minimumSplashDuration;
   final StartupThemeLoader? startupThemeLoader;
   final BootstrappedAppBuilder? appBuilder;
 
@@ -219,12 +212,6 @@ class _HomePilotBootstrapState extends State<HomePilotBootstrap> {
                   await ref
                       .read(syncCoordinatorProvider)
                       ?.prepareForAccountDeletion(userId);
-                  await ref
-                      .read(notificationSchedulerProvider)
-                      .clearAllScheduledReminders();
-                  await ref.read(notificationInboxRepositoryProvider).clear();
-                  await cancelAccountScopedBackgroundWork();
-                  ref.read(initialHomeSnapshotProvider).value = null;
                 },
               ),
               accountDeletionCancelProvider.overrideWith(
@@ -237,10 +224,27 @@ class _HomePilotBootstrapState extends State<HomePilotBootstrap> {
                       .refreshSchedules();
                 },
               ),
-              accountDeletionLocalCleanupProvider.overrideWithValue(
-                (userId) => LocalAccountDataCleaner(
-                  LocalSyncStore(database),
-                ).clearAfterCloudDeletion(userId),
+              accountDeletionLocalCleanupProvider.overrideWith(
+                (ref) => (userId) async {
+                  await LocalAccountDataCleaner(
+                    LocalSyncStore(database),
+                  ).clearAfterCloudDeletion(
+                    userId,
+                    additionalCleanup: (accountId) async {
+                      await ref
+                          .read(offlineCreationDraftStoreProvider)
+                          .clearForAccount(accountId);
+                      await ref
+                          .read(taskCreationOperationStoreProvider)
+                          .clearOperationsForAccount(accountId);
+                    },
+                  );
+                  await ref
+                      .read(notificationSchedulerProvider)
+                      .clearAllScheduledReminders();
+                  await cancelAccountScopedBackgroundWork();
+                  ref.read(initialHomeSnapshotProvider).value = null;
+                },
               ),
             ],
       child: _HomeStartupGate(
@@ -310,9 +314,8 @@ class _HomeStartupGateState extends ConsumerState<_HomeStartupGate> {
   Widget build(BuildContext context) {
     final startupTheme = _startupTheme;
     if (startupTheme == null) {
-      return const ColoredBox(
-        key: ValueKey('startup-theme-placeholder'),
-        color: HkColors.appBackground,
+      return const HomePilotStartupSurface(
+        key: ValueKey('startup-theme-loading'),
       );
     }
     return widget.appBuilder(startupTheme);
@@ -394,13 +397,13 @@ Future<void> main() async {
       error: error,
       stackTrace: stackTrace,
     );
-    runApp(const HomePilotStartupFailure());
+    _runHomePilotProcess(const HomePilotStartupFailure());
     return;
   }
 
   Future<void> runHomePilot() async {
     final database = AppDatabase();
-    runApp(
+    _runHomePilotProcess(
       _DeferredHomePilotBootstrap(
         database: database,
         config: config,
@@ -427,6 +430,10 @@ Future<void> main() async {
     );
     await runHomePilot();
   }
+}
+
+void _runHomePilotProcess(Widget child) {
+  runApp(HomePilotProcessSplash(child: child));
 }
 
 class _DeferredHomePilotBootstrap extends StatefulWidget {
@@ -470,7 +477,14 @@ class _DeferredHomePilotBootstrapState
     try {
       final resumed = await LocalAccountDataCleaner(
         LocalSyncStore(widget.database),
-      ).resumePendingCleanup();
+      ).resumePendingCleanup(
+        additionalCleanup: (accountId) async {
+          await const OfflineCreationDraftStore().clearForAccount(accountId);
+          await TaskCreationOperationStore(
+            storage: const FlutterSecureStorage(),
+          ).clearOperationsForAccount(accountId);
+        },
+      );
       if (resumed) AppLogger.info('account_deletion_local_cleanup_resumed');
     } on Object catch (error) {
       AppLogger.warning(
@@ -534,13 +548,14 @@ class _DeferredHomePilotBootstrapState
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
-      return const ColoredBox(color: HkColors.appBackground);
+      return const HomePilotStartupSurface(
+        key: ValueKey('deferred-startup-loading'),
+      );
     }
     return HomePilotBootstrap(
       database: widget.database,
       appConfig: widget.config,
       supabaseClient: _supabaseClient,
-      elapsedBeforeFirstFrame: widget.elapsedBeforeFirstFrame,
     );
   }
 }
@@ -703,6 +718,7 @@ final notificationSchedulerProvider = Provider<NotificationScheduler>(
     notificationInboxRepository: ref.watch(notificationInboxRepositoryProvider),
     settingsRepository: ref.watch(settingsRepositoryProvider),
     weatherRepository: ref.watch(weatherRepositoryProvider),
+    permissionGateway: ref.watch(permissionCoordinatorProvider),
     onNotificationPayload: _openNotificationPayload,
   ),
 );
@@ -2166,42 +2182,38 @@ class _HomePilotAppState extends ConsumerState<HomePilotApp>
       theme: HomePilotTheme.light(),
       darkTheme: HomePilotTheme.dark(),
       builder: (context, child) {
-        // Splash is process-scoped presentation. Do not duplicate inside auth/startup/router branches.
-        return HomePilotSplashOverlay(
-          child: ValueListenableBuilder<StartupBootstrapState>(
-            valueListenable: startupController.stateListenable,
-            builder: (context, startupState, _) {
-              final effectiveStartupStatus =
-                  startupState.status ??
-                  _syntheticStartupStatus(RestoreRunState.running);
-              if (startupState.kind !=
-                  StartupBootstrapKind.authenticatedReady) {
-                return _StartupHome(
-                  state: startupState,
-                  status: effectiveStartupStatus,
-                  language: appLanguage,
-                  onLanguageChanged: (language) => ref
-                      .read(settingsRepositoryProvider)
-                      .setAppLocalePreference(language),
-                  onRetry: startupController.retryStartupRestore,
-                  onCheckConnection: startupController.retryStartupRestore,
-                  onContinueOffline: startupState.canContinueOffline
-                      ? startupController.continueStartupOffline
-                      : null,
-                  onSignOut: startupController.signOutFromStartup,
-                );
-              }
-              return MonetizationBootstrap(
-                child: CloudSyncBootstrap(
-                  child: NotificationBootstrap(
-                    child: StandardSystemUi(
-                      child: child ?? const SizedBox.shrink(),
-                    ),
+        return ValueListenableBuilder<StartupBootstrapState>(
+          valueListenable: startupController.stateListenable,
+          builder: (context, startupState, _) {
+            final effectiveStartupStatus =
+                startupState.status ??
+                _syntheticStartupStatus(RestoreRunState.running);
+            if (startupState.kind != StartupBootstrapKind.authenticatedReady) {
+              return _StartupHome(
+                state: startupState,
+                status: effectiveStartupStatus,
+                language: appLanguage,
+                onLanguageChanged: (language) => ref
+                    .read(settingsRepositoryProvider)
+                    .setAppLocalePreference(language),
+                onRetry: startupController.retryStartupRestore,
+                onCheckConnection: startupController.retryStartupRestore,
+                onContinueOffline: startupState.canContinueOffline
+                    ? startupController.continueStartupOffline
+                    : null,
+                onSignOut: startupController.signOutFromStartup,
+              );
+            }
+            return MonetizationBootstrap(
+              child: CloudSyncBootstrap(
+                child: NotificationBootstrap(
+                  child: StandardSystemUi(
+                    child: child ?? const SizedBox.shrink(),
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -3882,6 +3894,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   final GlobalKey _weatherEducationTargetKey = GlobalKey();
   final GlobalKey _notificationEducationTargetKey = GlobalKey();
   bool _forcePermissionEducationHandled = false;
+  bool _permissionOverlaySuspendsNativeAds = false;
 
   @override
   void initState() {
@@ -3891,6 +3904,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     ref.listenManual(tasksProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(assetsProvider, (_, _) => _scheduleHomeDataCommit());
     ref.listenManual(roomsProvider, (_, _) => _scheduleHomeDataCommit());
+    ref.listenManual(permissionEducationControllerProvider, (_, next) {
+      _setPermissionOverlayNativeAdSuspension(
+        next.isVisible && next.activeCapability != null,
+      );
+    });
     scheduleMicrotask(() {
       if (mounted) {
         ref.read(permissionEducationControllerProvider.notifier).initialize();
@@ -3927,17 +3945,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      ref
-          .read(permissionEducationControllerProvider.notifier)
-          .handleAppResume();
+      unawaited(
+        ref
+            .read(permissionEducationControllerProvider.notifier)
+            .handleAppResume(),
+      );
     }
   }
 
   @override
   void dispose() {
+    _setPermissionOverlayNativeAdSuspension(false);
     WidgetsBinding.instance.removeObserver(this);
     _homeDataTimer?.cancel();
     super.dispose();
+  }
+
+  void _setPermissionOverlayNativeAdSuspension(bool shouldSuspend) {
+    if (_permissionOverlaySuspendsNativeAds == shouldSuspend) return;
+    _permissionOverlaySuspendsNativeAds = shouldSuspend;
+    final depth = ref.read(nativeAdPresentationDepthProvider.notifier);
+    if (shouldSuspend) {
+      depth.push();
+    } else {
+      depth.pop();
+    }
   }
 
   _HomeRenderData _readHomeData() {
@@ -4002,6 +4034,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final headerExtent = _dashboardHeaderExtent(context, topPadding);
     final hasThings = assets.isNotEmpty;
     final canAddThing = rooms.isNotEmpty;
+    final permissionState = ref.watch(permissionEducationControllerProvider);
+    final weatherCapability = permissionState.setupSnapshot?.weather;
     return Scaffold(
       floatingActionButton: hasThings
           ? Padding(
@@ -4051,11 +4085,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               RepaintBoundary(
-                                child: _DashboardWeatherCard(
+                                 child: _DashboardWeatherCard(
                                   educationLink: _weatherEducationLink,
                                   educationTargetKey:
                                       _weatherEducationTargetKey,
-                                  onEducationTap: null,
+                                  capability: weatherCapability,
+                                  onEducationTap: () => unawaited(
+                                    ref
+                                        .read(
+                                          permissionEducationControllerProvider
+                                              .notifier,
+                                        )
+                                        .initialize(
+                                          source: PermissionEducationSource
+                                              .weatherCard,
+                                          forceShow: true,
+                                        ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: HkSpacing.sm),
@@ -4178,11 +4224,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
           PermissionEducationOverlayWrapper(
             targetLink: _weatherEducationLink,
-            onChooseLocationManually: () => showModalBottomSheet<HomeLocation>(
-              context: context,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (_) => const LocationPickerSheet(),
+            onChooseLocationManually: () => runWithNativeAdsSuspended(
+              context,
+              () => showModalBottomSheet<HomeLocation>(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => const LocationPickerSheet(),
+              ),
             ),
           ),
         ],
@@ -4256,11 +4305,13 @@ class _DashboardWeatherCard extends ConsumerWidget {
   const _DashboardWeatherCard({
     required this.educationLink,
     required this.educationTargetKey,
+    required this.capability,
     this.onEducationTap,
   });
 
   final LayerLink educationLink;
   final GlobalKey educationTargetKey;
+  final WeatherAreaCapabilitySnapshot? capability;
   final VoidCallback? onEducationTap;
 
   @override
@@ -4275,21 +4326,15 @@ class _DashboardWeatherCard extends ConsumerWidget {
       link: educationLink,
       child: KeyedSubtree(
         key: educationTargetKey,
-        child: Semantics(
-          button: onEducationTap != null,
-          label: onEducationTap == null ? null : context.l10n.enableLocation,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: onEducationTap,
-            child: _WeatherCard(
-              weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
-              location: location,
-              localNow: themeNow,
-              isDark: brightness == Brightness.dark,
-              onToggleTheme: () =>
-                  _toggleWeatherTheme(context, ref, brightness),
-            ),
-          ),
+        child: _WeatherCard(
+          weather: ref.watch(weatherProvider).value ?? snapshot?.weather,
+          location: location,
+          capability: capability,
+          localNow: themeNow,
+          isDark: brightness == Brightness.dark,
+          onToggleTheme: () =>
+              _toggleWeatherTheme(context, ref, brightness),
+          onCapabilityAction: onEducationTap,
         ),
       ),
     );
@@ -5350,16 +5395,20 @@ class _WeatherCard extends StatelessWidget {
   const _WeatherCard({
     required this.weather,
     required this.location,
+    required this.capability,
     required this.localNow,
     required this.isDark,
     required this.onToggleTheme,
+    required this.onCapabilityAction,
   });
 
   final WeatherSnapshot? weather;
   final HomeLocation? location;
+  final WeatherAreaCapabilitySnapshot? capability;
   final DateTime localNow;
   final bool isDark;
   final VoidCallback onToggleTheme;
+  final VoidCallback? onCapabilityAction;
 
   @override
   Widget build(BuildContext context) {
@@ -5409,8 +5458,11 @@ class _WeatherCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.all(HkSpacing.sm),
-            child: current == null
-                ? Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (current == null)
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       _WeatherIconBadge(icon: Symbols.location_on_rounded),
@@ -5447,7 +5499,8 @@ class _WeatherCard extends StatelessWidget {
                       ),
                     ],
                   )
-                : Column(
+                else
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       LayoutBuilder(
@@ -5529,7 +5582,89 @@ class _WeatherCard extends StatelessWidget {
                       WeatherDetailChips(weather: current),
                     ],
                   ),
+                if (capability != null) ...[
+                  const SizedBox(height: HkSpacing.xs),
+                  _WeatherCapabilityStatus(
+                    capability: capability!,
+                    onAction: onCapabilityAction,
+                  ),
+                ],
+              ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeatherCapabilityStatus extends StatelessWidget {
+  const _WeatherCapabilityStatus({
+    required this.capability,
+    required this.onAction,
+  });
+
+  final WeatherAreaCapabilitySnapshot capability;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isManual = capability.mode == WeatherAreaMode.manual;
+    final isDeviceActive = capability.mode == WeatherAreaMode.device &&
+        capability.effectiveState == EffectiveCapabilityState.active;
+    final label = isManual && capability.selectedArea != null
+        ? context.l10n.permissionSelectedArea(capability.selectedArea!.label)
+        : isDeviceActive
+        ? context.l10n.permissionUsingCurrentLocation
+        : capability.locationServiceEnabled == false
+        ? context.l10n.locationServicesAreOff
+        : capability.isConfigured
+        ? context.l10n.permissionLocationAccessRequired
+        : context.l10n.weatherNotSet;
+    final showAction = !isDeviceActive;
+    final actionLabel = isManual
+        ? context.l10n.change
+        : capability.locationServiceEnabled == false
+        ? context.l10n.turnOnLocationServices
+        : context.l10n.configure;
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Row(
+        children: [
+          Icon(
+            isManual
+                ? Symbols.location_city_rounded
+                : isDeviceActive
+                ? Symbols.my_location_rounded
+                : Symbols.location_off_rounded,
+            size: 18,
+            color: isManual || isDeviceActive
+                ? scheme.primary
+                : scheme.error,
+          ),
+          const SizedBox(width: HkSpacing.xs),
+          Expanded(
+            child: Text(
+              label,
+              key: const ValueKey('dashboard-weather-capability-status'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          if (showAction)
+            SizedBox(
+              height: 48,
+              child: TextButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Symbols.settings_rounded, size: 18),
+                label: Text(actionLabel),
+              ),
+            ),
         ],
       ),
     );
@@ -10936,11 +11071,49 @@ Future<void> _saveAccountNickname(WidgetRef ref, String? nickname) async {
   unawaited(_syncProfileIfEnabled(ref));
 }
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    scheduleMicrotask(() {
+      if (mounted) {
+        unawaited(
+          ref
+              .read(permissionEducationControllerProvider.notifier)
+              .refreshCapabilities(),
+        );
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(
+        ref
+            .read(permissionEducationControllerProvider.notifier)
+            .handleAppResume(),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final location = ref.watch(homeLocationProvider).value;
     final weather = ref.watch(weatherProvider).value;
     final startupTheme = ref.watch(startupThemeSettingsProvider);
@@ -10958,7 +11131,9 @@ class SettingsScreen extends ConsumerWidget {
     final notificationPreferences =
         ref.watch(notificationPreferencesProvider).value ??
         const NotificationPreferences();
-    final notificationState = ref.watch(notificationPermissionStateProvider);
+    final capabilitySetup = ref
+        .watch(permissionEducationControllerProvider)
+        .setupSnapshot;
     final consent = ref.watch(consentSnapshotProvider).value;
     final reminderHours = {
       ...[7, 8, 9, 10, 12, 18],
@@ -11161,30 +11336,58 @@ class SettingsScreen extends ConsumerWidget {
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
                 const SizedBox(height: HkSpacing.space4),
-                notificationState.when(
-                  data: (state) => Column(
+                if (capabilitySetup == null)
+                  const LinearProgressIndicator()
+                else
+                  Column(
                     children: [
                       _NotificationStatusRow(
                         icon: Symbols.notifications_rounded,
-                        label: context.l10n.pushNotifications,
-                        value: state.notificationsEnabled
-                            ? context.l10n.allowed
-                            : context.l10n.blocked,
-                        good: state.notificationsEnabled,
+                        label: context.l10n.deviceReminders,
+                        value: _effectiveCapabilityLabel(
+                          context,
+                          capabilitySetup.notifications.deviceReminderState,
+                        ),
+                        good:
+                            capabilitySetup.notifications.deviceReminderState ==
+                            EffectiveCapabilityState.active,
                       ),
                       _NotificationStatusRow(
                         icon: Symbols.alarm_on_rounded,
                         label: context.l10n.alarmsAndReminders,
-                        value: state.canScheduleExact
-                            ? context.l10n.allowed
-                            : context.l10n.needsAccess,
-                        good: state.canScheduleExact,
+                        value: _effectiveCapabilityLabel(
+                          context,
+                          capabilitySetup.notifications.exactTimingState,
+                          approximateWhenDegraded: true,
+                        ),
+                        good:
+                            capabilitySetup.notifications.exactTimingState ==
+                            EffectiveCapabilityState.active,
+                      ),
+                      _NotificationStatusRow(
+                        icon: Symbols.inbox_rounded,
+                        label: context.l10n.inAppInbox,
+                        value: _effectiveCapabilityLabel(
+                          context,
+                          capabilitySetup.notifications.inboxState,
+                        ),
+                        good:
+                            capabilitySetup.notifications.inboxState ==
+                            EffectiveCapabilityState.active,
+                      ),
+                      _NotificationStatusRow(
+                        icon: Symbols.rainy_rounded,
+                        label: context.l10n.weatherAlerts,
+                        value: _effectiveCapabilityLabel(
+                          context,
+                          capabilitySetup.notifications.weatherAlertState,
+                        ),
+                        good:
+                            capabilitySetup.notifications.weatherAlertState ==
+                            EffectiveCapabilityState.active,
                       ),
                     ],
                   ),
-                  error: (_, _) => const SizedBox.shrink(),
-                  loading: () => const LinearProgressIndicator(),
-                ),
                 const SizedBox(height: HkSpacing.xs),
                 ListTile(
                   key: const ValueKey('settings-permission-education'),
@@ -11204,10 +11407,8 @@ class SettingsScreen extends ConsumerWidget {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.notifications_active_outlined),
-                  title: Text(context.l10n.enabled),
-                  subtitle: Text(
-                    context.l10n.maintenanceWeatherAndDigestAlerts,
-                  ),
+                  title: Text(context.l10n.homePilotAlerts),
+                  subtitle: Text(context.l10n.homePilotAlertsDescription),
                   value: notificationPreferences.enabled,
                   onChanged: (value) => _saveNotificationPreferences(
                     context,
@@ -11215,44 +11416,82 @@ class SettingsScreen extends ConsumerWidget {
                     notificationPreferences.copyWith(enabled: value),
                   ),
                 ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.alarm_rounded),
-                  title: Text(context.l10n.deviceReminders),
-                  subtitle: Text(context.l10n.scheduledAndroidReminderDelivery),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.localReminders,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(
-                            localReminders: value,
-                          ),
-                        )
-                      : null,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.alarm_on_rounded),
-                  title: Text(context.l10n.preciseReminderAlarms),
-                  subtitle: Text(
-                    context.l10n.askAndroidForAlarmsAndRemindersAccess,
+                if (capabilitySetup != null &&
+                    notificationPreferences.allowsLocalReminders &&
+                    capabilitySetup.notifications.deviceReminderState !=
+                        EffectiveCapabilityState.active)
+                  _EffectiveCapabilityPreferenceTile(
+                    key: const ValueKey('device-reminders-recovery'),
+                    icon: Symbols.alarm_rounded,
+                    title: context.l10n.deviceReminders,
+                    subtitle: context.l10n.scheduledAndroidReminderDelivery,
+                    state:
+                        capabilitySetup.notifications.deviceReminderState,
+                    onFix: () => _enableDeviceReminders(context, ref),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Symbols.alarm_rounded),
+                    title: Text(context.l10n.deviceReminders),
+                    subtitle: Text(
+                      context.l10n.scheduledAndroidReminderDelivery,
+                    ),
+                    value:
+                        notificationPreferences.enabled &&
+                        notificationPreferences.localReminders,
+                    onChanged: notificationPreferences.enabled
+                        ? (value) => value
+                              ? _enableDeviceReminders(context, ref)
+                              : _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    localReminders: false,
+                                    preferExactReminders: false,
+                                  ),
+                                )
+                        : null,
                   ),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.preferExactReminders,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(
-                            preferExactReminders: value,
-                          ),
-                        )
-                      : null,
-                ),
+                if (capabilitySetup != null &&
+                    notificationPreferences.preferExactReminders &&
+                    capabilitySetup.notifications.exactTimingState !=
+                        EffectiveCapabilityState.active)
+                  _EffectiveCapabilityPreferenceTile(
+                    key: const ValueKey('exact-reminders-recovery'),
+                    icon: Symbols.alarm_on_rounded,
+                    title: context.l10n.preciseReminderAlarms,
+                    subtitle:
+                        context.l10n.askAndroidForAlarmsAndRemindersAccess,
+                    state: capabilitySetup.notifications.exactTimingState,
+                    approximateWhenDegraded: true,
+                    onFix: notificationPreferences.allowsLocalReminders
+                        ? () => _enableExactTiming(context, ref)
+                        : null,
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Symbols.alarm_on_rounded),
+                    title: Text(context.l10n.preciseReminderAlarms),
+                    subtitle: Text(
+                      context.l10n.askAndroidForAlarmsAndRemindersAccess,
+                    ),
+                    value:
+                        notificationPreferences.enabled &&
+                        notificationPreferences.preferExactReminders,
+                    onChanged: notificationPreferences.allowsLocalReminders
+                        ? (value) => value
+                              ? _enableExactTiming(context, ref)
+                              : _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    preferExactReminders: false,
+                                  ),
+                                )
+                        : null,
+                  ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Symbols.inbox_rounded),
@@ -11276,7 +11515,7 @@ class SettingsScreen extends ConsumerWidget {
                   secondary: const Icon(Symbols.rainy_rounded),
                   title: Text(context.l10n.weatherAlerts),
                   subtitle: Text(
-                    context.l10n.outdoorTaskAlertsDuringSevereWeather,
+                    context.l10n.weatherAlertsInboxDescription,
                   ),
                   value:
                       notificationPreferences.enabled &&
@@ -11561,11 +11800,6 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 _ReminderSettingsActions(
                   onSendTest: () => _sendTestNotification(context, ref),
-                  onSave: () => _enableNotifications(
-                    context,
-                    ref,
-                    notificationPreferences.copyWith(enabled: true),
-                  ),
                 ),
               ],
             ),
@@ -11599,30 +11833,7 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _openPermissionSetup(BuildContext context, WidgetRef ref) async {
-    try {
-      final permissions = ref.read(permissionCoordinatorProvider);
-      final states = await Future.wait([
-        permissions.check(AppPermissionKind.location),
-        permissions.check(AppPermissionKind.notifications),
-        permissions.check(AppPermissionKind.exactAlarms),
-      ]);
-      if (!context.mounted) return;
-      if (states.every(
-        (state) =>
-            state == AppPermissionState.granted ||
-            state == AppPermissionState.unavailable,
-      )) {
-        hk_ui.showToast(
-          context,
-          content: Text(context.l10n.permissionsAlreadyEnabled),
-        );
-        return;
-      }
-      context.go('/permissions/setup');
-    } catch (error) {
-      AppLogger.warning('permission_setup_open', error: error);
-      if (context.mounted) context.go('/permissions/setup');
-    }
+    await context.push('/permissions/setup');
   }
 
   Future<void> _setAppLanguage(
@@ -11658,6 +11869,9 @@ class SettingsScreen extends ConsumerWidget {
     await ref.read(settingsRepositoryProvider).setHomeLocation(location);
     await ref.read(weatherRepositoryProvider).refreshWeather();
     await refreshNotificationSchedules(ref);
+    await ref
+        .read(permissionEducationControllerProvider.notifier)
+        .refreshCapabilities();
     if (!context.mounted) {
       return;
     }
@@ -11667,21 +11881,17 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _useDeviceLocation(BuildContext context, WidgetRef ref) async {
     try {
-      final allowed = await _ensurePermission(
-        context,
-        ref,
-        kind: AppPermissionKind.location,
-        title: context.l10n.useThisDeviceLocation,
-        message: context.l10n.locationPermissionBody,
+      final controller = ref.read(
+        permissionEducationControllerProvider.notifier,
       );
-      if (!allowed || !context.mounted) return;
-      final location = await ref
-          .read(weatherRepositoryProvider)
-          .useDeviceLocation();
+      await controller.refreshCapabilities();
+      await controller.useCurrentLocation();
       if (!context.mounted) {
         return;
       }
-      if (location == null) {
+      final location =
+          controller.currentState.setupSnapshot?.weather.selectedArea;
+      if (location == null || location.source.toLowerCase() != 'device') {
         hk_ui.showToast(
           context,
           content: Text(context.l10n.deviceLocationIsUnavailable),
@@ -11747,14 +11957,6 @@ class SettingsScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     NotificationPreferences preferences,
-  ) {
-    return _enableNotifications(context, ref, preferences);
-  }
-
-  Future<void> _enableNotifications(
-    BuildContext context,
-    WidgetRef ref,
-    NotificationPreferences preferences,
   ) async {
     try {
       await ref
@@ -11763,36 +11965,11 @@ class SettingsScreen extends ConsumerWidget {
       ref.invalidate(notificationPreferencesProvider);
       final scheduler = ref.read(notificationSchedulerProvider);
       await scheduler.initialize();
-      if (!context.mounted) {
-        return;
-      }
-      if (preferences.allowsLocalReminders) {
-        final notificationsAllowed = await _ensurePermission(
-          context,
-          ref,
-          kind: AppPermissionKind.notifications,
-          title: context.l10n.allowHomePilotReminders,
-          message: context.l10n.notificationsPermissionBody,
-        );
-        if (!notificationsAllowed || !context.mounted) return;
-        if (preferences.preferExactReminders) {
-          final exactAllowed = await _ensurePermission(
-            context,
-            ref,
-            kind: AppPermissionKind.exactAlarms,
-            title: context.l10n.allowPreciseReminderTiming,
-            message: context.l10n.preciseAlarmsPermissionBody,
-          );
-          if (!exactAllowed && context.mounted) {
-            hk_ui.showToast(
-              context,
-              content: Text(context.l10n.approximateReminderTimingWarning),
-            );
-          }
-        }
-      }
       await scheduler.refreshSchedules();
       ref.invalidate(notificationPermissionStateProvider);
+      await ref
+          .read(permissionEducationControllerProvider.notifier)
+          .refreshCapabilities();
       if (!context.mounted) {
         return;
       }
@@ -11814,6 +11991,82 @@ class SettingsScreen extends ConsumerWidget {
           severity: hk_ui.HkToastSeverity.error,
         );
       }
+    }
+  }
+
+  Future<void> _enableDeviceReminders(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    try {
+      final controller = ref.read(
+        permissionEducationControllerProvider.notifier,
+      );
+      await controller.refreshCapabilities();
+      await controller.enableNotifications();
+      ref.invalidate(notificationPreferencesProvider);
+      ref.invalidate(notificationPermissionStateProvider);
+      if (!context.mounted) return;
+      final effective = controller
+          .currentState
+          .setupSnapshot
+          ?.notifications
+          .deviceReminderState;
+      if (effective == EffectiveCapabilityState.active) {
+        hk_ui.showToast(
+          context,
+          content: Text(context.l10n.notificationSettingsUpdated),
+        );
+      }
+    } catch (error) {
+      if (!context.mounted) return;
+      hk_ui.showToast(
+        context,
+        content: Text(
+          _failureMessage(
+            context,
+            error,
+            fallback: AppFailureCode.notificationSetup,
+          ),
+        ),
+        severity: hk_ui.HkToastSeverity.error,
+      );
+    }
+  }
+
+  Future<void> _enableExactTiming(BuildContext context, WidgetRef ref) async {
+    try {
+      final controller = ref.read(
+        permissionEducationControllerProvider.notifier,
+      );
+      await controller.refreshCapabilities();
+      await controller.enableExactTiming();
+      ref.invalidate(notificationPreferencesProvider);
+      ref.invalidate(notificationPermissionStateProvider);
+      if (!context.mounted) return;
+      final effective =
+          controller.currentState.setupSnapshot?.notifications.exactTimingState;
+      hk_ui.showToast(
+        context,
+        content: Text(
+          effective == EffectiveCapabilityState.active
+              ? context.l10n.notificationSettingsUpdated
+              : context.l10n.approximateReminderTimingWarning,
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      hk_ui.showToast(
+        context,
+        content: Text(
+          _failureMessage(
+            context,
+            error,
+            fallback: AppFailureCode.notificationSetup,
+          ),
+        ),
+        severity: hk_ui.HkToastSeverity.error,
+      );
     }
   }
 
@@ -11938,54 +12191,22 @@ class SettingsScreen extends ConsumerWidget {
 }
 
 class _ReminderSettingsActions extends StatelessWidget {
-  const _ReminderSettingsActions({
-    required this.onSendTest,
-    required this.onSave,
-  });
+  const _ReminderSettingsActions({required this.onSendTest});
 
   final VoidCallback onSendTest;
-  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stack = constraints.maxWidth < 310;
-        final sendButton = OutlinedButton.icon(
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: SizedBox(
+        height: 48,
+        child: OutlinedButton.icon(
           onPressed: onSendTest,
           icon: const Icon(Symbols.notification_add_rounded, size: 19),
           label: Text(context.l10n.sendTest, maxLines: 1),
-        );
-        final saveButton = FilledButton.icon(
-          onPressed: onSave,
-          icon: const Icon(Symbols.check_rounded, size: 19),
-          label: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              context.l10n.saveReminderSettings,
-              maxLines: 1,
-              softWrap: false,
-            ),
-          ),
-        );
-        if (stack) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(height: 44, child: sendButton),
-              const SizedBox(height: 8),
-              SizedBox(height: 44, child: saveButton),
-            ],
-          );
-        }
-        return Row(
-          children: [
-            Expanded(flex: 9, child: SizedBox(height: 44, child: sendButton)),
-            const SizedBox(width: 8),
-            Expanded(flex: 13, child: SizedBox(height: 44, child: saveButton)),
-          ],
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -12018,6 +12239,77 @@ class _NotificationStatusRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _EffectiveCapabilityPreferenceTile extends StatelessWidget {
+  const _EffectiveCapabilityPreferenceTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.state,
+    required this.onFix,
+    this.approximateWhenDegraded = false,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final EffectiveCapabilityState state;
+  final VoidCallback? onFix;
+  final bool approximateWhenDegraded;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.error;
+    return Semantics(
+      container: true,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: color),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: HkSpacing.xs,
+          children: [
+            hk_ui.StatusPill(
+              label: _effectiveCapabilityLabel(
+                context,
+                state,
+                approximateWhenDegraded: approximateWhenDegraded,
+              ),
+              color: color,
+              compact: true,
+            ),
+            if (onFix != null)
+              TextButton(
+                onPressed: onFix,
+                child: Text(context.l10n.fix),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _effectiveCapabilityLabel(
+  BuildContext context,
+  EffectiveCapabilityState state, {
+  bool approximateWhenDegraded = false,
+}) {
+  return switch (state) {
+    EffectiveCapabilityState.active => context.l10n.allowed,
+    EffectiveCapabilityState.degraded =>
+      approximateWhenDegraded
+          ? context.l10n.approximateTiming
+          : context.l10n.limited,
+    EffectiveCapabilityState.blocked => context.l10n.blocked,
+    EffectiveCapabilityState.disabledByUser => context.l10n.disabled,
+    EffectiveCapabilityState.notConfigured => context.l10n.notSet,
+    EffectiveCapabilityState.unavailable => context.l10n.unavailable,
+  };
 }
 
 String _hourLabel(BuildContext context, int hour) {
@@ -14819,9 +15111,33 @@ Future<bool> deleteThingWithConfirmation(
     return false;
   }
   unawaited(hkActionFeedbackService.playDeleted());
-  hk_ui.showToast(
+  hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(asset.name)),
+    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
+    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
+    onUndo: () async {
+      try {
+        await ref.read(assetRepositoryProvider).restoreAsset(asset.id);
+        await refreshNotificationSchedules(ref);
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(context.l10n.nameRestored(asset.name)),
+          );
+        }
+      } on Object catch (error) {
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(
+              _failureMessage(context, error, fallback: AppFailureCode.undo),
+            ),
+            severity: hk_ui.HkToastSeverity.error,
+          );
+        }
+      }
+    },
   );
   return true;
 }
@@ -14857,9 +15173,33 @@ Future<bool> deleteRoomWithConfirmation(
     return false;
   }
   unawaited(hkActionFeedbackService.playDeleted());
-  hk_ui.showToast(
+  hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(room.name)),
+    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
+    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
+    onUndo: () async {
+      try {
+        await ref.read(assetRepositoryProvider).restoreRoom(room.id);
+        await refreshNotificationSchedules(ref);
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(context.l10n.nameRestored(room.name)),
+          );
+        }
+      } on Object catch (error) {
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(
+              _failureMessage(context, error, fallback: AppFailureCode.undo),
+            ),
+            severity: hk_ui.HkToastSeverity.error,
+          );
+        }
+      }
+    },
   );
   return true;
 }
@@ -14902,9 +15242,33 @@ Future<bool> deleteAreaWithConfirmation(
     return false;
   }
   unawaited(hkActionFeedbackService.playDeleted());
-  hk_ui.showToast(
+  hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(area.name)),
+    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
+    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
+    onUndo: () async {
+      try {
+        await ref.read(assetRepositoryProvider).restoreArea(area.id);
+        await refreshNotificationSchedules(ref);
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(context.l10n.nameRestored(area.name)),
+          );
+        }
+      } on Object catch (error) {
+        if (context.mounted) {
+          hk_ui.showToast(
+            context,
+            content: Text(
+              _failureMessage(context, error, fallback: AppFailureCode.undo),
+            ),
+            severity: hk_ui.HkToastSeverity.error,
+          );
+        }
+      }
+    },
   );
   return true;
 }

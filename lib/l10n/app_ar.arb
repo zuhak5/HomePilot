@@ -56,6 +56,10 @@
   "allowed": "مسموح",
   "blocked": "محظور",
   "needsAccess": "يتطلب إذنا",
+  "limited": "محدود",
+  "unavailable": "غير متاح",
+  "configuredManually": "تم الضبط يدويا",
+  "approximateTiming": "توقيت تقريبي",
   "preferences": "التفضيلات",
   "enabled": "مفعل",
   "maintenanceWeatherAndDigestAlerts": "تنبيهات الصيانة والطقس والملخص",
@@ -784,6 +788,7 @@
   "backupProfilePreviewWarning": "تعذر معاينة إعدادات الملف الشخصي.",
   "backupGenericWarning": "تحتوي هذه النسخة الاحتياطية على تحذير توافق. راجعه قبل الاستعادة.",
   "startupStartingHomePilot": "جاري تشغيل HomePilot",
+  "homePilotSplashTagline": "مهامك وروتينك وتذكيراتك\nكلها متزامنة.",
   "startupLoadedPreferences": "تم تحميل التفضيلات",
   "startupOpeningHomePilot": "جاري فتح HomePilot",
   "startupRestoringSession": "جاري استعادة الجلسة",
@@ -986,8 +991,8 @@
   },
   "exactAlarmEducationTitle": "حافظ على التذكيرات في وقتها",
   "enableAlarmsAndRemindersOnboarding": "تفعيل التذكيرات",
-  "permissionSetup": "إعداد الموقع والإشعارات والتذكيرات",
-  "permissionSetupSubtitle": "راجع كيفية استخدام HomePilot للموقع والتذكيرات.",
+  "permissionSetup": "الأذونات والإعداد",
+  "permissionSetupSubtitle": "اختر منطقة الطقس، ثم تحكم في تذكيرات الجهاز والتوقيت الدقيق الاختياري.",
   "permissionsAlreadyEnabled": "تم إعداد الموقع والإشعارات والتذكيرات بالفعل.",
   "permissionSetupFinishLater": "إكمال لاحقاً",
   "permissionSetupChooseLocation": "تحديد مدينة",
@@ -1000,4 +1005,18 @@
   "permissionSetupUseApproximateTiming": "استخدام التوقيت التقريبي",
   "permissionSetupAllowPreciseTiming": "السماح بالتوقيت الدقيق",
   "permissionSetupManageInSettings": "إدارة في الإعدادات"
+  ,"permissionSetupChangeLocation": "تغيير الموقع"
+  ,"permissionSelectedArea": "المنطقة المحددة: {area}"
+  ,"@permissionSelectedArea": {"placeholders": {"area": {"type": "String"}}}
+  ,"permissionUsingCurrentLocation": "يُستخدم الموقع الحالي"
+  ,"permissionLocationAccessRequired": "يلزم إذن الموقع لاستخدام الموقع الحالي."
+  ,"permissionNotificationAccessRequired": "يلزم إذن إشعارات أندرويد لتذكيرات الجهاز."
+  ,"permissionDeviceRemindersOff": "تذكيرات الجهاز متوقفة في HomePilot."
+  ,"permissionExactRequiresDeviceReminders": "شغّل تذكيرات الجهاز قبل تفعيل التوقيت الدقيق."
+  ,"permissionActionCouldNotComplete": "تعذر إكمال الإجراء. حاول مرة أخرى."
+  ,"permissionSettingsCouldNotOpen": "تعذر فتح إعدادات أندرويد. حاول من إعدادات الجهاز."
+  ,"homePilotAlerts": "تنبيهات HomePilot"
+  ,"homePilotAlertsDescription": "يتحكم في كل قنوات تنبيه HomePilot. ما زالت تذكيرات الجهاز تتطلب إذن أندرويد."
+  ,"weatherAlertsInboxDescription": "تحذيرات الطقس التي تظهر في صندوق HomePilot؛ ويتبع إرسالها للجهاز إعداد التذكيرات."
+  ,"fix": "إصلاح"
 }

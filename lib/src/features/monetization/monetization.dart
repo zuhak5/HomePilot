@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,9 @@ import '../../core/config/app_config.dart';
 import '../../core/utils/redacting_logger.dart';
 import '../../ui/app_theme.dart';
 import '../auth/presentation/auth_providers.dart';
+import 'ad_cache.dart';
+import 'ad_retry_policy.dart';
+import 'ad_runtime.dart';
 
 const _nativeFactoryId = 'homepilotNative';
 const _firstSessionStorageKey = 'monetization_has_completed_session_v1';
@@ -31,10 +35,38 @@ enum RewardShowResult {
 
 @visibleForTesting
 Duration adRetryDelayForFailure(int failureCount) {
-  const seconds = [2, 4, 8, 16, 32, 60];
-  final index = (failureCount - 1).clamp(0, seconds.length - 1);
-  return Duration(seconds: seconds[index]);
+  if (failureCount <= 0 || failureCount >= 4) return Duration.zero;
+  const seconds = [2, 4, 8];
+  return Duration(seconds: seconds[failureCount - 1]);
 }
+
+@visibleForTesting
+AdLoadFailureKind classifyAdLoadFailure({
+  required int code,
+  required String domain,
+}) {
+  final normalizedDomain = domain.toLowerCase();
+  if (code == 1) return AdLoadFailureKind.invalidRequest;
+  if (code == 2) return AdLoadFailureKind.network;
+  if (code == 3) return AdLoadFailureKind.noFill;
+  if (code == 0 || normalizedDomain.contains('internal')) {
+    return AdLoadFailureKind.internal;
+  }
+  return AdLoadFailureKind.unknown;
+}
+
+@visibleForTesting
+bool rewardPresentationIsCurrent({
+  required bool disposed,
+  required int requestGeneration,
+  required int currentGeneration,
+  required bool formatAllowed,
+}) => !disposed && requestGeneration == currentGeneration && formatAllowed;
+
+Timer _defaultAdTimer(Duration delay, void Function() callback) =>
+    Timer(delay, callback);
+
+double _defaultAdJitter() => math.Random().nextDouble();
 
 @visibleForTesting
 bool nativeAdPlacementEnabled({
@@ -48,11 +80,11 @@ bool nativeAdPlacementEnabled({
 }) =>
     routeIsCurrent &&
     !presentationSuppressed &&
-    (enabledOverride ??
-        (configEnabled &&
-            consentGranted &&
-            adsInitialized &&
-            platformSupported));
+    enabledOverride != false &&
+    configEnabled &&
+    consentGranted &&
+    adsInitialized &&
+    platformSupported;
 
 final nativeAdPresentationDepthProvider =
     NotifierProvider<NativeAdPresentationDepth, int>(
@@ -137,6 +169,27 @@ class OfflineCreationDraftStore {
       await _storage.delete(key: _storageKey(key));
     } on Object catch (error) {
       AppLogger.warning('offline_creation_draft_clear', error: error);
+    }
+  }
+
+  Future<void> clearForAccount(String accountId) async {
+    final normalized = accountId.trim();
+    if (normalized.isEmpty) return;
+    final prefixes = <String>[
+      _storageKey('asset_copy_${normalized}_'),
+      _storageKey('asset_${normalized}_'),
+      _storageKey('task_${normalized}_'),
+    ];
+    try {
+      final stored = await _storage.readAll();
+      for (final key in stored.keys.toList(growable: false)) {
+        if (prefixes.any(key.startsWith)) {
+          await _storage.delete(key: key);
+        }
+      }
+    } on Object catch (error) {
+      AppLogger.warning('offline_creation_draft_account_clear', error: error);
+      rethrow;
     }
   }
 
@@ -493,9 +546,6 @@ class ConsentSnapshot {
 }
 
 class HomePilotConsentService {
-  HomePilotConsentService(this.ads);
-
-  final HomePilotAdsService ads;
   final _states = StreamController<ConsentSnapshot>.broadcast();
   ConsentSnapshot _current = const ConsentSnapshot.initial();
   bool _started = false;
@@ -509,23 +559,43 @@ class HomePilotConsentService {
     if (_started || !_supportsMobileAds) return;
     _started = true;
     final completion = Completer<void>();
-    ConsentInformation.instance.requestConsentInfoUpdate(
-      ConsentRequestParameters(),
-      () async {
-        await ConsentForm.loadAndShowConsentFormIfRequired((error) {
-          if (error != null) {
+    Future<void> finishRefresh() async {
+      try {
+        await _refresh();
+      } on Object catch (error) {
+        AppLogger.warning('ad_consent_refresh', error: error);
+        _current = const ConsentSnapshot.initial();
+        _states.add(_current);
+      } finally {
+        if (!completion.isCompleted) completion.complete();
+      }
+    }
+
+    try {
+      ConsentInformation.instance.requestConsentInfoUpdate(
+        ConsentRequestParameters(),
+        () async {
+          try {
+            await ConsentForm.loadAndShowConsentFormIfRequired((error) {
+              if (error != null) {
+                AppLogger.warning('ad_consent_form', error: error);
+              }
+            });
+          } on Object catch (error) {
             AppLogger.warning('ad_consent_form', error: error);
+          } finally {
+            await finishRefresh();
           }
-        });
-        await _refreshAndInitializeAds();
-        if (!completion.isCompleted) completion.complete();
-      },
-      (error) async {
-        AppLogger.warning('ad_consent_update', error: error);
-        await _refreshAndInitializeAds();
-        if (!completion.isCompleted) completion.complete();
-      },
-    );
+        },
+        (error) async {
+          AppLogger.warning('ad_consent_update', error: error);
+          await finishRefresh();
+        },
+      );
+    } on Object catch (error) {
+      AppLogger.warning('ad_consent_update', error: error);
+      await finishRefresh();
+    }
     await completion.future;
   }
 
@@ -534,10 +604,10 @@ class HomePilotConsentService {
     await ConsentForm.showPrivacyOptionsForm((error) {
       if (error != null) AppLogger.warning('ad_privacy_options', error: error);
     });
-    await _refreshAndInitializeAds();
+    await _refresh();
   }
 
-  Future<void> _refreshAndInitializeAds() async {
+  Future<void> _refresh() async {
     final canRequestAds = await ConsentInformation.instance.canRequestAds();
     final privacyStatus = await ConsentInformation.instance
         .getPrivacyOptionsRequirementStatus();
@@ -548,7 +618,6 @@ class HomePilotConsentService {
       updated: true,
     );
     _states.add(_current);
-    if (canRequestAds) await ads.initialize();
   }
 
   void dispose() => _states.close();
@@ -566,7 +635,7 @@ final homePilotAdsProvider = Provider<HomePilotAdsService>((ref) {
 });
 
 final consentServiceProvider = Provider<HomePilotConsentService>((ref) {
-  final service = HomePilotConsentService(ref.watch(homePilotAdsProvider));
+  final service = HomePilotConsentService();
   ref.onDispose(service.dispose);
   return service;
 });
@@ -585,31 +654,66 @@ class MonetizationBootstrap extends ConsumerStatefulWidget {
       _MonetizationBootstrapState();
 }
 
-class _MonetizationBootstrapState extends ConsumerState<MonetizationBootstrap> {
+class _MonetizationBootstrapState extends ConsumerState<MonetizationBootstrap>
+    with WidgetsBindingObserver {
+  AppLifecycleState _lifecycleState = AppLifecycleState.detached;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _lifecycleState =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.detached;
+    ref.listenManual(monetizationConfigProvider, (_, _) => _applyRuntime());
+    ref.listenManual(consentSnapshotProvider, (_, _) => _applyRuntime());
     scheduleMicrotask(() async {
       await ref.read(completionAdCoordinatorProvider).initializeSession();
       await ref.read(consentServiceProvider).initialize();
-      final config = ref.read(monetizationConfigProvider).value;
-      if (config?.adsEnabled ?? false) {
-        await ref.read(homePilotAdsProvider).preloadFullScreenAds();
-      }
+      _applyRuntime();
     });
   }
 
   @override
-  Widget build(BuildContext context) {
-    final config = ref.watch(monetizationConfigProvider).value;
-    final consent = ref.watch(consentSnapshotProvider).value;
-    if ((config?.adsEnabled ?? false) && (consent?.canRequestAds ?? false)) {
-      scheduleMicrotask(
-        () => ref.read(homePilotAdsProvider).preloadFullScreenAds(),
-      );
-    }
-    return widget.child;
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+    _applyRuntime();
   }
+
+  void _applyRuntime() {
+    if (!mounted) return;
+    final config =
+        ref.read(monetizationConfigProvider).value ??
+        const MonetizationConfig.failClosed();
+    final consent =
+        ref.read(consentSnapshotProvider).value ??
+        const ConsentSnapshot.initial();
+    unawaited(
+      ref
+          .read(homePilotAdsProvider)
+          .applyEligibility(
+            AdRuntimeEligibility(
+              platformSupported: _supportsMobileAds,
+              appResumed: _lifecycleState == AppLifecycleState.resumed,
+              consentUpdated: consent.updated,
+              canRequestAds: consent.canRequestAds,
+              adsEnabled: config.adsEnabled,
+              nativeAdsEnabled: config.nativeAdsEnabled,
+              interstitialAdsEnabled: config.interstitialAdsEnabled,
+              rewardedAdsEnabled: config.rewardedAdsEnabled,
+              rewardedInterstitialEnabled: config.rewardedInterstitialEnabled,
+            ),
+          ),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class HomePilotAdUnits {
@@ -619,9 +723,19 @@ class HomePilotAdUnits {
 
   String native(String placement) {
     if (!production) return 'ca-app-pub-3940256099942544/2247696110';
-    return placement == 'home'
-        ? 'ca-app-pub-5274007212820203/1685903136'
-        : 'ca-app-pub-5274007212820203/5230396474';
+    return switch (placement) {
+      'home' => 'ca-app-pub-5274007212820203/1685903136',
+      'assets' ||
+      'room_detail' ||
+      'thing_detail' ||
+      'maintenance' ||
+      'calendar' ||
+      'more' ||
+      'search' ||
+      'notifications' ||
+      'statistics' => 'ca-app-pub-5274007212820203/5230396474',
+      _ => throw ArgumentError.value(placement, 'placement'),
+    };
   }
 
   String get interstitial => production
@@ -642,32 +756,98 @@ class HomePilotAdsService {
     required this.useProductionUnits,
     required this.repository,
     this.timeZoneResolver = resolveSystemRewardTimeZone,
-  }) : units = HomePilotAdUnits(production: useProductionUnits);
+    DateTime Function()? now,
+    this._retryPolicy = const AdRetryPolicy(),
+    double Function()? jitterUnit,
+    Timer Function(Duration, void Function())? timerFactory,
+  }) : units = HomePilotAdUnits(production: useProductionUnits),
+       now = now ?? DateTime.now,
+       _jitterUnit = jitterUnit ?? _defaultAdJitter,
+       _timerFactory = timerFactory ?? _defaultAdTimer;
 
   final bool useProductionUnits;
   final MonetizationRepository? repository;
   final Future<String?> Function(String? fallback) timeZoneResolver;
+  final DateTime Function() now;
   final HomePilotAdUnits units;
+  final AdRetryPolicy _retryPolicy;
+  final double Function() _jitterUnit;
+  final Timer Function(Duration, void Function()) _timerFactory;
+  final AdRuntimeController _runtime = AdRuntimeController();
+  final FullScreenAdGate _fullScreenGate = FullScreenAdGate();
+  final StreamController<int> _states = StreamController<int>.broadcast();
+
   bool _initialized = false;
-  bool _preloading = false;
   bool _disposed = false;
-  bool _interstitialLoading = false;
-  bool _rewardedLoading = false;
-  bool _rewardedInterstitialLoading = false;
+  Future<void>? _initialization;
+  int? _preloadingGeneration;
+  int? _interstitialLoadGeneration;
+  int? _rewardedLoadGeneration;
+  int? _rewardedInterstitialLoadGeneration;
   int _interstitialFailures = 0;
   int _rewardedFailures = 0;
   int _rewardedInterstitialFailures = 0;
   Timer? _interstitialRetry;
   Timer? _rewardedRetry;
   Timer? _rewardedInterstitialRetry;
-  InterstitialAd? _interstitial;
-  RewardedAd? _rewarded;
-  RewardedInterstitialAd? _rewardedInterstitial;
+  CachedAd<InterstitialAd>? _interstitial;
+  CachedAd<RewardedAd>? _rewarded;
+  CachedAd<RewardedInterstitialAd>? _rewardedInterstitial;
 
   bool get initialized => _initialized;
+  int get runtimeGeneration => _runtime.generation;
+  AdRuntimeEligibility get eligibility => _runtime.current;
+  Stream<int> get states => _states.stream;
+  bool allows(AdFormat format) =>
+      !_disposed && _initialized && _runtime.current.allows(format);
+
+  Future<void> applyEligibility(AdRuntimeEligibility eligibility) async {
+    if (_disposed) return;
+    final transition = _runtime.apply(eligibility);
+    if (!transition.changed) return;
+    _notifyState();
+
+    _cancelRetries();
+    _interstitialFailures = 0;
+    _rewardedFailures = 0;
+    _rewardedInterstitialFailures = 0;
+    _preloadingGeneration = null;
+    _interstitialLoadGeneration = null;
+    _rewardedLoadGeneration = null;
+    _rewardedInterstitialLoadGeneration = null;
+    _disposeBlockedCaches();
+
+    if (!eligibility.sdkEligible) return;
+    try {
+      await initialize();
+    } on Object catch (error) {
+      AppLogger.warning('ad_sdk_initialize', error: error);
+      return;
+    }
+    if (_disposed || transition.generation != _runtime.generation) return;
+    _notifyState();
+    await preloadFullScreenAds();
+  }
 
   Future<void> initialize() async {
     if (_initialized || _disposed || !_supportsMobileAds) return;
+    final existing = _initialization;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    late final Future<void> attempt;
+    attempt = _initializeSdk();
+    _initialization = attempt;
+    try {
+      await attempt;
+    } on Object {
+      if (identical(_initialization, attempt)) _initialization = null;
+      rethrow;
+    }
+  }
+
+  Future<void> _initializeSdk() async {
     final testDeviceIds = const String.fromEnvironment(
       'ADMOB_TEST_DEVICE_IDS',
     ).split(',').map((id) => id.trim()).where((id) => id.isNotEmpty).toList();
@@ -680,33 +860,52 @@ class HomePilotAdsService {
       ),
     );
     await MobileAds.instance.initialize();
-    _initialized = true;
+    if (!_disposed) _initialized = true;
   }
 
   Future<void> preloadFullScreenAds() async {
-    if (!_initialized || _preloading || _disposed) return;
-    _preloading = true;
+    if (!_initialized || _disposed) return;
+    final generation = _runtime.generation;
+    if (_preloadingGeneration == generation) return;
+    _preloadingGeneration = generation;
     try {
       await Future.wait([
-        if (_interstitial == null) _loadInterstitial(),
-        if (_rewarded == null) _loadRewarded(),
-        if (_rewardedInterstitial == null) _loadRewardedInterstitial(),
+        if (_runtime.current.allows(AdFormat.interstitial)) _loadInterstitial(),
+        if (_runtime.current.allows(AdFormat.rewarded)) _loadRewarded(),
+        if (_runtime.current.allows(AdFormat.rewardedInterstitial))
+          _loadRewardedInterstitial(),
       ]);
     } finally {
-      _preloading = false;
+      if (_preloadingGeneration == generation) {
+        _preloadingGeneration = null;
+      }
     }
   }
 
   Future<bool> showInterstitial({
     Map<String, dynamic> analyticsProperties = const {},
   }) async {
-    final ad = _interstitial;
-    if (!_initialized || ad == null) {
+    if (!allows(AdFormat.interstitial)) return false;
+    final fullScreenLease = _fullScreenGate.tryAcquire();
+    if (fullScreenLease == null) return false;
+    final ad = _takeFreshInterstitial();
+    if (ad == null) {
+      fullScreenLease.release();
       unawaited(_loadInterstitial());
       return false;
     }
-    _interstitial = null;
     final completion = Completer<bool>();
+    var finished = false;
+
+    void finish(InterstitialAd finishedAd, bool shown) {
+      if (finished) return;
+      finished = true;
+      finishedAd.dispose();
+      fullScreenLease.release();
+      if (!completion.isCompleted) completion.complete(shown);
+      if (allows(AdFormat.interstitial)) unawaited(_loadInterstitial());
+    }
+
     ad.fullScreenContentCallback = FullScreenContentCallback<InterstitialAd>(
       onAdShowedFullScreenContent: (_) {
         AppLogger.info('ad_impression', fields: {'ad_type': 'interstitial'});
@@ -714,19 +913,18 @@ class HomePilotAdsService {
           repository?.recordEvent('ad_interstitial_shown', analyticsProperties),
         );
       },
-      onAdDismissedFullScreenContent: (shownAd) {
-        shownAd.dispose();
-        if (!completion.isCompleted) completion.complete(true);
-        unawaited(_loadInterstitial());
-      },
+      onAdDismissedFullScreenContent: (shownAd) => finish(shownAd, true),
       onAdFailedToShowFullScreenContent: (failedAd, error) {
         AppLogger.warning('interstitial_show', error: error);
-        failedAd.dispose();
-        if (!completion.isCompleted) completion.complete(false);
-        unawaited(_loadInterstitial());
+        finish(failedAd, false);
       },
     );
-    await ad.show();
+    try {
+      await ad.show();
+    } on Object catch (error) {
+      AppLogger.warning('interstitial_show', error: error);
+      finish(ad, false);
+    }
     return completion.future;
   }
 
@@ -735,21 +933,17 @@ class HomePilotAdsService {
     required String? timeZone,
     required String entryPoint,
   }) async {
-    if (!_initialized || repository == null) {
+    final format = type == RewardAdType.rewardedAd
+        ? AdFormat.rewarded
+        : AdFormat.rewardedInterstitial;
+    if (!allows(format) || repository == null || !_hasFreshReward(type)) {
+      _loadRewardType(type);
       return RewardShowResult.unavailable;
     }
-    final adAvailable = switch (type) {
-      RewardAdType.rewardedAd => _rewarded != null,
-      RewardAdType.rewardedInterstitial => _rewardedInterstitial != null,
-    };
-    if (!adAvailable) {
-      if (type == RewardAdType.rewardedAd) {
-        unawaited(_loadRewarded());
-      } else {
-        unawaited(_loadRewardedInterstitial());
-      }
-      return RewardShowResult.unavailable;
-    }
+    final fullScreenLease = _fullScreenGate.tryAcquire();
+    if (fullScreenLease == null) return RewardShowResult.unavailable;
+    final generation = _runtime.generation;
+
     RewardClaimRequest claim;
     try {
       final resolvedTimeZone = await timeZoneResolver(timeZone);
@@ -758,90 +952,140 @@ class HomePilotAdsService {
         timeZone: resolvedTimeZone,
       );
     } on Object {
+      fullScreenLease.release();
       return RewardShowResult.rejected;
     }
+    if (_disposed ||
+        generation != _runtime.generation ||
+        !allows(format) ||
+        !_hasFreshReward(type)) {
+      fullScreenLease.release();
+      return RewardShowResult.unavailable;
+    }
+
     final earned = Completer<bool>();
     final dismissed = Completer<void>();
     var failedToShow = false;
-    if (type == RewardAdType.rewardedAd) {
-      final ad = _rewarded;
-      if (ad == null) {
-        unawaited(_loadRewarded());
-        return RewardShowResult.unavailable;
-      }
-      _rewarded = null;
-      await ad.setServerSideOptions(
-        ServerSideVerificationOptions(
-          userId: claim.userId,
-          customData: claim.claimId,
-        ),
-      );
-      ad.fullScreenContentCallback = FullScreenContentCallback<RewardedAd>(
-        onAdDismissedFullScreenContent: (shownAd) {
-          shownAd.dispose();
-          if (!dismissed.isCompleted) dismissed.complete();
-          unawaited(_loadRewarded());
-        },
-        onAdFailedToShowFullScreenContent: (failedAd, error) {
-          AppLogger.warning('rewarded_show', error: error);
-          failedToShow = true;
-          failedAd.dispose();
-          if (!earned.isCompleted) earned.complete(false);
-          if (!dismissed.isCompleted) dismissed.complete();
-          unawaited(_loadRewarded());
-        },
-      );
-      await ad.show(
-        onUserEarnedReward: (_, reward) {
-          AppLogger.info(
-            'ad_rewarded',
-            fields: {'ad_type': 'rewarded', 'reward_amount': reward.amount},
-          );
-          if (!earned.isCompleted) earned.complete(true);
-        },
-      );
-    } else {
-      final ad = _rewardedInterstitial;
-      if (ad == null) {
-        unawaited(_loadRewardedInterstitial());
-        return RewardShowResult.unavailable;
-      }
-      _rewardedInterstitial = null;
-      await ad.setServerSideOptions(
-        ServerSideVerificationOptions(
-          userId: claim.userId,
-          customData: claim.claimId,
-        ),
-      );
-      ad.fullScreenContentCallback =
-          FullScreenContentCallback<RewardedInterstitialAd>(
-            onAdDismissedFullScreenContent: (shownAd) {
-              shownAd.dispose();
-              if (!dismissed.isCompleted) dismissed.complete();
-              unawaited(_loadRewardedInterstitial());
-            },
-            onAdFailedToShowFullScreenContent: (failedAd, error) {
-              AppLogger.warning('rewarded_interstitial_show', error: error);
-              failedToShow = true;
-              failedAd.dispose();
-              if (!earned.isCompleted) earned.complete(false);
-              if (!dismissed.isCompleted) dismissed.complete();
-              unawaited(_loadRewardedInterstitial());
-            },
-          );
-      await ad.show(
-        onUserEarnedReward: (_, reward) {
-          AppLogger.info(
-            'ad_rewarded',
-            fields: {
-              'ad_type': 'rewarded_interstitial',
-              'reward_amount': reward.amount,
-            },
-          );
-          if (!earned.isCompleted) earned.complete(true);
-        },
-      );
+    var finished = false;
+    var activeAdDisposed = false;
+    void Function()? disposeActiveAd;
+
+    void finish({required bool failed}) {
+      if (finished) return;
+      finished = true;
+      if (failed) failedToShow = true;
+      fullScreenLease.release();
+      if (!earned.isCompleted && failed) earned.complete(false);
+      if (!dismissed.isCompleted) dismissed.complete();
+      if (allows(format)) _loadRewardType(type);
     }
+
+    try {
+      if (type == RewardAdType.rewardedAd) {
+        final ad = _takeFreshRewarded();
+        if (ad == null) {
+          fullScreenLease.release();
+          return RewardShowResult.unavailable;
+        }
+        disposeActiveAd = () {
+          if (activeAdDisposed) return;
+          activeAdDisposed = true;
+          ad.dispose();
+        };
+        await ad.setServerSideOptions(
+          ServerSideVerificationOptions(
+            userId: claim.userId,
+            customData: claim.claimId,
+          ),
+        );
+        if (!rewardPresentationIsCurrent(
+          disposed: _disposed,
+          requestGeneration: generation,
+          currentGeneration: _runtime.generation,
+          formatAllowed: allows(format),
+        )) {
+          disposeActiveAd?.call();
+          finish(failed: true);
+          return RewardShowResult.unavailable;
+        }
+        ad.fullScreenContentCallback = FullScreenContentCallback<RewardedAd>(
+          onAdDismissedFullScreenContent: (shownAd) {
+            disposeActiveAd?.call();
+            finish(failed: false);
+          },
+          onAdFailedToShowFullScreenContent: (failedAd, error) {
+            AppLogger.warning('rewarded_show', error: error);
+            disposeActiveAd?.call();
+            finish(failed: true);
+          },
+        );
+        await ad.show(
+          onUserEarnedReward: (_, reward) {
+            AppLogger.info(
+              'ad_rewarded',
+              fields: {'ad_type': 'rewarded', 'reward_amount': reward.amount},
+            );
+            if (!earned.isCompleted) earned.complete(true);
+          },
+        );
+      } else {
+        final ad = _takeFreshRewardedInterstitial();
+        if (ad == null) {
+          fullScreenLease.release();
+          return RewardShowResult.unavailable;
+        }
+        disposeActiveAd = () {
+          if (activeAdDisposed) return;
+          activeAdDisposed = true;
+          ad.dispose();
+        };
+        await ad.setServerSideOptions(
+          ServerSideVerificationOptions(
+            userId: claim.userId,
+            customData: claim.claimId,
+          ),
+        );
+        if (!rewardPresentationIsCurrent(
+          disposed: _disposed,
+          requestGeneration: generation,
+          currentGeneration: _runtime.generation,
+          formatAllowed: allows(format),
+        )) {
+          disposeActiveAd?.call();
+          finish(failed: true);
+          return RewardShowResult.unavailable;
+        }
+        ad.fullScreenContentCallback =
+            FullScreenContentCallback<RewardedInterstitialAd>(
+              onAdDismissedFullScreenContent: (shownAd) {
+                disposeActiveAd?.call();
+                finish(failed: false);
+              },
+              onAdFailedToShowFullScreenContent: (failedAd, error) {
+                AppLogger.warning('rewarded_interstitial_show', error: error);
+                disposeActiveAd?.call();
+                finish(failed: true);
+              },
+            );
+        await ad.show(
+          onUserEarnedReward: (_, reward) {
+            AppLogger.info(
+              'ad_rewarded',
+              fields: {
+                'ad_type': 'rewarded_interstitial',
+                'reward_amount': reward.amount,
+              },
+            );
+            if (!earned.isCompleted) earned.complete(true);
+          },
+        );
+      }
+    } on Object catch (error) {
+      AppLogger.warning('reward_show', error: error);
+      disposeActiveAd?.call();
+      finish(failed: true);
+    }
+
     await dismissed.future;
     final wasEarned = earned.isCompleted ? await earned.future : false;
     if (!wasEarned) {
@@ -868,217 +1112,371 @@ class HomePilotAdsService {
   }
 
   Future<void> _loadInterstitial({bool retry = false}) async {
-    if (!_initialized ||
-        _disposed ||
+    _discardStaleInterstitial();
+    if (!allows(AdFormat.interstitial) ||
         _interstitial != null ||
-        _interstitialLoading ||
+        _interstitialLoadGeneration != null ||
         (!retry && _interstitialRetry?.isActive == true)) {
       return;
     }
     _interstitialRetry?.cancel();
     _interstitialRetry = null;
-    AppLogger.info('ad_load_requested', fields: {'ad_type': 'interstitial'});
-    _interstitialLoading = true;
+    final generation = _runtime.generation;
+    _interstitialLoadGeneration = generation;
     final completion = Completer<void>();
+    AppLogger.info('ad_load_requested', fields: {'ad_type': 'interstitial'});
     try {
       await InterstitialAd.load(
         adUnitId: units.interstitial,
         request: const AdRequest(),
         adLoadCallback: InterstitialAdLoadCallback(
           onAdLoaded: (ad) {
-            _interstitialLoading = false;
-            _interstitialFailures = 0;
-            AppLogger.info('ad_loaded', fields: {'ad_type': 'interstitial'});
-            if (_disposed) {
-              ad.dispose();
+            if (_interstitialLoadGeneration == generation) {
+              _interstitialLoadGeneration = null;
+            }
+            if (_accepts(generation, AdFormat.interstitial)) {
+              _interstitialFailures = 0;
+              _interstitial = CachedAd(value: ad, loadedAt: now());
+              AppLogger.info('ad_loaded', fields: {'ad_type': 'interstitial'});
             } else {
-              _interstitial = ad;
+              ad.dispose();
             }
             if (!completion.isCompleted) completion.complete();
           },
           onAdFailedToLoad: (error) {
-            _interstitialLoading = false;
+            if (_interstitialLoadGeneration == generation) {
+              _interstitialLoadGeneration = null;
+            }
             AppLogger.warning(
               'ad_load_failed',
               error: error,
               fields: {'ad_type': 'interstitial'},
             );
-            _scheduleInterstitialRetry();
+            _scheduleInterstitialRetry(
+              generation,
+              classifyAdLoadFailure(code: error.code, domain: error.domain),
+            );
             if (!completion.isCompleted) completion.complete();
           },
         ),
       );
     } on Object catch (error) {
-      _interstitialLoading = false;
+      if (_interstitialLoadGeneration == generation) {
+        _interstitialLoadGeneration = null;
+      }
       AppLogger.warning(
         'ad_load_failed',
         error: error,
         fields: {'ad_type': 'interstitial'},
       );
-      _scheduleInterstitialRetry();
+      _scheduleInterstitialRetry(generation, AdLoadFailureKind.unknown);
       if (!completion.isCompleted) completion.complete();
     }
     await completion.future;
   }
 
   Future<void> _loadRewarded({bool retry = false}) async {
-    if (!_initialized ||
-        _disposed ||
+    _discardStaleRewarded();
+    if (!allows(AdFormat.rewarded) ||
         _rewarded != null ||
-        _rewardedLoading ||
+        _rewardedLoadGeneration != null ||
         (!retry && _rewardedRetry?.isActive == true)) {
       return;
     }
     _rewardedRetry?.cancel();
     _rewardedRetry = null;
-    AppLogger.info('ad_load_requested', fields: {'ad_type': 'rewarded'});
-    _rewardedLoading = true;
+    final generation = _runtime.generation;
+    _rewardedLoadGeneration = generation;
     final completion = Completer<void>();
+    AppLogger.info('ad_load_requested', fields: {'ad_type': 'rewarded'});
     try {
       await RewardedAd.load(
         adUnitId: units.rewarded,
         request: const AdRequest(),
         rewardedAdLoadCallback: RewardedAdLoadCallback(
           onAdLoaded: (ad) {
-            _rewardedLoading = false;
-            _rewardedFailures = 0;
-            AppLogger.info('ad_loaded', fields: {'ad_type': 'rewarded'});
-            if (_disposed) {
-              ad.dispose();
+            if (_rewardedLoadGeneration == generation) {
+              _rewardedLoadGeneration = null;
+            }
+            if (_accepts(generation, AdFormat.rewarded)) {
+              _rewardedFailures = 0;
+              _rewarded = CachedAd(value: ad, loadedAt: now());
+              AppLogger.info('ad_loaded', fields: {'ad_type': 'rewarded'});
             } else {
-              _rewarded = ad;
+              ad.dispose();
             }
             if (!completion.isCompleted) completion.complete();
           },
           onAdFailedToLoad: (error) {
-            _rewardedLoading = false;
+            if (_rewardedLoadGeneration == generation) {
+              _rewardedLoadGeneration = null;
+            }
             AppLogger.warning(
               'ad_load_failed',
               error: error,
               fields: {'ad_type': 'rewarded'},
             );
-            _scheduleRewardedRetry();
+            _scheduleRewardedRetry(
+              generation,
+              classifyAdLoadFailure(code: error.code, domain: error.domain),
+            );
             if (!completion.isCompleted) completion.complete();
           },
         ),
       );
     } on Object catch (error) {
-      _rewardedLoading = false;
+      if (_rewardedLoadGeneration == generation) {
+        _rewardedLoadGeneration = null;
+      }
       AppLogger.warning(
         'ad_load_failed',
         error: error,
         fields: {'ad_type': 'rewarded'},
       );
-      _scheduleRewardedRetry();
+      _scheduleRewardedRetry(generation, AdLoadFailureKind.unknown);
       if (!completion.isCompleted) completion.complete();
     }
     await completion.future;
   }
 
   Future<void> _loadRewardedInterstitial({bool retry = false}) async {
-    if (!_initialized ||
-        _disposed ||
+    _discardStaleRewardedInterstitial();
+    if (!allows(AdFormat.rewardedInterstitial) ||
         _rewardedInterstitial != null ||
-        _rewardedInterstitialLoading ||
+        _rewardedInterstitialLoadGeneration != null ||
         (!retry && _rewardedInterstitialRetry?.isActive == true)) {
       return;
     }
     _rewardedInterstitialRetry?.cancel();
     _rewardedInterstitialRetry = null;
+    final generation = _runtime.generation;
+    _rewardedInterstitialLoadGeneration = generation;
+    final completion = Completer<void>();
     AppLogger.info(
       'ad_load_requested',
       fields: {'ad_type': 'rewarded_interstitial'},
     );
-    _rewardedInterstitialLoading = true;
-    final completion = Completer<void>();
     try {
       await RewardedInterstitialAd.load(
         adUnitId: units.rewardedInterstitial,
         request: const AdRequest(),
         rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
           onAdLoaded: (ad) {
-            _rewardedInterstitialLoading = false;
-            _rewardedInterstitialFailures = 0;
-            AppLogger.info(
-              'ad_loaded',
-              fields: {'ad_type': 'rewarded_interstitial'},
-            );
-            if (_disposed) {
-              ad.dispose();
+            if (_rewardedInterstitialLoadGeneration == generation) {
+              _rewardedInterstitialLoadGeneration = null;
+            }
+            if (_accepts(generation, AdFormat.rewardedInterstitial)) {
+              _rewardedInterstitialFailures = 0;
+              _rewardedInterstitial = CachedAd(value: ad, loadedAt: now());
+              AppLogger.info(
+                'ad_loaded',
+                fields: {'ad_type': 'rewarded_interstitial'},
+              );
             } else {
-              _rewardedInterstitial = ad;
+              ad.dispose();
             }
             if (!completion.isCompleted) completion.complete();
           },
           onAdFailedToLoad: (error) {
-            _rewardedInterstitialLoading = false;
+            if (_rewardedInterstitialLoadGeneration == generation) {
+              _rewardedInterstitialLoadGeneration = null;
+            }
             AppLogger.warning(
               'ad_load_failed',
               error: error,
               fields: {'ad_type': 'rewarded_interstitial'},
             );
-            _scheduleRewardedInterstitialRetry();
+            _scheduleRewardedInterstitialRetry(
+              generation,
+              classifyAdLoadFailure(code: error.code, domain: error.domain),
+            );
             if (!completion.isCompleted) completion.complete();
           },
         ),
       );
     } on Object catch (error) {
-      _rewardedInterstitialLoading = false;
+      if (_rewardedInterstitialLoadGeneration == generation) {
+        _rewardedInterstitialLoadGeneration = null;
+      }
       AppLogger.warning(
         'ad_load_failed',
         error: error,
         fields: {'ad_type': 'rewarded_interstitial'},
       );
-      _scheduleRewardedInterstitialRetry();
+      _scheduleRewardedInterstitialRetry(generation, AdLoadFailureKind.unknown);
       if (!completion.isCompleted) completion.complete();
     }
     await completion.future;
   }
 
-  void _scheduleInterstitialRetry() {
-    if (_disposed || _interstitialRetry?.isActive == true) return;
-    _interstitialFailures++;
-    _interstitialRetry = Timer(
-      adRetryDelayForFailure(_interstitialFailures),
-      () {
-        _interstitialRetry = null;
-        unawaited(_loadInterstitial(retry: true));
-      },
-    );
-  }
+  bool _accepts(int generation, AdFormat format) =>
+      !_disposed && generation == _runtime.generation && allows(format);
 
-  void _scheduleRewardedRetry() {
-    if (_disposed || _rewardedRetry?.isActive == true) return;
-    _rewardedFailures++;
-    _rewardedRetry = Timer(adRetryDelayForFailure(_rewardedFailures), () {
-      _rewardedRetry = null;
-      unawaited(_loadRewarded(retry: true));
+  void _scheduleInterstitialRetry(int generation, AdLoadFailureKind failure) {
+    if (!_accepts(generation, AdFormat.interstitial) ||
+        _interstitialRetry?.isActive == true) {
+      return;
+    }
+    _interstitialFailures++;
+    final decision = _retryPolicy.decide(
+      failure: failure,
+      failedAttempt: _interstitialFailures,
+      jitterUnit: _jitterUnit(),
+    );
+    if (!decision.shouldRetry) return;
+    _interstitialRetry = _timerFactory(decision.delay, () {
+      _interstitialRetry = null;
+      if (_accepts(generation, AdFormat.interstitial)) {
+        unawaited(_loadInterstitial(retry: true));
+      }
     });
   }
 
-  void _scheduleRewardedInterstitialRetry() {
-    if (_disposed || _rewardedInterstitialRetry?.isActive == true) return;
-    _rewardedInterstitialFailures++;
-    _rewardedInterstitialRetry = Timer(
-      adRetryDelayForFailure(_rewardedInterstitialFailures),
-      () {
-        _rewardedInterstitialRetry = null;
-        unawaited(_loadRewardedInterstitial(retry: true));
-      },
+  void _scheduleRewardedRetry(int generation, AdLoadFailureKind failure) {
+    if (!_accepts(generation, AdFormat.rewarded) ||
+        _rewardedRetry?.isActive == true) {
+      return;
+    }
+    _rewardedFailures++;
+    final decision = _retryPolicy.decide(
+      failure: failure,
+      failedAttempt: _rewardedFailures,
+      jitterUnit: _jitterUnit(),
     );
+    if (!decision.shouldRetry) return;
+    _rewardedRetry = _timerFactory(decision.delay, () {
+      _rewardedRetry = null;
+      if (_accepts(generation, AdFormat.rewarded)) {
+        unawaited(_loadRewarded(retry: true));
+      }
+    });
   }
 
-  void dispose() {
-    _disposed = true;
+  void _scheduleRewardedInterstitialRetry(
+    int generation,
+    AdLoadFailureKind failure,
+  ) {
+    if (!_accepts(generation, AdFormat.rewardedInterstitial) ||
+        _rewardedInterstitialRetry?.isActive == true) {
+      return;
+    }
+    _rewardedInterstitialFailures++;
+    final decision = _retryPolicy.decide(
+      failure: failure,
+      failedAttempt: _rewardedInterstitialFailures,
+      jitterUnit: _jitterUnit(),
+    );
+    if (!decision.shouldRetry) return;
+    _rewardedInterstitialRetry = _timerFactory(decision.delay, () {
+      _rewardedInterstitialRetry = null;
+      if (_accepts(generation, AdFormat.rewardedInterstitial)) {
+        unawaited(_loadRewardedInterstitial(retry: true));
+      }
+    });
+  }
+
+  void _loadRewardType(RewardAdType type) {
+    if (type == RewardAdType.rewardedAd) {
+      unawaited(_loadRewarded());
+    } else {
+      unawaited(_loadRewardedInterstitial());
+    }
+  }
+
+  bool _hasFreshReward(RewardAdType type) {
+    if (type == RewardAdType.rewardedAd) {
+      _discardStaleRewarded();
+      return _rewarded != null;
+    }
+    _discardStaleRewardedInterstitial();
+    return _rewardedInterstitial != null;
+  }
+
+  InterstitialAd? _takeFreshInterstitial() {
+    _discardStaleInterstitial();
+    final cached = _interstitial;
+    _interstitial = null;
+    return cached?.value;
+  }
+
+  RewardedAd? _takeFreshRewarded() {
+    _discardStaleRewarded();
+    final cached = _rewarded;
+    _rewarded = null;
+    return cached?.value;
+  }
+
+  RewardedInterstitialAd? _takeFreshRewardedInterstitial() {
+    _discardStaleRewardedInterstitial();
+    final cached = _rewardedInterstitial;
+    _rewardedInterstitial = null;
+    return cached?.value;
+  }
+
+  void _discardStaleInterstitial() {
+    final cached = _interstitial;
+    if (cached != null && !cached.isFresh(now())) {
+      cached.value.dispose();
+      _interstitial = null;
+    }
+  }
+
+  void _discardStaleRewarded() {
+    final cached = _rewarded;
+    if (cached != null && !cached.isFresh(now())) {
+      cached.value.dispose();
+      _rewarded = null;
+    }
+  }
+
+  void _discardStaleRewardedInterstitial() {
+    final cached = _rewardedInterstitial;
+    if (cached != null && !cached.isFresh(now())) {
+      cached.value.dispose();
+      _rewardedInterstitial = null;
+    }
+  }
+
+  void _disposeBlockedCaches() {
+    if (!_runtime.current.allows(AdFormat.interstitial)) {
+      _interstitial?.value.dispose();
+      _interstitial = null;
+    }
+    if (!_runtime.current.allows(AdFormat.rewarded)) {
+      _rewarded?.value.dispose();
+      _rewarded = null;
+    }
+    if (!_runtime.current.allows(AdFormat.rewardedInterstitial)) {
+      _rewardedInterstitial?.value.dispose();
+      _rewardedInterstitial = null;
+    }
+  }
+
+  void _cancelRetries() {
     _interstitialRetry?.cancel();
     _rewardedRetry?.cancel();
     _rewardedInterstitialRetry?.cancel();
-    _interstitial?.dispose();
-    _rewarded?.dispose();
-    _rewardedInterstitial?.dispose();
+    _interstitialRetry = null;
+    _rewardedRetry = null;
+    _rewardedInterstitialRetry = null;
+  }
+
+  void _notifyState() {
+    if (!_disposed && !_states.isClosed) _states.add(_runtime.generation);
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _runtime.apply(const AdRuntimeEligibility.blocked());
+    _cancelRetries();
+    _interstitial?.value.dispose();
+    _rewarded?.value.dispose();
+    _rewardedInterstitial?.value.dispose();
     _interstitial = null;
     _rewarded = null;
     _rewardedInterstitial = null;
+    unawaited(_states.close());
   }
 }
 
@@ -1191,111 +1589,230 @@ class HkNativeAdCard extends ConsumerStatefulWidget {
 }
 
 class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
-  NativeAd? _ad;
-  NativeAd? _pendingAd;
-  bool _loaded = false;
+  StreamSubscription<int>? _adsSubscription;
+  HomePilotAdsService? _ads;
+  AdLease<NativeAd>? _displayLease;
+  AdLease<NativeAd>? _pendingLease;
+  DateTime? _loadedAt;
+  int? _pendingRuntimeGeneration;
+  int _requestGeneration = 0;
+  bool _enabled = false;
   bool _failed = false;
-  bool _loadStarted = false;
+  bool _syncScheduled = false;
   int _loadFailures = 0;
+  String? _themeIdentity;
+  Timer? _expiryTimer;
   Timer? _retryTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual(homePilotAdsProvider, (_, next) => _bindAds(next));
+    ref.listenManual(nativeAdPresentationDepthProvider, (_, _) {
+      _scheduleSynchronize();
+    });
+    scheduleMicrotask(() => _bindAds(ref.read(homePilotAdsProvider)));
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!(ModalRoute.isCurrentOf(context) ?? true)) {
-      _deactivateForObscuredRoute();
+    _scheduleSynchronize();
+  }
+
+  @override
+  void didUpdateWidget(covariant HkNativeAdCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.placement != widget.placement ||
+        oldWidget.enabledOverride != widget.enabledOverride) {
+      _deactivate();
     }
+    _scheduleSynchronize();
   }
 
   @override
   void dispose() {
+    _requestGeneration++;
+    _adsSubscription?.cancel();
+    _expiryTimer?.cancel();
     _retryTimer?.cancel();
-    _ad?.dispose();
-    _pendingAd?.dispose();
+    _displayLease?.release();
+    _pendingLease?.release();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final config = ref.watch(monetizationConfigProvider).value;
-    final consent = ref.watch(consentSnapshotProvider).value;
-    final ads = ref.watch(homePilotAdsProvider);
-    final routeIsCurrent = ModalRoute.isCurrentOf(context) ?? true;
-    final presentationSuppressed =
-        ref.watch(nativeAdPresentationDepthProvider) > 0;
-    final enabled = nativeAdPlacementEnabled(
-      routeIsCurrent: routeIsCurrent,
-      presentationSuppressed: presentationSuppressed,
-      configEnabled:
-          (config?.adsEnabled ?? false) && (config?.nativeAdsEnabled ?? false),
-      consentGranted: consent?.canRequestAds ?? false,
-      adsInitialized: ads.initialized,
-      platformSupported: _supportsMobileAds,
-      enabledOverride: widget.enabledOverride,
-    );
-    if (enabled && !_loadStarted) {
-      _loadStarted = true;
-      scheduleMicrotask(() => _load(ads));
-    }
     return HkNativeAdSlotFrame(
-      collapsed: !enabled || _failed,
-      child: _loaded && _ad != null
+      collapsed: !_enabled || _failed,
+      child: _displayLease != null
           ? ClipRRect(
               borderRadius: BorderRadius.circular(18),
-              child: AdWidget(ad: _ad!),
+              child: AdWidget(ad: _displayLease!.value),
             )
           : const HkNativeAdLoadingSkeleton(),
     );
   }
 
-  Future<void> _load(HomePilotAdsService ads) async {
+  void _bindAds(HomePilotAdsService ads) {
+    if (identical(_ads, ads)) return;
+    _adsSubscription?.cancel();
+    _ads = ads;
+    _adsSubscription = ads.states.listen((_) => _scheduleSynchronize());
+    _deactivate();
+    _scheduleSynchronize();
+  }
+
+  void _scheduleSynchronize() {
+    if (!mounted || _syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (mounted) _synchronize();
+    });
+  }
+
+  void _synchronize() {
+    final ads = _ads;
+    if (ads == null) return;
+    final routeIsCurrent = ModalRoute.isCurrentOf(context) ?? true;
+    final presentationSuppressed =
+        ref.read(nativeAdPresentationDepthProvider) > 0;
+    final enabled = nativeAdPlacementEnabled(
+      routeIsCurrent: routeIsCurrent,
+      presentationSuppressed: presentationSuppressed,
+      configEnabled: ads.eligibility.adsEnabled,
+      consentGranted:
+          ads.eligibility.consentUpdated && ads.eligibility.canRequestAds,
+      adsInitialized: ads.allows(AdFormat.native),
+      platformSupported: ads.eligibility.platformSupported,
+      enabledOverride: widget.enabledOverride,
+    );
+    final palette = _nativePalette(Theme.of(context).colorScheme);
+    final themeIdentity = palette.entries
+        .map((entry) => '${entry.key}:${entry.value}')
+        .join('|');
+
+    if (!enabled) {
+      _deactivate();
+      return;
+    }
+
+    var needsReplacement =
+        _themeIdentity != null && _themeIdentity != themeIdentity;
+    if (_loadedAt case final loadedAt?) {
+      needsReplacement =
+          needsReplacement || ads.now().difference(loadedAt) >= kAdCacheMaxAge;
+    }
+    if (_pendingLease != null &&
+        _pendingRuntimeGeneration != ads.runtimeGeneration) {
+      needsReplacement = true;
+    }
+    if (needsReplacement) {
+      _requestGeneration++;
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      _displayLease?.release();
+      _pendingLease?.release();
+      _displayLease = null;
+      _pendingLease = null;
+      _loadedAt = null;
+      _pendingRuntimeGeneration = null;
+      _failed = false;
+      _loadFailures = 0;
+    }
+    _themeIdentity = themeIdentity;
+    if (!_enabled || needsReplacement) {
+      setState(() => _enabled = true);
+    }
+    if (_displayLease == null &&
+        _pendingLease == null &&
+        _retryTimer?.isActive != true) {
+      unawaited(_load(ads, themeIdentity, palette));
+    }
+  }
+
+  Future<void> _load(
+    HomePilotAdsService ads,
+    String themeIdentity,
+    Map<String, Object> palette,
+  ) async {
+    if (!mounted || !ads.allows(AdFormat.native)) return;
     final repository = ref.read(monetizationRepositoryProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final ad = NativeAd(
+    final runtimeGeneration = ads.runtimeGeneration;
+    final requestGeneration = ++_requestGeneration;
+    late final NativeAd request;
+    late final AdLease<NativeAd> lease;
+    request = NativeAd(
       adUnitId: ads.units.native(widget.placement),
       factoryId: _nativeFactoryId,
       customOptions: {
-        'schemaVersion': 1,
-        'isDark': isDark,
+        'schemaVersion': 2,
+        'isDark': Theme.of(context).brightness == Brightness.dark,
         'placement': widget.placement,
-        'backgroundColor': isDark ? '#1C2632' : '#FFFFFF',
-        'textColor': isDark ? '#E2E8F0' : '#0F172A',
+        ...palette,
       },
       request: const AdRequest(),
       listener: NativeAdListener(
         onAdLoaded: (loadedAd) {
-          if (_pendingAd == loadedAd) _pendingAd = null;
-          if (!mounted ||
-              _ad != loadedAd ||
-              !(ModalRoute.isCurrentOf(context) ?? true)) {
-            loadedAd.dispose();
-            if (mounted && _ad == loadedAd) {
-              _ad = null;
-              _loaded = false;
-              _loadStarted = false;
-            }
+          final currentRequest = identical(_pendingLease, lease);
+          if (currentRequest) {
+            _pendingLease = null;
+            _pendingRuntimeGeneration = null;
+          }
+          if (!currentRequest ||
+              !_requestIsCurrent(
+                ads,
+                runtimeGeneration,
+                requestGeneration,
+                themeIdentity,
+              )) {
+            lease.release();
             return;
           }
-          setState(() {
-            _ad = loadedAd as NativeAd;
-            _loaded = true;
-            _failed = false;
-            _loadFailures = 0;
-          });
           _retryTimer?.cancel();
           _retryTimer = null;
-        },
-        onAdFailedToLoad: (failedAd, _) {
-          failedAd.dispose();
-          final isTracked = _ad == failedAd || _pendingAd == failedAd;
-          if (_pendingAd == failedAd) _pendingAd = null;
-          if (_ad == failedAd) _ad = null;
-          if (!mounted || !isTracked) return;
+          _loadFailures = 0;
+          final loadedAt = ads.now();
           setState(() {
-            _loaded = false;
-            _failed = true;
+            _displayLease = lease;
+            _loadedAt = loadedAt;
+            _failed = false;
           });
-          _scheduleRetry();
+          _scheduleExpiry(
+            ads: ads,
+            lease: lease,
+            loadedAt: loadedAt,
+            runtimeGeneration: runtimeGeneration,
+            requestGeneration: requestGeneration,
+            themeIdentity: themeIdentity,
+          );
+        },
+        onAdFailedToLoad: (failedAd, error) {
+          final currentRequest = identical(_pendingLease, lease);
+          if (currentRequest) {
+            _pendingLease = null;
+            _pendingRuntimeGeneration = null;
+          }
+          lease.release();
+          if (!currentRequest ||
+              !_requestIsCurrent(
+                ads,
+                runtimeGeneration,
+                requestGeneration,
+                themeIdentity,
+              )) {
+            return;
+          }
+          _handleNativeFailure(
+            ads,
+            runtimeGeneration,
+            requestGeneration,
+            themeIdentity,
+            classifyAdLoadFailure(code: error.code, domain: error.domain),
+          );
         },
         onAdImpression: (_) {
           unawaited(
@@ -1315,36 +1832,158 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
         },
       ),
     );
-    _ad = ad;
-    _pendingAd = ad;
-    await ad.load();
+    lease = AdLease<NativeAd>(request, (ad) => ad.dispose());
+    _pendingLease = lease;
+    _pendingRuntimeGeneration = runtimeGeneration;
+    try {
+      await request.load();
+    } on Object catch (error) {
+      final currentRequest = identical(_pendingLease, lease);
+      if (currentRequest) {
+        _pendingLease = null;
+        _pendingRuntimeGeneration = null;
+      }
+      lease.release();
+      if (currentRequest &&
+          _requestIsCurrent(
+            ads,
+            runtimeGeneration,
+            requestGeneration,
+            themeIdentity,
+          )) {
+        AppLogger.warning('native_ad_load', error: error);
+        _handleNativeFailure(
+          ads,
+          runtimeGeneration,
+          requestGeneration,
+          themeIdentity,
+          AdLoadFailureKind.unknown,
+        );
+      }
+    }
   }
 
-  void _scheduleRetry() {
-    if (_retryTimer?.isActive == true) return;
+  bool _requestIsCurrent(
+    HomePilotAdsService ads,
+    int runtimeGeneration,
+    int requestGeneration,
+    String themeIdentity,
+  ) =>
+      mounted &&
+      identical(_ads, ads) &&
+      runtimeGeneration == ads.runtimeGeneration &&
+      requestGeneration == _requestGeneration &&
+      themeIdentity == _themeIdentity &&
+      ads.allows(AdFormat.native) &&
+      (ModalRoute.isCurrentOf(context) ?? true) &&
+      ref.read(nativeAdPresentationDepthProvider) == 0 &&
+      widget.enabledOverride != false;
+
+  void _handleNativeFailure(
+    HomePilotAdsService ads,
+    int runtimeGeneration,
+    int requestGeneration,
+    String themeIdentity,
+    AdLoadFailureKind failure,
+  ) {
     _loadFailures++;
-    _retryTimer = Timer(adRetryDelayForFailure(_loadFailures), () {
+    final decision = const AdRetryPolicy().decide(
+      failure: failure,
+      failedAttempt: _loadFailures,
+      jitterUnit: _defaultAdJitter(),
+    );
+    setState(() => _failed = true);
+    if (!decision.shouldRetry) return;
+    _retryTimer?.cancel();
+    _retryTimer = Timer(decision.delay, () {
       _retryTimer = null;
-      if (!mounted) return;
-      setState(() {
-        _failed = false;
-        _loadStarted = false;
-      });
+      if (!_requestIsCurrent(
+        ads,
+        runtimeGeneration,
+        requestGeneration,
+        themeIdentity,
+      )) {
+        return;
+      }
+      setState(() => _failed = false);
+      _scheduleSynchronize();
     });
   }
 
-  void _deactivateForObscuredRoute() {
+  void _scheduleExpiry({
+    required HomePilotAdsService ads,
+    required AdLease<NativeAd> lease,
+    required DateTime loadedAt,
+    required int runtimeGeneration,
+    required int requestGeneration,
+    required String themeIdentity,
+  }) {
+    _expiryTimer?.cancel();
+    _expiryTimer = Timer(kAdCacheMaxAge, () {
+      _expiryTimer = null;
+      if (!mounted ||
+          !identical(_ads, ads) ||
+          !identical(_displayLease, lease) ||
+          _loadedAt != loadedAt ||
+          runtimeGeneration != ads.runtimeGeneration ||
+          requestGeneration != _requestGeneration ||
+          themeIdentity != _themeIdentity) {
+        return;
+      }
+
+      final shouldReload = _requestIsCurrent(
+        ads,
+        runtimeGeneration,
+        requestGeneration,
+        themeIdentity,
+      );
+      _requestGeneration++;
+      _displayLease = null;
+      _loadedAt = null;
+      _loadFailures = 0;
+      lease.release();
+      setState(() {
+        _enabled = shouldReload;
+        _failed = false;
+      });
+      if (shouldReload) _scheduleSynchronize();
+    });
+  }
+
+  Map<String, Object> _nativePalette(ColorScheme scheme) => {
+    'backgroundColor': _nativeHex(scheme.surface),
+    'borderColor': _nativeHex(scheme.outlineVariant),
+    'headlineColor': _nativeHex(scheme.onSurface),
+    'bodyColor': _nativeHex(scheme.onSurfaceVariant),
+    'advertiserColor': _nativeHex(scheme.onSurfaceVariant),
+    'sponsoredColor': _nativeHex(scheme.onSurfaceVariant),
+    'adBadgeBackgroundColor': _nativeHex(scheme.primaryContainer),
+    'adBadgeTextColor': _nativeHex(scheme.onPrimaryContainer),
+    'callToActionBackgroundColor': _nativeHex(scheme.primary),
+    'callToActionTextColor': _nativeHex(scheme.onPrimary),
+  };
+
+  String _nativeHex(Color color) =>
+      '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+
+  void _deactivate() {
+    final hadVisibleState =
+        _enabled || _failed || _displayLease != null || _pendingLease != null;
+    _requestGeneration++;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     _retryTimer?.cancel();
     _retryTimer = null;
-    final ad = _ad;
-    final pending = _pendingAd;
-    _ad = null;
-    _pendingAd = null;
-    _loaded = false;
+    _displayLease?.release();
+    _pendingLease?.release();
+    _displayLease = null;
+    _pendingLease = null;
+    _loadedAt = null;
+    _pendingRuntimeGeneration = null;
+    _enabled = false;
     _failed = false;
-    _loadStarted = false;
-    ad?.dispose();
-    pending?.dispose();
+    _loadFailures = 0;
+    if (mounted && hadVisibleState) setState(() {});
   }
 }
 

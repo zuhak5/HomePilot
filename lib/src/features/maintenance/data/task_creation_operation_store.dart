@@ -83,4 +83,36 @@ class TaskCreationOperationStore {
       } catch (_) {}
     }
   }
+
+  Future<void> clearOperationsForAccount(String accountScope) async {
+    final keys = <String>{..._inMemoryFallback.keys};
+    final storage = _storage;
+    if (storage != null) {
+      try {
+        keys.addAll((await storage.readAll()).keys);
+      } catch (_) {
+        rethrow;
+      }
+    }
+
+    for (final key in keys) {
+      if (!key.startsWith(_keyPrefix)) continue;
+      String? encoded = _inMemoryFallback[key];
+      if (storage != null) {
+        encoded ??= await storage.read(key: key);
+      }
+      if (encoded == null) continue;
+      try {
+        final operation = TaskCreationOperation.fromJson(
+          jsonDecode(encoded) as Map<String, dynamic>,
+        );
+        if (operation.accountScope != accountScope) continue;
+      } on Object {
+        // A malformed entry cannot be attributed safely to this account.
+        continue;
+      }
+      _inMemoryFallback.remove(key);
+      if (storage != null) await storage.delete(key: key);
+    }
+  }
 }

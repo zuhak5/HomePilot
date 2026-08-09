@@ -166,12 +166,38 @@ void main() {
   });
 
   testWidgets('Test 7 — Large text scale', (tester) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
     await tester.pumpWidget(
-      MaterialApp(
-        home: MediaQuery(
-          data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
-          child: const HomePilotSplashOverlay(child: _TestChildWidget()),
-        ),
+      const MaterialApp(
+        home: HomePilotSplashOverlay(child: _TestChildWidget()),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(HomePilotAnimatedSplashScreen), findsOneWidget);
+  });
+
+  testWidgets('Test 7b — Landscape at large text scale', (tester) async {
+    tester.view.physicalSize = const Size(568, 320);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HomePilotSplashOverlay(child: _TestChildWidget()),
       ),
     );
 

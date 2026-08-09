@@ -10,6 +10,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:homepilot/homepilot_animated_splash_screen.dart';
 import 'package:homepilot/main.dart';
 import 'package:homepilot/src/core/database/app_database.dart';
 import 'package:homepilot/src/core/domain/contracts.dart';
@@ -240,29 +241,30 @@ void main() {
         const FakeAccessibilityFeatures();
   });
 
-  testWidgets('startup bootstrap stays blank until theme load completes', (
+  testWidgets('startup bootstrap shows a branded surface until theme loads', (
     tester,
   ) async {
     final startupTheme = Completer<ThemeStartupSettings>();
 
     await tester.pumpWidget(
       HomePilotBootstrap(
-        elapsedBeforeFirstFrame: Duration.zero,
         startupThemeLoader: () => startupTheme.future,
         appBuilder: (_) => const SizedBox(key: ValueKey('bootstrapped-app')),
       ),
     );
 
-    final placeholder = find.byKey(const ValueKey('startup-theme-placeholder'));
-    expect(placeholder, findsOneWidget);
+    final startupSurface = find.byKey(const ValueKey('startup-theme-loading'));
+    expect(startupSurface, findsOneWidget);
+    expect(find.byType(HomePilotStartupSurface), findsOneWidget);
+    expect(find.text('HomePilot'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('homepilot-animated-splash')),
       findsNothing,
     );
-    expect(tester.getSize(placeholder), const Size(800, 600));
+    expect(tester.getSize(startupSurface), const Size(800, 600));
 
     await tester.pump(const Duration(milliseconds: 500));
-    expect(placeholder, findsOneWidget);
+    expect(startupSurface, findsOneWidget);
 
     startupTheme.complete(
       const ThemeStartupSettings(
@@ -272,7 +274,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
-    expect(placeholder, findsNothing);
+    expect(startupSurface, findsNothing);
     expect(find.byKey(const ValueKey('bootstrapped-app')), findsOneWidget);
   });
 
@@ -283,7 +285,6 @@ void main() {
 
     await tester.pumpWidget(
       HomePilotBootstrap(
-        elapsedBeforeFirstFrame: Duration.zero,
         startupThemeLoader: () => Completer<ThemeStartupSettings>().future,
         appBuilder: (startupTheme) {
           resolvedTheme = startupTheme;
@@ -292,14 +293,14 @@ void main() {
       ),
     );
 
-    final placeholder = find.byKey(const ValueKey('startup-theme-placeholder'));
-    expect(placeholder, findsOneWidget);
+    final startupSurface = find.byKey(const ValueKey('startup-theme-loading'));
+    expect(startupSurface, findsOneWidget);
     await tester.pump(const Duration(milliseconds: 3999));
-    expect(placeholder, findsOneWidget);
+    expect(startupSurface, findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
-    expect(placeholder, findsNothing);
+    expect(startupSurface, findsNothing);
     expect(find.byKey(const ValueKey('bootstrapped-app')), findsOneWidget);
     expect(resolvedTheme?.preference, ThemePreference.light);
     expect(resolvedTheme?.timeOfDayEnabled, isFalse);
@@ -312,7 +313,6 @@ void main() {
 
     await tester.pumpWidget(
       HomePilotBootstrap(
-        elapsedBeforeFirstFrame: minimumNativeSplashDuration,
         startupThemeLoader: () => Future<ThemeStartupSettings>.error(
           StateError('settings unavailable'),
         ),
@@ -591,7 +591,7 @@ void main() {
   });
 
   testWidgets(
-    'new install starts at onboarding without Flutter splash or Home',
+    'app root starts at onboarding without owning a duplicate splash',
     (tester) async {
       final settings = FakeSettingsRepository(onboardingCompletedValue: false);
       addTearDown(settings.close);
@@ -1607,6 +1607,7 @@ void main() {
       },
     );
     final weather = CountingWeatherRepository(
+      settingsRepository: settings,
       deviceLocation: const HomeLocation(
         label: 'Baghdad',
         latitude: 33.3152,
@@ -4679,6 +4680,136 @@ void main() {
     );
   });
 
+  testWidgets(
+    'unrelated notification preferences never request Android permission',
+    (tester) async {
+      final settings = FakeSettingsRepository(onboardingCompletedValue: true);
+      final permissions = FakeAppPermissionGateway(
+        states: {
+          AppPermissionKind.location: AppPermissionState.denied,
+          AppPermissionKind.notifications: AppPermissionState.denied,
+          AppPermissionKind.exactAlarms: AppPermissionState.denied,
+        },
+      );
+      addTearDown(settings.close);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: _testOverrides(settings, permissionGateway: permissions),
+          child: MaterialApp(
+            theme: testLightTheme(),
+            home: const SettingsScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final inbox = find.widgetWithText(SwitchListTile, 'In-app inbox');
+      await tester.scrollUntilVisible(
+        inbox,
+        320,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(inbox);
+      await tester.pump();
+
+      expect(permissions.requests, isEmpty);
+      expect(settings.notificationPreferencesValue.inAppInbox, isFalse);
+    },
+  );
+
+  testWidgets('denied notification enable is not persisted as active', (
+    tester,
+  ) async {
+    final settings = FakeSettingsRepository(onboardingCompletedValue: true);
+    settings.notificationPreferencesValue = const NotificationPreferences(
+      localReminders: false,
+    );
+    final permissions = FakeAppPermissionGateway(
+      states: {
+        AppPermissionKind.location: AppPermissionState.denied,
+        AppPermissionKind.notifications: AppPermissionState.denied,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
+      },
+      requestResults: {
+        AppPermissionKind.notifications: AppPermissionState.denied,
+      },
+    );
+    addTearDown(settings.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _testOverrides(settings, permissionGateway: permissions),
+        child: MaterialApp(
+          theme: testLightTheme(),
+          home: const SettingsScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final reminders = find.widgetWithText(SwitchListTile, 'Device reminders');
+    await tester.scrollUntilVisible(
+      reminders,
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(reminders);
+    await tester.pumpAndSettle();
+
+    expect(permissions.requests, [AppPermissionKind.notifications]);
+    expect(settings.notificationPreferencesValue.localReminders, isFalse);
+  });
+
+  testWidgets('denied exact access preserves approximate timing preference', (
+    tester,
+  ) async {
+    final settings = FakeSettingsRepository(onboardingCompletedValue: true);
+    settings.notificationPreferencesValue = const NotificationPreferences(
+      preferExactReminders: false,
+    );
+    final permissions = FakeAppPermissionGateway(
+      states: {
+        AppPermissionKind.location: AppPermissionState.denied,
+        AppPermissionKind.notifications: AppPermissionState.granted,
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
+      },
+      requestResults: {
+        AppPermissionKind.exactAlarms: AppPermissionState.denied,
+      },
+    );
+    addTearDown(settings.close);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: _testOverrides(settings, permissionGateway: permissions),
+        child: MaterialApp(
+          theme: testLightTheme(),
+          home: const SettingsScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final exact = find.widgetWithText(
+      SwitchListTile,
+      'Precise reminder alarms',
+    );
+    await tester.scrollUntilVisible(
+      exact,
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(exact);
+    await tester.pumpAndSettle();
+
+    expect(permissions.requests, [AppPermissionKind.exactAlarms]);
+    expect(settings.notificationPreferencesValue.preferExactReminders, isFalse);
+  });
+
   testWidgets('Quiet Hours start picker saves notification preferences', (
     tester,
   ) async {
@@ -5549,8 +5680,9 @@ List<Override> _testOverrides(
       permissionEducationRepository ??
           FakePermissionEducationRepository(initialState: defaultDeviceState),
     ),
-    if (weatherRepository != null)
-      weatherRepositoryProvider.overrideWithValue(weatherRepository),
+    weatherRepositoryProvider.overrideWithValue(
+      weatherRepository ?? CountingWeatherRepository(),
+    ),
     settingsRepositoryProvider.overrideWithValue(settings),
     maintenanceRepositoryProvider.overrideWithValue(
       maintenanceRepository ?? FakeMaintenanceRepository(initialTasks: tasks),
@@ -6159,6 +6291,19 @@ class AppPermissionGatewayDeviceAdapter implements DevicePermissionGateway {
       gateway.check(_map(capability));
 
   @override
+  Future<DeviceLocationAccessState> checkLocationAccess() async {
+    final state = await gateway.check(AppPermissionKind.location);
+    return DeviceLocationAccessState(
+      permissionState: state == AppPermissionState.serviceDisabled
+          ? AppPermissionState.denied
+          : state,
+      serviceEnabled: state == AppPermissionState.unavailable
+          ? null
+          : state != AppPermissionState.serviceDisabled,
+    );
+  }
+
+  @override
   Future<AppPermissionState> request(PermissionCapability capability) =>
       gateway.request(_map(capability));
 
@@ -6686,9 +6831,10 @@ class FakeStreakService implements StreakService {
 }
 
 class CountingWeatherRepository implements WeatherRepository {
-  CountingWeatherRepository({this.deviceLocation});
+  CountingWeatherRepository({this.deviceLocation, this.settingsRepository});
 
   final HomeLocation? deviceLocation;
+  final FakeSettingsRepository? settingsRepository;
   var refreshCount = 0;
   var useDeviceLocationCount = 0;
 
@@ -6707,6 +6853,9 @@ class CountingWeatherRepository implements WeatherRepository {
   @override
   Future<HomeLocation?> useDeviceLocation() async {
     useDeviceLocationCount++;
+    if (deviceLocation != null) {
+      await settingsRepository?.setHomeLocation(deviceLocation);
+    }
     return deviceLocation;
   }
 

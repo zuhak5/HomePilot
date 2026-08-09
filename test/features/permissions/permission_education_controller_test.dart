@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homepilot/main.dart'
     show
-        weatherRepositoryProvider,
+        notificationSchedulerProvider,
         settingsRepositoryProvider,
-        notificationSchedulerProvider;
+        weatherRepositoryProvider;
 import 'package:homepilot/src/core/domain/contracts.dart';
 import 'package:homepilot/src/core/domain/models.dart';
 import 'package:homepilot/src/features/permissions/application/permission_education_controller.dart';
@@ -12,10 +14,6 @@ import 'package:homepilot/src/features/permissions/data/device_permission_gatewa
 import 'package:homepilot/src/features/permissions/data/permission_education_repository.dart';
 import 'package:homepilot/src/features/permissions/domain/permission_capability.dart';
 import 'package:homepilot/src/features/permissions/domain/permission_education_state.dart';
-
-// ---------------------------------------------------------------------------
-// Fakes
-// ---------------------------------------------------------------------------
 
 class FakeDevicePermissionGateway implements DevicePermissionGateway {
   FakeDevicePermissionGateway({
@@ -28,10 +26,21 @@ class FakeDevicePermissionGateway implements DevicePermissionGateway {
   final Map<PermissionCapability, AppPermissionState> requestResults;
   final List<PermissionCapability> requests = [];
   final List<PermissionCapability> settingsOpens = [];
+  bool? locationServiceEnabled = true;
 
   @override
   Future<AppPermissionState> check(PermissionCapability capability) async {
     return states[capability] ?? AppPermissionState.denied;
+  }
+
+  @override
+  Future<DeviceLocationAccessState> checkLocationAccess() async {
+    return DeviceLocationAccessState(
+      permissionState:
+          states[PermissionCapability.deviceLocation] ??
+          AppPermissionState.denied,
+      serviceEnabled: locationServiceEnabled,
+    );
   }
 
   @override
@@ -53,27 +62,43 @@ class FakePermissionEducationRepository
     implements PermissionEducationRepository {
   PermissionEducationDeviceState deviceState =
       const PermissionEducationDeviceState();
+  int saveCount = 0;
 
   @override
-  Future<PermissionEducationDeviceState> loadDeviceState() async {
-    return deviceState;
-  }
+  Future<PermissionEducationDeviceState> loadDeviceState() async => deviceState;
 
   @override
   Future<void> saveDeviceState(PermissionEducationDeviceState state) async {
     deviceState = state;
+    saveCount++;
   }
 }
 
 class FakeSettingsRepository implements SettingsRepository {
-  HomeLocation? _location;
+  HomeLocation? location;
+  NotificationPreferences preferences = const NotificationPreferences();
+  bool permissionEducationSeenValue = false;
 
   @override
-  Future<HomeLocation?> homeLocation() async => _location;
+  Future<HomeLocation?> homeLocation() async => location;
 
   @override
-  Future<void> setHomeLocation(HomeLocation? location) async {
-    _location = location;
+  Future<void> setHomeLocation(HomeLocation? value) async {
+    location = value;
+  }
+
+  @override
+  Future<NotificationPreferences> notificationPreferences() async =>
+      preferences;
+
+  @override
+  Future<void> setNotificationPreferences(NotificationPreferences value) async {
+    preferences = value;
+  }
+
+  @override
+  Future<void> setPermissionEducationSeen(bool seen) async {
+    permissionEducationSeenValue = seen;
   }
 
   @override
@@ -81,10 +106,17 @@ class FakeSettingsRepository implements SettingsRepository {
 }
 
 class FakeNotificationScheduler implements NotificationScheduler {
+  NotificationPermissionState state = const NotificationPermissionState(
+    notificationsEnabled: false,
+    canScheduleExact: false,
+  );
   int refreshCount = 0;
 
   @override
   Future<void> initialize() async {}
+
+  @override
+  Future<NotificationPermissionState> permissionState() async => state;
 
   @override
   Future<void> refreshSchedules() async {
@@ -96,18 +128,28 @@ class FakeNotificationScheduler implements NotificationScheduler {
 }
 
 class FakeWeatherRepository implements WeatherRepository {
+  FakeWeatherRepository(this.settingsRepository);
+
+  final FakeSettingsRepository settingsRepository;
   int useCurrentLocationCount = 0;
   int refreshWeatherCount = 0;
+  HomeLocation? currentLocationResult = const HomeLocation(
+    label: 'Baghdad',
+    latitude: 33.31,
+    longitude: 44.36,
+    source: 'device',
+  );
+  Completer<void>? acquisitionGate;
 
   @override
   Future<HomeLocation?> useCurrentLocationHomeArea() async {
     useCurrentLocationCount++;
-    return const HomeLocation(
-      label: 'Baghdad',
-      latitude: 33.31,
-      longitude: 44.36,
-      source: 'device',
-    );
+    await acquisitionGate?.future;
+    final result = currentLocationResult;
+    if (result != null) {
+      await settingsRepository.setHomeLocation(result);
+    }
+    return result;
   }
 
   @override
@@ -120,41 +162,32 @@ class FakeWeatherRepository implements WeatherRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Builds a [ProviderContainer] with fakes overriding all external providers
-/// that [PermissionEducationController] depends on.
 ProviderContainer _makeContainer({
   required FakeDevicePermissionGateway gateway,
   required FakePermissionEducationRepository repository,
-  required FakeWeatherRepository weatherRepo,
-  required FakeSettingsRepository settingsRepo,
+  required FakeWeatherRepository weatherRepository,
+  required FakeSettingsRepository settingsRepository,
   required FakeNotificationScheduler scheduler,
 }) {
   return ProviderContainer(
     overrides: [
       devicePermissionGatewayProvider.overrideWithValue(gateway),
       permissionEducationRepositoryProvider.overrideWithValue(repository),
-      weatherRepositoryProvider.overrideWithValue(weatherRepo),
-      settingsRepositoryProvider.overrideWithValue(settingsRepo),
+      weatherRepositoryProvider.overrideWithValue(weatherRepository),
+      settingsRepositoryProvider.overrideWithValue(settingsRepository),
       notificationSchedulerProvider.overrideWithValue(scheduler),
     ],
   );
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 void main() {
   late FakeDevicePermissionGateway gateway;
   late FakePermissionEducationRepository repository;
-  late FakeSettingsRepository settingsRepo;
+  late FakeSettingsRepository settingsRepository;
   late FakeNotificationScheduler scheduler;
-  late FakeWeatherRepository weatherService;
+  late FakeWeatherRepository weatherRepository;
   late ProviderContainer container;
+  late PermissionEducationController notifier;
 
   setUp(() {
     gateway = FakeDevicePermissionGateway(
@@ -165,110 +198,429 @@ void main() {
       },
     );
     repository = FakePermissionEducationRepository();
-    settingsRepo = FakeSettingsRepository();
+    settingsRepository = FakeSettingsRepository();
     scheduler = FakeNotificationScheduler();
-    weatherService = FakeWeatherRepository();
-
+    weatherRepository = FakeWeatherRepository(settingsRepository);
     container = _makeContainer(
       gateway: gateway,
       repository: repository,
-      weatherRepo: weatherService,
-      settingsRepo: settingsRepo,
+      weatherRepository: weatherRepository,
+      settingsRepository: settingsRepository,
       scheduler: scheduler,
     );
+    notifier = container.read(permissionEducationControllerProvider.notifier);
   });
 
-  tearDown(() {
-    container.dispose();
-  });
+  tearDown(() => container.dispose());
 
   test(
-    'Initialization populates default relevant capabilities without exact alarms',
+    'first dashboard includes weather and notifications but never exact',
     () async {
-      final notifier = container.read(
-        permissionEducationControllerProvider.notifier,
-      );
       await notifier.initialize();
-      final state = container.read(permissionEducationControllerProvider);
 
+      final state = container.read(permissionEducationControllerProvider);
       expect(state.relevantCapabilities, [
         PermissionCapability.deviceLocation,
         PermissionCapability.notifications,
       ]);
       expect(state.activeCapability, PermissionCapability.deviceLocation);
       expect(state.isVisible, isTrue);
+      expect(state.setupSnapshot, isNotNull);
+    },
+  );
+
+  test('manual weather area suppresses first-run location education', () async {
+    settingsRepository.location = const HomeLocation(
+      label: 'Basra',
+      latitude: 30.50,
+      longitude: 47.81,
+      source: 'manual',
+    );
+
+    await notifier.initialize();
+
+    final state = container.read(permissionEducationControllerProvider);
+    expect(state.relevantCapabilities, [PermissionCapability.notifications]);
+    expect(
+      state.setupSnapshot?.weather.effectiveState,
+      EffectiveCapabilityState.active,
+    );
+    expect(
+      state.setupSnapshot?.weather.deviceLocationPermission,
+      AppPermissionState.denied,
+    );
+  });
+
+  test('manual choice preserves the real denied OS location state', () async {
+    await notifier.initialize();
+    const location = HomeLocation(
+      label: 'Basra',
+      latitude: 30.50,
+      longitude: 47.81,
+      source: 'manual',
+    );
+
+    await notifier.chooseLocationManually(location);
+
+    final state = container.read(permissionEducationControllerProvider);
+    expect(gateway.requests, isEmpty);
+    expect(settingsRepository.location, same(location));
+    expect(
+      state
+          .capabilityStatuses[PermissionCapability.deviceLocation]
+          ?.permissionState,
+      AppPermissionState.denied,
+    );
+    expect(
+      state.capabilityStatuses[PermissionCapability.deviceLocation]?.outcome,
+      PermissionEducationOutcome.configuredManually,
+    );
+    expect(state.activeCapability, PermissionCapability.notifications);
+  });
+
+  test(
+    'current-location step waits until the area has been persisted',
+    () async {
+      await notifier.initialize();
+      final gate = Completer<void>();
+      weatherRepository.acquisitionGate = gate;
+
+      final action = notifier.useCurrentLocation();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(weatherRepository.useCurrentLocationCount, 1);
+      expect(
+        container.read(permissionEducationControllerProvider).activeCapability,
+        PermissionCapability.deviceLocation,
+      );
+
+      gate.complete();
+      await action;
+
+      expect(settingsRepository.location, isNotNull);
+      expect(
+        container.read(permissionEducationControllerProvider).activeCapability,
+        PermissionCapability.notifications,
+      );
     },
   );
 
   test(
-    'Use current location triggers gateway request and advances step',
+    'granted permission without an acquired area does not advance',
     () async {
-      final notifier = container.read(
-        permissionEducationControllerProvider.notifier,
-      );
+      weatherRepository.currentLocationResult = null;
       await notifier.initialize();
+
       await notifier.useCurrentLocation();
 
-      expect(gateway.requests, [PermissionCapability.deviceLocation]);
-      expect(weatherService.useCurrentLocationCount, 1);
       final state = container.read(permissionEducationControllerProvider);
-      expect(state.activeCapability, PermissionCapability.notifications);
+      expect(
+        state
+            .capabilityStatuses[PermissionCapability.deviceLocation]
+            ?.permissionState,
+        AppPermissionState.granted,
+      );
+      expect(
+        state.capabilityStatuses[PermissionCapability.deviceLocation]?.outcome,
+        PermissionEducationOutcome.failed,
+      );
+      expect(state.setupSnapshot?.weather.isConfigured, isFalse);
+      expect(state.activeCapability, PermissionCapability.deviceLocation);
     },
   );
 
+  test('weather-card source targets only the weather capability', () async {
+    settingsRepository.location = const HomeLocation(
+      label: 'Basra',
+      latitude: 30.50,
+      longitude: 47.81,
+      source: 'manual',
+    );
+
+    await notifier.initialize(source: PermissionEducationSource.weatherCard);
+
+    expect(
+      container
+          .read(permissionEducationControllerProvider)
+          .relevantCapabilities,
+      [PermissionCapability.deviceLocation],
+    );
+  });
+
+  test('reminder source targets exact timing only when requested', () async {
+    await notifier.initialize(
+      source: PermissionEducationSource.reminderSettings,
+    );
+    expect(
+      container
+          .read(permissionEducationControllerProvider)
+          .relevantCapabilities,
+      isEmpty,
+    );
+
+    settingsRepository.preferences = settingsRepository.preferences.copyWith(
+      preferExactReminders: true,
+    );
+    await notifier.initialize(
+      source: PermissionEducationSource.reminderSettings,
+    );
+    expect(
+      container
+          .read(permissionEducationControllerProvider)
+          .relevantCapabilities,
+      [PermissionCapability.exactReminderTiming],
+    );
+  });
+
   test(
-    'Choose location manually sets location without OS permission request',
+    'settings source includes configured and missing applicable cards',
     () async {
-      final notifier = container.read(
-        permissionEducationControllerProvider.notifier,
-      );
-      await notifier.initialize();
-      const location = HomeLocation(
+      settingsRepository.location = const HomeLocation(
         label: 'Basra',
         latitude: 30.50,
         longitude: 47.81,
         source: 'manual',
       );
-      await notifier.chooseLocationManually(location);
+      gateway.states[PermissionCapability.notifications] =
+          AppPermissionState.granted;
+      gateway.states[PermissionCapability.exactReminderTiming] =
+          AppPermissionState.unavailable;
+      scheduler.state = const NotificationPermissionState(
+        notificationsEnabled: true,
+        canScheduleExact: false,
+      );
 
-      expect(gateway.requests, isEmpty);
-      expect(await settingsRepo.homeLocation(), equals(location));
-      final state = container.read(permissionEducationControllerProvider);
-      expect(state.activeCapability, PermissionCapability.notifications);
+      await notifier.initialize(
+        source: PermissionEducationSource.settings,
+        forceShow: true,
+      );
+
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .relevantCapabilities,
+        [
+          PermissionCapability.deviceLocation,
+          PermissionCapability.notifications,
+        ],
+      );
     },
   );
 
   test(
-    'Defer current step saves deferral cooldown in local v3 state',
+    'settings opener targets the tapped card instead of the active card',
     () async {
-      final notifier = container.read(
-        permissionEducationControllerProvider.notifier,
+      await notifier.initialize(
+        source: PermissionEducationSource.settings,
+        forceShow: true,
       );
+      expect(
+        container.read(permissionEducationControllerProvider).activeCapability,
+        PermissionCapability.deviceLocation,
+      );
+
+      await notifier.openSettingsFor(PermissionCapability.exactReminderTiming);
+
+      expect(gateway.settingsOpens, [PermissionCapability.exactReminderTiming]);
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .awaitingSettingsCapability,
+        PermissionCapability.exactReminderTiming,
+      );
+    },
+  );
+
+  test(
+    'location-service-disabled recovery targets location settings',
+    () async {
+      gateway.states[PermissionCapability.deviceLocation] =
+          AppPermissionState.serviceDisabled;
+      await notifier.initialize(
+        source: PermissionEducationSource.settings,
+        forceShow: true,
+      );
+
+      await notifier.openSettingsFor(PermissionCapability.deviceLocation);
+
+      expect(gateway.settingsOpens, [PermissionCapability.deviceLocation]);
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .capabilityStatuses[PermissionCapability.deviceLocation]
+            ?.nextAction,
+        PermissionNextAction.openLocationSettings,
+      );
+    },
+  );
+
+  test(
+    'restricted and unavailable capabilities expose no invalid settings action',
+    () async {
+      gateway.states[PermissionCapability.notifications] =
+          AppPermissionState.restricted;
+      await notifier.initialize(
+        source: PermissionEducationSource.settings,
+        forceShow: true,
+      );
+
+      await notifier.openSettingsFor(PermissionCapability.notifications);
+
+      expect(gateway.settingsOpens, isEmpty);
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .capabilityStatuses[PermissionCapability.notifications]
+            ?.nextAction,
+        PermissionNextAction.none,
+      );
+    },
+  );
+
+  test(
+    'resume re-reads, derives, advances, and publishes exactly once',
+    () async {
       await notifier.initialize();
+      await notifier.openSettingsFor(PermissionCapability.deviceLocation);
+      gateway.states[PermissionCapability.deviceLocation] =
+          AppPermissionState.granted;
+      settingsRepository.location = const HomeLocation(
+        label: 'Baghdad',
+        latitude: 33.31,
+        longitude: 44.36,
+        source: 'device',
+      );
+
+      final published = <PermissionEducationControllerState>[];
+      final subscription = container.listen(
+        permissionEducationControllerProvider,
+        (_, next) => published.add(next),
+      );
+      await notifier.handleAppResume();
+      subscription.close();
+
+      expect(published, hasLength(1));
+      final state = published.single;
+      expect(state.awaitingSettingsReturn, isFalse);
+      expect(state.activeCapability, PermissionCapability.notifications);
+      expect(
+        state.setupSnapshot?.weather.effectiveState,
+        EffectiveCapabilityState.active,
+      );
+      expect(
+        state.capabilityStatuses[PermissionCapability.deviceLocation]?.outcome,
+        PermissionEducationOutcome.granted,
+      );
+    },
+  );
+
+  test(
+    'resume refreshes capability truth even when no education UI is visible',
+    () async {
+      repository.deviceState = PermissionEducationDeviceState(
+        completedAt: DateTime(2026),
+      );
+      await notifier.refreshCapabilities();
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .setupSnapshot
+            ?.weather
+            .effectiveState,
+        EffectiveCapabilityState.notConfigured,
+      );
+
+      settingsRepository.location = const HomeLocation(
+        label: 'Basra',
+        latitude: 30.50,
+        longitude: 47.81,
+        source: 'manual',
+      );
+      final published = <PermissionEducationControllerState>[];
+      final subscription = container.listen(
+        permissionEducationControllerProvider,
+        (_, next) => published.add(next),
+      );
+
+      await notifier.handleAppResume();
+      subscription.close();
+
+      expect(published, hasLength(1));
+      expect(published.single.isVisible, isFalse);
+      expect(
+        published.single.setupSnapshot?.weather.effectiveState,
+        EffectiveCapabilityState.active,
+      );
+      expect(
+        published.single.setupSnapshot?.weather.deviceLocationPermission,
+        AppPermissionState.denied,
+      );
+    },
+  );
+
+  test(
+    'choosing approximate timing clears exact intent and reconciles',
+    () async {
+      gateway.states[PermissionCapability.notifications] =
+          AppPermissionState.granted;
+      scheduler.state = const NotificationPermissionState(
+        notificationsEnabled: true,
+        canScheduleExact: false,
+      );
+      settingsRepository.preferences = settingsRepository.preferences.copyWith(
+        preferExactReminders: true,
+      );
+      await notifier.initialize(
+        source: PermissionEducationSource.reminderSettings,
+      );
+
       await notifier.deferCurrentStep();
 
-      final savedState = repository.deviceState;
-      final step = savedState.steps[PermissionCapability.deviceLocation];
-
-      expect(step?.educationSeen, isTrue);
-      expect(step?.deferCount, equals(1));
-      final state = container.read(permissionEducationControllerProvider);
-      expect(state.activeCapability, PermissionCapability.notifications);
+      expect(settingsRepository.preferences.preferExactReminders, isFalse);
+      expect(scheduler.refreshCount, 1);
+      expect(repository.deviceState.completedAt, isNotNull);
+      expect(
+        container
+            .read(permissionEducationControllerProvider)
+            .setupSnapshot
+            ?.notifications
+            .usesApproximateTiming,
+        isTrue,
+      );
     },
   );
 
   test(
-    'Finish later closes overlay without marking all capabilities completed',
+    'finish later persists a session cooldown without completing setup',
     () async {
-      final notifier = container.read(
-        permissionEducationControllerProvider.notifier,
-      );
       await notifier.initialize();
-      notifier.finishLater();
 
-      final state = container.read(permissionEducationControllerProvider);
+      await notifier.finishLater();
+
+      var state = container.read(permissionEducationControllerProvider);
       expect(state.isVisible, isFalse);
       expect(repository.deviceState.completedAt, isNull);
+      expect(repository.deviceState.dismissedUntil, isNotNull);
+
+      await notifier.initialize();
+      state = container.read(permissionEducationControllerProvider);
+      expect(state.isVisible, isFalse);
+      expect(state.relevantCapabilities, isEmpty);
     },
   );
+
+  test('a second user action cannot overlap an in-flight action', () async {
+    await notifier.initialize();
+    final gate = Completer<void>();
+    weatherRepository.acquisitionGate = gate;
+
+    final locationAction = notifier.useCurrentLocation();
+    final notificationAction = notifier.enableNotifications();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gateway.requests, [PermissionCapability.deviceLocation]);
+    gate.complete();
+    await Future.wait([locationAction, notificationAction]);
+    expect(gateway.requests, [PermissionCapability.deviceLocation]);
+  });
 }

@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:homepilot/main.dart';
+import 'package:homepilot/homepilot_animated_splash_screen.dart';
 
 ({int width, int height}) _pngSize(String path) {
   final bytes = File(path).readAsBytesSync();
@@ -132,16 +132,22 @@ Future<bool> _opaqueArtworkFitsCircle(
 }
 
 void main() {
-  test('in-app startup uses no artificial fixed splash wait', () {
-    expect(remainingNativeSplashDuration(Duration.zero), Duration.zero);
+  test('process splash has one fixed presentation lifetime', () {
+    expect(homePilotSplashDisplayDuration, const Duration(milliseconds: 3200));
+    expect(homePilotSplashFadeOutDuration, const Duration(milliseconds: 250));
+    expect(homePilotSplashBackground.toARGB32(), 0xFFF9FCF8);
+  });
+
+  test('first runApp child owns the process splash above startup branches', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(source, contains('runApp(HomePilotProcessSplash(child: child))'));
     expect(
-      remainingNativeSplashDuration(const Duration(milliseconds: 1250)),
-      Duration.zero,
+      source,
+      contains('_runHomePilotProcess(const HomePilotStartupFailure())'),
     );
-    expect(
-      remainingNativeSplashDuration(const Duration(milliseconds: 3300)),
-      Duration.zero,
-    );
+    expect(source, contains('_DeferredHomePilotBootstrap('));
+    expect(source, isNot(contains('startup-theme-placeholder')));
+    expect(source, isNot(contains('return HomePilotSplashOverlay(')));
   });
 
   test('Android native splash uses the final borderless 3D icon', () {

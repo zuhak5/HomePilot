@@ -17,14 +17,35 @@ GoRouter definitions in `lib/main.dart` are authoritative. Current route pattern
 /trash
 /statistics
 /settings
+/profile -> /account
 /account
 /backup
 /notifications
+/permissions/setup
 ```
 
 Route parameters are untrusted input. Screens must handle missing, deleted, unauthorized, malformed, or not-yet-hydrated entities without crashing or exposing another account's data.
 
 Route changes should update navigation tests, deep-link behavior, authentication gates, analytics/diagnostic route naming, and this reference.
+
+`/permissions/setup` is the user-invoked capability-setup surface. It can also be opened from Settings. Weather-card, reminder-settings, and task-scheduling education use the same controller with source-specific capability selection rather than creating independent OS permission requesters.
+
+## Capability truth model
+
+HomePilot keeps four kinds of state separate:
+
+| Layer | Examples | What it establishes |
+|---|---|---|
+| Application preference | Reminders enabled, inbox enabled, weather alerts enabled, exact timing preferred | User intent only |
+| OS permission, service, or special access | Approximate location permission, location services, notification permission, exact-alarm access | Current Android authorization or availability |
+| Runtime service truth | Notifications actually enabled, scheduler can actually schedule exact alarms | Whether the platform service can perform the requested operation now |
+| Effective capability | `active`, `degraded`, `blocked`, `disabledByUser`, `unavailable`, `notConfigured` | The combined product state shown to application logic and education UI |
+
+The snapshot derivation in `lib/src/features/permissions/domain/capability_snapshots.dart` is authoritative. A preference never upgrades a denied OS state, and an OS grant alone does not turn on a user-disabled feature.
+
+Weather areas have three modes: not configured, manually selected, and device-derived. A manual area is an active weather capability even when location permission remains denied, service-disabled, restricted, or unavailable; the stored OS state is not rewritten. Device-derived weather requires foreground approximate-location access, an available location service, and a successfully persisted area before setup advances.
+
+Notification capability combines the master and channel preferences with Android permission and the notification plugin's effective state. In-app inbox and weather-alert preferences are independent of whether Android can post a device notification. Exact timing is a separate optional capability and does not determine whether reminders exist.
 
 ## Android permissions
 
@@ -33,16 +54,16 @@ The current main manifest declares:
 | Permission | Purpose | Review requirement |
 |---|---|---|
 | `INTERNET` | Supabase, authentication, ads, weather/network features, Sentry | Keep network payloads privacy-safe |
-| `ACCESS_COARSE_LOCATION` | Approximate location-dependent features | Request in context; no precise/background expansion |
+| `ACCESS_COARSE_LOCATION` | Optional current-location selection for a weather area | Request in context; preserve manual selection; no precise/background expansion |
 | `POST_NOTIFICATIONS` | Local maintenance reminders on supported Android versions | Explain value and handle denial |
-| `SCHEDULE_EXACT_ALARM` | Time-sensitive reminders | Use only where exact delivery is justified |
+| `SCHEDULE_EXACT_ALARM` | Optional exact timing for reminders | Ask only from exact-timing context; retain inexact fallback |
 | `RECEIVE_BOOT_COMPLETED` | Restore scheduled reminders after reboot | Keep receiver work bounded |
 | `WAKE_LOCK` | Reliable bounded notification/background work | Avoid long-running holds |
 | `VIBRATE` | Notification behavior | Respect user/channel settings |
 | `FOREGROUND_SERVICE` | Foreground task support | Show required user-visible notification |
 | `FOREGROUND_SERVICE_DATA_SYNC` | Foreground data synchronization | Keep service type aligned with actual work |
 
-The manifest does not currently request fine location or background location.
+The source manifest does not request fine location or background location. A release claim still requires inspection of the merged production manifest because dependencies can contribute manifest entries.
 
 ## Android components
 
@@ -61,13 +82,18 @@ Android platform backup is disabled through manifest/application backup settings
 - Explain the product value before the system prompt where appropriate.
 - Provide useful degraded behavior after denial.
 - Do not repeatedly pressure the user after denial.
-- Distinguish denied, permanently denied, unavailable, and restricted states.
-- Link to system settings only when the user can act there.
+- Distinguish denied, permanently denied, restricted, service-disabled, and unavailable states.
+- Link to the relevant app, location-service, or exact-alarm settings only when the user can act there, then recompute one coherent snapshot when the app resumes.
+- Route all checks, prompts, prompt-history writes, and settings actions through `AppPermissionCoordinator`; feature adapters and notification scheduling must not create competing request paths.
 - Update `PRIVACY.md`, store disclosures, tests, and operations docs for any new permission.
+
+The first dashboard visit can educate for an unconfigured weather area and unsatisfied notification delivery, subject to deferral/cooldown. It does not include exact timing. Manual weather selection does not request OS location. Exact timing is considered from Settings and from reminder/task-scheduling context when the preference calls for it; users can defer it without losing approximate reminders.
 
 ## Exact alarms and notifications
 
-Test permission and scheduling behavior across Android versions, notification channels, disabled notifications, reboot, application replacement, time-zone changes, daylight-saving transitions, maintenance completion, recurrence changes, and duplicate scheduling.
+When exact timing is not preferred, unavailable, denied, or not effectively schedulable, the scheduler uses `inexactAllowWhileIdle`. It uses `exactAllowWhileIdle` only when the preference and current platform capability both allow it. Exact access is therefore a delivery-precision enhancement, not a prerequisite for reminders.
+
+Test permission and scheduling behavior across Android versions, notification channels, disabled notifications, exact-alarm settings return, reboot, application replacement, time-zone changes, daylight-saving transitions, maintenance completion, recurrence changes, and duplicate scheduling. Pure/widget tests establish derivation and routing contracts; OEM settings behavior, real notification delivery, reboot/update restoration, and timing accuracy require physical-device evidence.
 
 ## Foreground and background work
 
@@ -75,4 +101,4 @@ Foreground service and Workmanager jobs should be bounded, idempotent, account-a
 
 ## Location
 
-Use approximate location only for the current feature requirement. Do not retain or transmit location beyond the documented purpose. Handle no permission, unavailable services, timeout, stale cache, and network failure. Introducing precise or background location requires a separate product and privacy decision.
+Use approximate location only for the current-location weather-area option. Manual search is the non-permission alternative, but its typed query and chosen area still cross the documented weather-provider and synchronization boundaries; it must not be described as “no location data.” Do not retain or transmit location beyond the documented purpose. Handle no permission, unavailable services, timeout, stale cache, and network failure. Introducing precise or background location requires a separate product and privacy decision.

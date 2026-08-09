@@ -8,7 +8,10 @@ import {
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
+const operationId = "44444444-4444-4444-8444-444444444444";
+const recoveryKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const validToken = jwtWithSession(sessionId);
+const productionOrigin = "https://zuhak5.github.io";
 const configuredEnvironment = {
   get: (key: string): string | undefined =>
     ({
@@ -31,6 +34,110 @@ Deno.test("rejects non-POST methods before reading credentials", async () => {
   assertEquals(await response.json(), { error: "method_not_allowed" });
   assertMatch(response.headers.get("content-type") ?? "", /application\/json/);
   assertEquals(response.headers.get("cache-control"), "no-store");
+  assertEquals(response.headers.get("access-control-allow-origin"), null);
+});
+
+Deno.test("answers preflight for each exact browser origin", async () => {
+  for (
+    const origin of [
+      productionOrigin,
+      "http://localhost:4173",
+      "http://127.0.0.1:4173",
+    ]
+  ) {
+    const response = await handleDeleteAccount(
+      new Request("http://localhost/delete-account", {
+        method: "OPTIONS",
+        headers: {
+          Origin: origin,
+          "Access-Control-Request-Method": "POST",
+          "Access-Control-Request-Headers": "authorization,apikey,content-type",
+        },
+      }),
+      emptyEnvironment,
+    );
+
+    assertEquals(response.status, 204);
+    assertEquals(response.headers.get("access-control-allow-origin"), origin);
+    assertEquals(
+      response.headers.get("access-control-allow-methods"),
+      "POST, OPTIONS",
+    );
+    assertEquals(
+      response.headers.get("access-control-allow-headers"),
+      "authorization, apikey, content-type, x-client-info",
+    );
+    assertEquals(response.headers.get("vary"), "Origin");
+  }
+});
+
+Deno.test("rejects missing or non-allowlisted preflight origins", async () => {
+  for (
+    const origin of [
+      null,
+      "https://example.com",
+      "https://zuhak5.github.io.evil.example",
+    ]
+  ) {
+    const headers = new Headers();
+    if (origin != null) headers.set("Origin", origin);
+    const response = await handleDeleteAccount(
+      new Request("http://localhost/delete-account", {
+        method: "OPTIONS",
+        headers,
+      }),
+      emptyEnvironment,
+    );
+
+    assertEquals(response.status, 403);
+    assertEquals(await response.json(), { error: "origin_not_allowed" });
+    assertEquals(response.headers.get("access-control-allow-origin"), null);
+  }
+});
+
+Deno.test("rejects an untrusted browser origin before authorization", async () => {
+  const response = await handleDeleteAccount(
+    deletionRequest({ origin: "https://attacker.example" }),
+    emptyEnvironment,
+  );
+
+  assertEquals(response.status, 403);
+  assertEquals(await response.json(), { error: "origin_not_allowed" });
+  assertEquals(response.headers.get("access-control-allow-origin"), null);
+});
+
+Deno.test("adds CORS headers to errors for an allowed browser origin", async () => {
+  const response = await handleDeleteAccount(
+    deletionRequest({ includeAuthorization: false, origin: productionOrigin }),
+    emptyEnvironment,
+  );
+
+  assertEquals(response.status, 401);
+  assertEquals(await response.json(), { error: "missing_authorization" });
+  assertEquals(
+    response.headers.get("access-control-allow-origin"),
+    productionOrigin,
+  );
+  assertEquals(response.headers.get("vary"), "Origin");
+});
+
+Deno.test("preserves authenticated native deletion without an Origin header", async () => {
+  const services = new FakeAccountDeletionServices();
+  services.objectListings.push([]);
+
+  const response = await handleDeleteAccount(
+    deletionRequest(),
+    configuredEnvironment,
+    factoryFor(services),
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), {
+    deleted: true,
+    status: "deleted",
+    user_id: userId,
+  });
+  assertEquals(response.headers.get("access-control-allow-origin"), null);
 });
 
 Deno.test("requires a bearer authorization header", async () => {
@@ -51,6 +158,18 @@ Deno.test("requires an explicit deletion confirmation payload", async () => {
 
   assertEquals(response.status, 400);
   assertEquals(await response.json(), { error: "confirmation_required" });
+});
+
+Deno.test("requires a 256-bit recovery capability", async () => {
+  for (const candidate of [null, "short", "!".repeat(43)]) {
+    const response = await handleDeleteAccount(
+      deletionRequest({ recoveryKey: candidate }),
+      emptyEnvironment,
+    );
+
+    assertEquals(response.status, 400);
+    assertEquals(await response.json(), { error: "recovery_key_required" });
+  }
 });
 
 Deno.test("fails closed when server credentials are unavailable", async () => {
@@ -103,6 +222,7 @@ Deno.test("deletes only the user derived from the verified JWT", async () => {
 
   const response = await handleDeleteAccount(
     deletionRequest({
+      origin: productionOrigin,
       extraBody: {
         user_id: "99999999-9999-4999-8999-999999999999",
       },
@@ -117,17 +237,48 @@ Deno.test("deletes only the user derived from the verified JWT", async () => {
     status: "deleted",
     user_id: userId,
   });
+  assertEquals(
+    response.headers.get("access-control-allow-origin"),
+    productionOrigin,
+  );
   assertEquals(services.events, [
     "get_user",
     `recent_session:${userId}:${sessionId}`,
+    `begin_operation:${userId}`,
     `list:${userId}`,
     `begin:${userId}:1`,
+    "advance:storage_cleanup",
     `list:${userId}`,
     "remove:1",
     `list:${userId}`,
-    "sign_out_global",
-    `delete_user:${userId}`,
     "complete_cleanup",
+    "advance:storage_complete",
+    "advance:auth_delete_started",
+    `delete_user:${userId}`,
+    "complete_operation",
+  ]);
+});
+
+Deno.test("an already-completed operation returns the strict receipt", async () => {
+  const services = new FakeAccountDeletionServices();
+  services.operationCompleted = true;
+
+  const response = await handleDeleteAccount(
+    deletionRequest(),
+    configuredEnvironment,
+    factoryFor(services),
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), {
+    deleted: true,
+    status: "deleted",
+    user_id: userId,
+  });
+  assertEquals(services.events, [
+    "get_user",
+    `recent_session:${userId}:${sessionId}`,
+    `begin_operation:${userId}`,
   ]);
 });
 
@@ -151,17 +302,22 @@ Deno.test("does not delete Auth when Storage cleanup fails", async () => {
     services.events.some((event) => event.startsWith("delete_user:")),
     false,
   );
-  assertEquals(services.events.includes("sign_out_global"), false);
   assertEquals(
     services.events.includes("record_error:remove_storage_failed"),
     true,
   );
+  assertEquals(
+    services.events.includes("record_operation_error:remove_storage_failed"),
+    true,
+  );
 });
 
-Deno.test("does not delete Auth when global sign-out fails", async () => {
+Deno.test("does not delete Auth when cleanup receipt finalization fails", async () => {
   const services = new FakeAccountDeletionServices();
   services.objectListings.push([]);
-  services.signOutError = new Error("forced sign-out failure");
+  services.completeCleanupError = new Error(
+    "forced cleanup completion failure",
+  );
 
   const response = await handleDeleteAccount(
     deletionRequest(),
@@ -169,15 +325,33 @@ Deno.test("does not delete Auth when global sign-out fails", async () => {
     factoryFor(services),
   );
 
-  assertEquals(response.status, 503);
-  assertEquals(await response.json(), { error: "session_revocation_failed" });
-  assertEquals(
-    services.events.includes("record_error:revoke_sessions_failed"),
-    true,
-  );
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "account_deletion_failed" });
   assertEquals(
     services.events.some((event) => event.startsWith("delete_user:")),
     false,
+  );
+});
+
+Deno.test("lost response after Auth deletion leaves a recoverable operation", async () => {
+  const services = new FakeAccountDeletionServices();
+  services.objectListings.push([]);
+  services.completeOperationError = new Error("forced receipt write failure");
+
+  const response = await handleDeleteAccount(
+    deletionRequest(),
+    configuredEnvironment,
+    factoryFor(services),
+  );
+
+  assertEquals(response.status, 500);
+  assertEquals(await response.json(), { error: "account_deletion_failed" });
+  assertEquals(services.events.includes(`delete_user:${userId}`), true);
+  assertEquals(
+    services.events.includes(
+      "record_operation_error:complete_operation_failed",
+    ),
+    true,
   );
 });
 
@@ -185,8 +359,10 @@ class FakeAccountDeletionServices implements AccountDeletionServices {
   events: string[] = [];
   objectListings: string[][] = [];
   recentSession = true;
-  signOutError: unknown = null;
   removeError: unknown = null;
+  completeCleanupError: unknown = null;
+  completeOperationError: unknown = null;
+  operationCompleted = false;
 
   getVerifiedUserId(_token: string): Promise<string | null> {
     this.events.push("get_user");
@@ -196,13 +372,6 @@ class FakeAccountDeletionServices implements AccountDeletionServices {
   isRecentSession(user: string, session: string): Promise<boolean> {
     this.events.push(`recent_session:${user}:${session}`);
     return Promise.resolve(this.recentSession);
-  }
-
-  signOutGlobally(_token: string): Promise<void> {
-    this.events.push("sign_out_global");
-    return this.signOutError == null
-      ? Promise.resolve()
-      : Promise.reject(this.signOutError);
   }
 
   listObjectPaths(user: string): Promise<string[]> {
@@ -229,11 +398,57 @@ class FakeAccountDeletionServices implements AccountDeletionServices {
 
   completeCleanup(_jobId: string): Promise<void> {
     this.events.push("complete_cleanup");
-    return Promise.resolve();
+    return this.completeCleanupError == null
+      ? Promise.resolve()
+      : Promise.reject(this.completeCleanupError);
   }
 
   recordCleanupError(_jobId: string, errorCode: string): Promise<void> {
     this.events.push(`record_error:${errorCode}`);
+    return Promise.resolve();
+  }
+
+  beginOperation(
+    _requestHash: string,
+    _subjectBinding: string,
+    user: string,
+  ) {
+    this.events.push(`begin_operation:${user}`);
+    return Promise.resolve({
+      operationId,
+      stage: this.operationCompleted
+        ? "completed" as const
+        : "prepared" as const,
+      completed: this.operationCompleted,
+    });
+  }
+
+  advanceOperation(
+    _operationId: string,
+    _userId: string,
+    stage: Parameters<AccountDeletionServices["advanceOperation"]>[2],
+  ): Promise<void> {
+    this.events.push(`advance:${stage}`);
+    return Promise.resolve();
+  }
+
+  completeOperation(
+    _operationId: string,
+    _userId: string,
+    _subjectBinding: string,
+  ): Promise<void> {
+    this.events.push("complete_operation");
+    return this.completeOperationError == null
+      ? Promise.resolve()
+      : Promise.reject(this.completeOperationError);
+  }
+
+  recordOperationError(
+    _operationId: string,
+    _userId: string,
+    errorCode: string,
+  ): Promise<void> {
+    this.events.push(`record_operation_error:${errorCode}`);
     return Promise.resolve();
   }
 }
@@ -247,16 +462,30 @@ function deletionRequest({
   confirmation = "delete-my-account",
   token = validToken,
   extraBody = {},
+  origin,
+  recoveryKey: requestRecoveryKey = recoveryKey,
 }: {
   includeAuthorization?: boolean;
   confirmation?: string;
   token?: string;
   extraBody?: Record<string, unknown>;
+  origin?: string;
+  recoveryKey?: string | null;
 } = {}): Request {
+  const headers = new Headers();
+  if (includeAuthorization) headers.set("Authorization", `Bearer ${token}`);
+  if (origin != null) headers.set("Origin", origin);
+  headers.set("Content-Type", "application/json");
   return new Request("http://localhost/delete-account", {
     method: "POST",
-    headers: includeAuthorization ? { Authorization: `Bearer ${token}` } : {},
-    body: JSON.stringify({ confirmation, ...extraBody }),
+    headers,
+    body: JSON.stringify({
+      confirmation,
+      ...(requestRecoveryKey == null
+        ? {}
+        : { recovery_key: requestRecoveryKey }),
+      ...extraBody,
+    }),
   });
 }
 

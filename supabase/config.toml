@@ -63,6 +63,12 @@ verify_jwt = true
 import_map = "./functions/delete-account/deno.json"
 entrypoint = "./functions/delete-account/index.ts"
 
+[functions.account-deletion-status]
+enabled = true
+verify_jwt = false
+import_map = "./functions/account-deletion-status/deno.json"
+entrypoint = "./functions/account-deletion-status/index.ts"
+
 [functions.admob-ssv-handler]
 enabled = true
 verify_jwt = false

@@ -1,142 +1,80 @@
-import 'dart:io';
-import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
-
+import '../../../core/services/app_permission_coordinator.dart';
 import '../domain/permission_capability.dart';
+
+class DeviceLocationAccessState {
+  const DeviceLocationAccessState({
+    required this.permissionState,
+    required this.serviceEnabled,
+  });
+
+  final AppPermissionState permissionState;
+  final bool? serviceEnabled;
+}
 
 abstract interface class DevicePermissionGateway {
   Future<AppPermissionState> check(PermissionCapability capability);
+  Future<DeviceLocationAccessState> checkLocationAccess();
   Future<AppPermissionState> request(PermissionCapability capability);
   Future<bool> openSettings(PermissionCapability capability);
 }
 
 class FlutterDevicePermissionGateway implements DevicePermissionGateway {
-  const FlutterDevicePermissionGateway();
+  const FlutterDevicePermissionGateway(this._delegate);
+
+  final AppPermissionGateway _delegate;
 
   @override
-  Future<AppPermissionState> check(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return AppPermissionState.serviceDisabled;
-          }
-          final status = await Geolocator.checkPermission();
-          return _mapLocationPermission(status);
+  Future<AppPermissionState> check(PermissionCapability capability) =>
+      _delegate.check(_kindFor(capability));
 
-        case PermissionCapability.notifications:
-          final status = await Permission.notification.status;
-          return _mapPermissionStatus(status);
-
-        case PermissionCapability.exactReminderTiming:
-          if (!Platform.isAndroid) {
-            return AppPermissionState.unavailable;
-          }
-          try {
-            final plugin = FlutterLocalNotificationsPlugin()
-                .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin
-                >();
-            final canExact = await plugin?.canScheduleExactNotifications();
-            if (canExact != null) {
-              return canExact
-                  ? AppPermissionState.granted
-                  : AppPermissionState.denied;
-            }
-          } catch (_) {}
-          final status = await Permission.scheduleExactAlarm.status;
-          return _mapPermissionStatus(status);
-      }
-    } on MissingPluginException {
-      return AppPermissionState.unavailable;
-    } on Exception {
-      return AppPermissionState.unavailable;
+  @override
+  Future<DeviceLocationAccessState> checkLocationAccess() async {
+    final delegate = _delegate;
+    if (delegate is AppLocationAccessGateway) {
+      final values = await Future.wait<Object?>([
+        delegate.checkLocationPermission(),
+        delegate.isLocationServiceEnabled(),
+      ]);
+      return DeviceLocationAccessState(
+        permissionState: values[0]! as AppPermissionState,
+        serviceEnabled: values[1] as bool?,
+      );
     }
+
+    final collapsed = await delegate.check(AppPermissionKind.location);
+    return DeviceLocationAccessState(
+      permissionState: collapsed == AppPermissionState.serviceDisabled
+          ? AppPermissionState.denied
+          : collapsed,
+      serviceEnabled: collapsed == AppPermissionState.unavailable
+          ? null
+          : collapsed != AppPermissionState.serviceDisabled,
+    );
   }
 
   @override
-  Future<AppPermissionState> request(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return AppPermissionState.serviceDisabled;
-          }
-          final status = await Geolocator.requestPermission();
-          return _mapLocationPermission(status);
-
-        case PermissionCapability.notifications:
-          final status = await Permission.notification.request();
-          return _mapPermissionStatus(status);
-
-        case PermissionCapability.exactReminderTiming:
-          if (!Platform.isAndroid) {
-            return AppPermissionState.unavailable;
-          }
-          try {
-            final plugin = FlutterLocalNotificationsPlugin()
-                .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin
-                >();
-            final granted = await plugin?.requestExactAlarmsPermission();
-            if (granted != null) {
-              return granted
-                  ? AppPermissionState.granted
-                  : AppPermissionState.denied;
-            }
-          } catch (_) {}
-          final status = await Permission.scheduleExactAlarm.request();
-          return _mapPermissionStatus(status);
-      }
-    } on MissingPluginException {
-      return AppPermissionState.unavailable;
-    } on Exception {
-      return AppPermissionState.unavailable;
-    }
-  }
+  Future<AppPermissionState> request(PermissionCapability capability) =>
+      _delegate.request(_kindFor(capability));
 
   @override
   Future<bool> openSettings(PermissionCapability capability) async {
-    try {
-      switch (capability) {
-        case PermissionCapability.deviceLocation:
-          if (!await Geolocator.isLocationServiceEnabled()) {
-            return await Geolocator.openLocationSettings();
-          }
-          return await openAppSettings();
-
-        case PermissionCapability.notifications:
-        case PermissionCapability.exactReminderTiming:
-          return await openAppSettings();
-      }
-    } on MissingPluginException {
-      return false;
-    } on Exception {
-      return false;
+    final kind = _kindFor(capability);
+    final delegate = _delegate;
+    if (delegate is TargetedAppPermissionSettings) {
+      return (delegate as TargetedAppPermissionSettings).openSettingsFor(kind);
     }
+    if (capability == PermissionCapability.deviceLocation &&
+        await delegate.check(kind) == AppPermissionState.serviceDisabled) {
+      return delegate.openLocationServiceSettings();
+    }
+    return delegate.openAppPermissionSettings();
   }
 
-  AppPermissionState _mapLocationPermission(LocationPermission permission) {
-    return switch (permission) {
-      LocationPermission.always ||
-      LocationPermission.whileInUse => AppPermissionState.granted,
-      LocationPermission.denied => AppPermissionState.denied,
-      LocationPermission.deniedForever => AppPermissionState.permanentlyDenied,
-      LocationPermission.unableToDetermine => AppPermissionState.denied,
-    };
-  }
-
-  AppPermissionState _mapPermissionStatus(PermissionStatus status) {
-    return switch (status) {
-      PermissionStatus.granted ||
-      PermissionStatus.limited => AppPermissionState.granted,
-      PermissionStatus.permanentlyDenied =>
-        AppPermissionState.permanentlyDenied,
-      PermissionStatus.restricted => AppPermissionState.restricted,
-      PermissionStatus.denied ||
-      PermissionStatus.provisional => AppPermissionState.denied,
-    };
-  }
+  AppPermissionKind _kindFor(PermissionCapability capability) =>
+      switch (capability) {
+        PermissionCapability.deviceLocation => AppPermissionKind.location,
+        PermissionCapability.notifications => AppPermissionKind.notifications,
+        PermissionCapability.exactReminderTiming =>
+          AppPermissionKind.exactAlarms,
+      };
 }

@@ -26,7 +26,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.44.7"
+          flutter-version: "3.44.8"
           channel: stable
           cache: true
 
@@ -54,6 +54,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           foreach ($Script in @(
             "tool/build_prod.ps1",
+            "tool/build_play_prod.ps1",
+            "tool/collect_android_release_evidence.ps1",
             "tool/publish_sentry_release.ps1"
           )) {
             $Tokens = $null

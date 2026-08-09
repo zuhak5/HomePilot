@@ -181,6 +181,18 @@ class AppLocalizationsAr extends AppLocalizations {
   String get needsAccess => 'يتطلب إذنا';
 
   @override
+  String get limited => 'محدود';
+
+  @override
+  String get unavailable => 'غير متاح';
+
+  @override
+  String get configuredManually => 'تم الضبط يدويا';
+
+  @override
+  String get approximateTiming => 'توقيت تقريبي';
+
+  @override
   String get preferences => 'التفضيلات';
 
   @override
@@ -2777,6 +2789,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get startupStartingHomePilot => 'جاري تشغيل HomePilot';
+
+  @override
+  String get homePilotSplashTagline => 'مهامك وروتينك وتذكيراتك\nكلها متزامنة.';
 
   @override
   String get startupLoadedPreferences => 'تم تحميل التفضيلات';

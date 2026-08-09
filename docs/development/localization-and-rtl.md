@@ -4,6 +4,8 @@
 
 HomePilot currently supports English and Arabic. The ARB source files under `lib/l10n/` and `l10n.yaml` are authoritative. Generated localization Dart files are outputs and must not be edited manually.
 
+The process splash appears before the full `MaterialApp`, so it performs a deliberately small device-locale selection: Arabic uses Arabic text/direction and every other device locale falls back to English. Its tagline, startup status, footer, and single semantic announcement come from the generated localization API. The `HomePilot` brand remains left-to-right inside either surrounding direction.
+
 ## Workflow
 
 1. Add or update the English message in `app_en.arb`.
@@ -28,6 +30,8 @@ flutter gen-l10n
 - Avoid embedding punctuation assumptions that break Arabic text.
 - Keep technical identifiers, file names, and version strings separate from translated prose.
 - Do not expose raw backend error text directly to users.
+- Keep capability status distinct from permission outcome in user-facing wording: an application preference is not proof that Android delivery, location service, or exact-alarm access is effective.
+- Treat permission, account-deletion, ads/consent, backup, permanent deletion, and Undo strings as high-impact translations that require semantic review in both languages.
 
 ## RTL layout
 
@@ -41,6 +45,17 @@ Use directional APIs:
 
 Do not mirror universal symbols such as media controls, checkmarks, or product logos unless their semantic direction requires it.
 
+Floating SnackBars and capability-setup cards must use directional layout. Transient feedback reserves safe area, keyboard, navigation, and optional floating-action-button clearance without hardcoding a left/right offset. Mixed Trash batches use localized counts and labels; Trash and maintenance completion remain separate semantic operations.
+
+## Reduced motion and accessibility
+
+- The process splash remains the first non-blank Flutter surface, but `MediaQuery.disableAnimations` completes its intro and stops the repeating loop.
+- GoRouter pages use no transition when `disableAnimations` or `accessibleNavigation` is active.
+- Startup, hydration, and other animated surfaces must preserve meaningful static state rather than hiding progress or content when motion is reduced.
+- The process splash exposes one localized container announcement and excludes decorative children from duplicate semantics.
+- An active Undo SnackBar uses Flutter's persistent actionable behavior when accessible navigation is enabled; it must not disappear merely because another message arrives.
+- Test focus order, TalkBack announcements, text scaling, and hardware/software input on a physical device before claiming device accessibility evidence.
+
 ## Testing checklist
 
 For meaningful UI changes, verify:
@@ -49,10 +64,22 @@ For meaningful UI changes, verify:
 - Long translations and text scaling.
 - Form labels, validation, hints, and error states.
 - Dialogs, snackbars, bottom sheets, and notifications.
+- Process splash, static startup/failure branches, capability setup, and settings-return states.
 - Charts, dates, recurrence text, and statistics.
 - Route transitions, back affordances, and chevrons.
 - Mixed Arabic/Latin content such as versions, asset serial numbers, and URLs.
 - Accessibility labels in both locales.
+- Reduced-motion and accessible-navigation modes.
+
+Focused repository coverage for the remediated startup, permissions, and feedback surfaces can be run with:
+
+```powershell
+flutter test --no-pub test/homepilot_splash_lifecycle_test.dart
+flutter test --no-pub test/features/permissions/permission_education_overlay_test.dart
+flutter test --no-pub test/feedback_coordinator_test.dart
+```
+
+This is widget/source evidence only. It does not replace English/Arabic review, TalkBack, keyboard/focus, system-settings return, or launch testing on a physical release device.
 
 ## Generated-file discipline
 

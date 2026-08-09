@@ -29,7 +29,22 @@ abstract interface class AppPermissionGateway {
   Future<bool> openLocationServiceSettings();
 }
 
-class AppPermissionCoordinator implements AppPermissionGateway {
+abstract interface class TargetedAppPermissionSettings {
+  Future<bool> openSettingsFor(AppPermissionKind kind);
+}
+
+/// Supplies the two independent Android location signals without collapsing a
+/// disabled device service into an operating-system permission result.
+abstract interface class AppLocationAccessGateway {
+  Future<AppPermissionState> checkLocationPermission();
+  Future<bool?> isLocationServiceEnabled();
+}
+
+class AppPermissionCoordinator
+    implements
+        AppPermissionGateway,
+        TargetedAppPermissionSettings,
+        AppLocationAccessGateway {
   AppPermissionCoordinator(this._database);
 
   final AppDatabase _database;
@@ -124,6 +139,60 @@ class AppPermissionCoordinator implements AppPermissionGateway {
   @override
   Future<bool> openLocationServiceSettings() =>
       Geolocator.openLocationSettings();
+
+  @override
+  Future<AppPermissionState> checkLocationPermission() async {
+    try {
+      return _mapStatus(await Permission.locationWhenInUse.status);
+    } on MissingPluginException {
+      return AppPermissionState.unavailable;
+    } on PlatformException {
+      return AppPermissionState.unavailable;
+    }
+  }
+
+  @override
+  Future<bool?> isLocationServiceEnabled() async {
+    try {
+      return Geolocator.isLocationServiceEnabled();
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> openSettingsFor(AppPermissionKind kind) async {
+    try {
+      switch (kind) {
+        case AppPermissionKind.notifications:
+          return openAppPermissionSettings();
+        case AppPermissionKind.location:
+          if (await check(kind) == AppPermissionState.serviceDisabled) {
+            return openLocationServiceSettings();
+          }
+          return openAppPermissionSettings();
+        case AppPermissionKind.exactAlarms:
+          if (!Platform.isAndroid) {
+            return false;
+          }
+          final plugin = FlutterLocalNotificationsPlugin()
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >();
+          final result = await plugin?.requestExactAlarmsPermission();
+          if (result != null) {
+            return true;
+          }
+          return openAppPermissionSettings();
+      }
+    } on MissingPluginException {
+      return false;
+    } on Exception {
+      return false;
+    }
+  }
 
   Permission _permission(AppPermissionKind kind) => switch (kind) {
     AppPermissionKind.notifications => Permission.notification,

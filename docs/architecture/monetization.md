@@ -1,105 +1,151 @@
 # Monetization Architecture
 
-## Scope
+## Scope and sources of truth
 
-HomePilot integrates Google Mobile Ads with a server-authoritative points system. The monetization design must preserve user consent, core-data integrity, reward replay protection, and predictable offline behavior.
+HomePilot uses Google Mobile Ads for native, interstitial, rewarded, and rewarded-interstitial presentation, while Supabase remains authoritative for points, charged creation, reward claims, and reward settlement. Ads can become unavailable without making core asset or maintenance data inconsistent.
 
-## Components
+This document describes the behavior present in the repository as of 2026-08-09. The executable sources are:
 
-- Flutter ad initialization and consent handling.
-- Native, interstitial, rewarded, and rewarded-interstitial presentation where enabled.
-- Local monetization configuration and cooldown state.
-- Supabase wallet and ledger records.
-- Point-debited creation RPCs.
-- Pending reward claims.
-- The `admob-ssv-handler` Edge Function.
-- Ad and reward diagnostics that exclude credentials and user content.
+- [`monetization.dart`](../../lib/src/features/monetization/monetization.dart) for consent, lifecycle integration, format orchestration, placement policy, and reward preflight.
+- [`ad_runtime.dart`](../../lib/src/features/monetization/ad_runtime.dart), [`ad_retry_policy.dart`](../../lib/src/features/monetization/ad_retry_policy.dart), and [`ad_cache.dart`](../../lib/src/features/monetization/ad_cache.dart) for eligibility generations, retry budgets, freshness, and ownership leases.
+- [`HomePilotNativeAdFactory.kt`](../../android/app/src/main/kotlin/com/homepilot/app/HomePilotNativeAdFactory.kt) and [`homepilot_native_ad.xml`](../../android/app/src/main/res/layout/homepilot_native_ad.xml) for Android native-ad presentation.
+- The [points schema](../../supabase/migrations/20260801124621_create_points_monetization_schema.sql), [points and reward RPCs](../../supabase/migrations/20260801124625_create_points_rpc_and_reward_claims.sql), [reward-limit hardening](../../supabase/migrations/20260801223243_harden_reward_limits_and_wallet_cap.sql), and [SSV replay hardening](../../supabase/migrations/20260802095845_harden_admob_ssv_replay_validation.sql) for backend authority.
+- [`admob-ssv-handler`](../../supabase/functions/admob-ssv-handler/index.ts) for signed callback validation.
+
+The operational disclosure worksheet is [`google-play-data-safety-evidence.md`](../operations/google-play-data-safety-evidence.md). It separates repository facts from Play Console, AdMob, hosted-service, and device evidence.
 
 ## Authority model
 
-The backend is authoritative for:
+The Flutter client may decide whether an ad surface is eligible, request an ad, create a pending reward claim, and display cached wallet state. It cannot credit or debit the authoritative wallet directly.
 
-- Current point balance.
-- Debit and credit ledger entries.
-- Whether a charged creation succeeds.
-- Whether a reward claim is valid and unused.
-- SSV signature and request validation.
-- Replay prevention and idempotency.
+Supabase is authoritative for:
 
-Flutter may display cached state and initiate operations, but it must not directly alter authoritative wallet values.
+- point balances and ledger entries;
+- atomic point-debited creation;
+- configuration and format kill switches;
+- reward-claim eligibility, expiry, cooldowns, and limits;
+- SSV signature and payload validation;
+- transaction replay protection and idempotent settlement.
 
-## Consent and initialization
+All user-owned monetization mutations derive the caller from the authenticated Supabase identity. The SSV settlement RPC is reserved for the service role used by the Edge Function. Row Level Security exposes only the authenticated user's permitted wallet, transaction, and pending-claim reads.
 
-Ad initialization should:
+## Runtime eligibility
 
-1. Resolve consent requirements for the current environment.
-2. Request consent only through approved user-facing flows.
-3. Handle unavailable, denied, or failed consent without corrupting core application state.
-4. Use test identifiers outside production.
-5. Avoid sending HomePilot domain data in ad request metadata.
+`AdRuntimeEligibility.sdkEligible` requires every global gate below. A missing configuration or consent value is represented by a fail-closed snapshot.
 
-Core asset and maintenance features should remain coherent when ads are unavailable.
+| Global gate | Eligible value | Runtime consequence when false |
+| --- | --- | --- |
+| Platform support | Android or iOS, never web or desktop | The Mobile Ads SDK is not initialized. |
+| Application lifecycle | `AppLifecycleState.resumed` | Loads and presentation are blocked while detached, inactive, paused, or hidden. |
+| Consent refresh completed | `ConsentSnapshot.updated == true` | Cached or assumed consent is not sufficient at startup. |
+| UMP permission to request ads | `canRequestAds == true` | No format is allowed. |
+| Global remote switch | `adsEnabled == true` | All formats are disabled. |
 
-## Point-debited creation
+Each format also has its own remote switch and presentation constraints:
 
-A point-gated operation should use a single backend transaction or RPC that:
+| Format | Client eligibility beyond the global gates | Additional presentation checks |
+| --- | --- | --- |
+| Native | `nativeAdsEnabled` | Current route, no active native-ad presentation suspension, and no explicit widget override of `false`. |
+| Interstitial | `interstitialAdsEnabled` | A fresh cached ad, the shared fullscreen gate, and completion policy: not the first-ever session, not a rapid completion, no keyboard or modal, cooldown elapsed, and session cap not reached. |
+| Rewarded | `rewardedAdsEnabled` | Authenticated monetization repository, fresh cached ad, shared fullscreen gate, and a successful server claim before show. |
+| Rewarded interstitial | `rewardedInterstitialEnabled` | The same fullscreen and claim preflight as rewarded. The backend claim RPC additionally requires the general rewarded switch, so it fails closed if the client switches disagree. |
 
-1. Authenticates the user.
-2. Validates the request and current configuration.
-3. Checks available balance.
-4. Applies an idempotency key.
-5. Debits the wallet and creates the target record atomically, or performs neither.
-6. Returns the authoritative result and balance.
+The service reports a format as allowed only after Mobile Ads initialization succeeds. Known native placements are explicitly mapped; an unknown production placement is rejected rather than silently using another unit.
 
-The client must not debit locally and then separately create cloud data.
+## Consent freshness and lifecycle
 
-## Offline behavior
+`HomePilotConsentService` starts blocked. Once per service lifetime—normally once per application launch/process—it calls UMP `requestConsentInfoUpdate`, presents a required consent form, and then reads both `canRequestAds` and the privacy-options requirement. This matches Google's requirement to refresh consent information on application launch without treating an application-owned cached string as current consent.
 
-When a charged operation cannot be confirmed by the server:
+If the consent update or form reports an error, the app records only a technical warning and still asks UMP for its current `canRequestAds` value. Ads remain blocked unless UMP explicitly returns `true`; core application behavior continues. The privacy-options action presents the UMP privacy form and refreshes the snapshot afterward.
 
-- Do not present it as completed.
-- Preserve user-entered work only as an explicit unfinished local draft when supported.
-- Do not enqueue a blind wallet mutation that can double-charge later.
-- Resume through a reviewed idempotent workflow after connectivity returns.
+Lifecycle resume changes runtime eligibility, but it does not issue another UMP consent-information request. Consent is therefore launch-fresh and privacy-options-refreshable, not periodically refreshed on every resume. AdMob message configuration, geographic behavior, and the availability of a required privacy-options entry point are console and device evidence, not facts proven by this repository.
 
-## Rewarded ads
+## Generation invalidation and ownership
 
-A device-side reward callback indicates that an ad SDK flow reached a reward point; it is not sufficient authority to credit points.
+Every material eligibility change increments an `AdRuntimeController` generation. Applying a new generation cancels retry timers, resets per-format failure counters and in-flight load markers, and disposes cached formats that are no longer allowed. SDK initialization and load callbacks retain the generation they started under; a callback that arrives after a consent, lifecycle, configuration, or disposal transition is rejected and its ad is disposed.
 
-The client should create or retain an opaque pending claim. The server-side verification handler then validates the SSV request, associates it with the intended account and claim, rejects replay, and credits points idempotently.
+Cached fullscreen and native ads are fresh strictly before 55 minutes from load. At 55 minutes or later they are disposed and replaced instead of being shown. `AdLease` makes native-ad release exactly once, while `FullScreenAdGate` serializes all interstitial and rewarded presentation. Dismissal, show failure, synchronous exceptions, and disposal all release their ownership through idempotent cleanup paths.
 
-## SSV security
+Native components add a request generation and a Flutter palette identity. A route change, presentation suspension, runtime-generation change, widget configuration change, theme change, or stale cache invalidates pending or displayed work. `runWithNativeAdsSuspended` removes Android platform-view ads before a modal overlay can receive its first gesture and restores eligibility when the overlay action finishes.
 
-The verification function must:
+## Classified retry and dormancy
 
-- Validate required request fields and signature material according to current Google documentation.
-- Avoid trusting a client-supplied user identity without a protected binding mechanism.
-- Use opaque claim identifiers rather than user content.
-- Enforce expiry, replay protection, and one-time credit.
-- Make duplicate valid callbacks return an idempotent result.
-- Avoid logging signatures, secrets, full provider payloads, or direct identifiers.
+Load errors are classified from the SDK error code and domain. Retry delays use a random factor from 0.8 through 1.2, giving the configured 20% jitter around the base delay.
 
-## Failure states
+| Failure class | Total attempts in one automatic cycle | Automatic delays after failures | Dormancy behavior |
+| --- | ---: | --- | --- |
+| Network | 4 | 2, 4, and 8 seconds, each with ±20% jitter | Dormant after the fourth failed attempt. |
+| Internal or unknown | 2 | 2 seconds with ±20% jitter | Dormant after the second failed attempt. |
+| No fill | 1 | None | Dormant immediately; rapid no-fill polling is avoided. |
+| Invalid request | 1 | None | Dormant immediately; retry cannot repair the request. |
 
-Handle explicitly:
+Dormancy means that no automatic retry timer remains for that cycle. It is not a permanent process-wide ban: a later eligible runtime transition, explicit preload/show attempt, or native component resynchronization can begin a new bounded cycle. Generation checks prevent an old retry timer or callback from reviving a newly blocked format.
 
-- Consent unavailable or denied.
-- Ad load failure.
-- Ad closed without reward.
-- Reward callback without later SSV.
-- SSV before client refresh.
-- Duplicate or delayed SSV.
-- Invalid signature.
-- Unknown or expired claim.
-- Insufficient points.
-- RPC timeout after possible commit.
-- Configuration disabled.
-- Account sign-out or deletion with pending claims.
+## Fullscreen presentation and reward preflight
 
-## Testing
+An interstitial acquires the shared fullscreen gate before taking a fresh cached ad. If no fresh ad exists, the gate is released, a load is requested, and the call returns without showing anything. Only a confirmed show updates the completion policy's session state.
 
-Use provider test modes and local Supabase tests. Cover wallet conservation, atomic debit/create, duplicate idempotency keys, replayed SSV, invalid signatures, wrong account, expiry, offline drafts, timeout/retry, and consent-disabled operation.
+A rewarded flow is stricter:
 
-## Privacy
+1. Confirm the selected format is eligible and already has a fresh cached ad.
+2. Acquire the shared fullscreen gate.
+3. Resolve the reward time zone and call the authenticated `create_reward_claim_request` RPC.
+4. Recheck disposal, runtime generation, format eligibility, and cache freshness after the network preflight.
+5. Attach the returned Supabase user UUID as SSV `userId` and the opaque claim UUID as `customData`, then show the ad.
+6. Treat the device reward callback only as “shown, awaiting server verification.” It never credits points.
+7. Let Google's signed callback reach `admob-ssv-handler`; verify its ECDSA P-256/SHA-256 signature, exact field shape, key, timestamp, approved unit, reward item and amount, claim, and user binding.
+8. Settle through `process_admob_ssv_reward`, which locks and validates the pending claim, rejects replay or mismatches, and updates the claim, wallet, and ledger atomically. Exact duplicates return an idempotent result without another credit.
 
-Advertising and reward changes require review of consent, identifiers, third-party processing, retention, logging, deletion, and `PRIVACY.md`. Do not place room names, asset names, maintenance content, location, email, or media references in ad or reward metadata.
+Pending claims expire after the database-defined interval and remain visible for recovery while still valid. An ad dismissal, SDK reward callback, or client event is never settlement authority. Service-role credentials remain in the Edge Function environment and are not distributed in Flutter configuration.
+
+## Native-ad schema version 2
+
+Flutter owns native-ad lifetime, eligibility, placement, event callbacks, and app-theme selection. Android owns the actual `NativeAdView`, registered provider assets, AdChoices surface, and app-owned chrome.
+
+For schema version 2, Flutter emits an entire `#RRGGBB` palette in one request:
+
+| Surface | Keys |
+| --- | --- |
+| Card | `backgroundColor`, `borderColor` |
+| Creative text | `headlineColor`, `bodyColor`, `advertiserColor`, `sponsoredColor` |
+| Ad badge | `adBadgeBackgroundColor`, `adBadgeTextColor` |
+| Call to action | `callToActionBackgroundColor`, `callToActionTextColor` |
+
+The Kotlin factory validates the version and all ten colors before mutating the inflated view. An unknown version, missing key, wrong type, or malformed color rejects the entire supplied palette and atomically uses the complete light/dark Android resource palette. It does not log custom options or user data. Rounded fills and strokes remain app-owned drawables.
+
+The factory registers headline, body, advertiser, icon, call-to-action, and AdChoices views before calling `setNativeAd`. Optional body, advertiser, call-to-action, and icon assets are cleared and hidden when absent. Provider-owned creative assets are not recolored. A Flutter theme identity change releases both displayed and in-flight native ads and requests one replacement; Android `values` and `values-night` colors are a safe fallback rather than the primary in-app theme authority.
+
+## Point-debited creation and offline behavior
+
+A point-gated task or asset creation uses one authenticated, idempotent backend RPC. The transaction checks configuration and wallet state, debits the wallet, creates the target rows, records the operation and ledger entry, and returns the authoritative result—or commits none of those steps.
+
+When the server cannot confirm a charged operation, the client must not present it as completed or enqueue a blind wallet mutation. User input may be preserved only as an explicitly unfinished draft in a workflow that supports it. A timeout after a possible commit must be reconciled through the operation's idempotency key.
+
+## Privacy and diagnostics boundaries
+
+- Ad requests and reward identifiers must not contain room names, asset names, maintenance content, location, email, media references, tokens, or raw domain payloads.
+- Current app-owned monetization events contain only technical fields: known placement and ad-unit identifiers for native events; cooldown/session counters for interstitials; and reward amount, entry point, and server-pending state for rewarded events. The authenticated event RPC derives the user ID and restricts event names and payload size, but it does not sanitize arbitrary future property values. New call sites therefore require a privacy review.
+- SSV logs omit the raw query and signed content, redact claim and user values, record only signature length, and replace the provider transaction ID with a short SHA-256 fingerprint. They still contain technical request and reward metadata such as user agent, parameter names, ad unit, reward value, timestamp, key ID, failure details, and a request ID. Hosted log access and retention require operator review.
+- Google Mobile Ads/UMP may process interaction, IP, diagnostic, consent, advertising-identifier, and other device/account data according to the installed SDK and console configuration. The repository cannot establish Google's final processing or the Play disclosure by itself.
+
+See the [Google Play data-safety evidence worksheet](../operations/google-play-data-safety-evidence.md) for the exact repository evidence, unresolved provider and console decisions, deletion boundaries, and release sign-off fields.
+
+## Validation and evidence boundary
+
+Repository coverage includes:
+
+- [`monetization_test.dart`](../../test/monetization_test.dart) for eligibility gates and per-format switches, generation changes, retry budgets and jitter bounds, 55-minute freshness, exact-once leases, fullscreen serialization, placement policy, and native slot states.
+- [`native_ad_factory_contract_test.dart`](../../test/native_ad_factory_contract_test.dart) for schema-v2 parity, atomic fallback, registered assets, absent-asset hiding, rounded/stroked chrome, light/dark resources, and single native-constructor ownership.
+- [`0012_points_monetization.test.sql`](../../supabase/tests/database/0012_points_monetization.test.sql) and [`0013_admob_ssv_hardening.test.sql`](../../supabase/tests/database/0013_admob_ssv_hardening.test.sql) for authorization, wallet conservation, reward limits, replay, and idempotency.
+- [`admob-ssv-handler/index_test.ts`](../../supabase/functions/admob-ssv-handler/index_test.ts) for callback parsing, signatures, setup probes, production validation, retry responses, duplicate settlement, and log redaction.
+
+These checks do not prove:
+
+- AdMob application/unit ownership, UMP messages, privacy-options configuration, or the production SSV callback URL;
+- behavior of the resolved release SDK versions, the merged release manifest, or advertising-ID access;
+- native rendering, AdChoices interaction, theme transitions, lifecycle races, or fullscreen overlap on a physical device;
+- deployment of the reviewed migrations and Edge Function to the intended Supabase project;
+- a successful signed AdMob callback and one-credit settlement in the hosted environment;
+- the accuracy or submission state of the Play Console Data safety, Ads, target-audience, or account-deletion declarations.
+
+Capture those items against the exact release artifact without recording tokens, direct user identifiers, full callback URLs, or provider payloads.

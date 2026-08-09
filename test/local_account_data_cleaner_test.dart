@@ -132,6 +132,31 @@ void main() {
     expect((await store.account()).boundUserId, isNull);
     expect(await cleaner.resumePendingCleanup(), isFalse);
   });
+
+  test(
+    'replays account-scoped cleanup while the durable marker exists',
+    () async {
+      await _seedBoundAccountData(database, store, 'user-1');
+      final marker = File(
+        p.join(documents.path, '.homepilot-account-deletion-cleanup-pending'),
+      );
+      await marker.writeAsString('user-1');
+      String? cleanedAccount;
+
+      expect(
+        await cleaner.resumePendingCleanup(
+          additionalCleanup: (userId) async {
+            expect(await marker.exists(), isTrue);
+            cleanedAccount = userId;
+          },
+        ),
+        isTrue,
+      );
+
+      expect(cleanedAccount, 'user-1');
+      expect(await marker.exists(), isFalse);
+    },
+  );
 }
 
 Future<void> _seedBoundAccountData(
