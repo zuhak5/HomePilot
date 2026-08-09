@@ -34,9 +34,9 @@ Live workflow status is informational. It must not grant download trust to an in
 
 ## Account-deletion surface
 
-The canonical page is `https://zuhak5.github.io/HomePilot/account-deletion.html`. Its browser flow uses Google OAuth with PKCE, consumes the callback verifier from `sessionStorage`, and keeps the resulting access token only in the current page's JavaScript memory. A page reload requires a new sign-in. Destructive controls remain hidden until identity lookup; the page then shows a masked account identity and keeps the delete button disabled until the user selects an explicit permanent-deletion confirmation.
+The canonical page is `https://zuhak5.github.io/HomePilot/account-deletion.html`. Its browser flow uses Google OAuth with PKCE, consumes the callback verifier from `sessionStorage`, and keeps the resulting access token only in the current page's JavaScript memory. A page reload requires a new sign-in, but an unresolved deletion can resume status recovery from the 32-byte recovery key and expected user ID stored for that operation in `sessionStorage`. Destructive controls remain hidden until identity lookup; the page then shows a masked account identity and keeps the delete button disabled until the user selects an explicit permanent-deletion confirmation.
 
-The page reports success only after `POST /functions/v1/delete-account` returns a successful response containing `deleted: true`, `status: "deleted"`, and the authenticated user's exact `user_id`. Redirect completion, Google sign-in, or a generic successful HTTP status is not deletion evidence. The browser page performs remote deletion only; it cannot erase installed-device databases, media, notifications, caches, secure storage, or user-exported backups.
+The page creates one 43-character unpadded base64url recovery key with Web Crypto and sends it with the confirmation to `POST /functions/v1/delete-account`. It reports success only after that response or `POST /functions/v1/account-deletion-status` returns `deleted: true`, `status: "deleted"`, and the authenticated/expected user's exact `user_id`. Ambiguous, pending, temporary, malformed, or mismatched results do not become success, and recovery reuses the same key. Redirect completion, Google sign-in, or a generic successful HTTP status is not deletion evidence. The browser page performs remote deletion only; it cannot erase installed-device databases, media, notifications, caches, secure storage, or user-exported backups.
 
 Public configuration is generated during the static build. See [`reference/configuration.md`](reference/configuration.md#public-browser-account-deletion) for the three required repository variables and their validation rules.
 
@@ -48,7 +48,7 @@ VersionDeck keeps validation and production publication deliberately separate:
 - A `workflow_run` handoff starts VersionDeck after the protected **Build Production APK** workflow completes successfully on `main`.
 - Manual dispatch is a recovery path and requires the run ID of a successful **Build Production APK** run for the current `main` SHA.
 
-Push and GitHub Release events do not deploy Pages. This prevents a source push or the APK workflow's intermediate Release publication step from racing the required backend, AAB, APK, and final VersionDeck sequence.
+Push and GitHub Release events do not deploy Pages. This prevents a source push or the APK workflow's intermediate Release publication step from racing the required backend, APK, and final VersionDeck sequence. The Play AAB remains an independent exact-SHA evidence rail.
 
 The automated production handoff is deliberately fail-closed:
 
@@ -94,7 +94,7 @@ The deployment workflow:
 11. Deploys GitHub Pages with protected permissions. The Pages action may poll for up to 20 minutes before declaring a deployment timeout, while the deployment job allows additional time for the public-manifest check.
 12. Verifies the public manifest after deployment.
 
-The Pages workflow does not deploy the `delete-account` Edge Function and does not perform a destructive hosted browser test. Deploy and verify the compatible Edge Function first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.
+The Pages workflow does not apply the deletion-recovery migration, deploy either `delete-account` or `account-deletion-status`, or perform a destructive hosted browser test. Apply and verify the compatible migration and both functions first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.
 
 The Pages workflow uses the current Node.js 24-compatible major versions of `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`. Upgrade these actions together when GitHub publishes a new supported major so the artifact and deployment contracts remain aligned.
 
@@ -166,7 +166,7 @@ Validate:
 
 Use a disposable Google/Supabase account with non-sensitive test rows and private test media. Do not use a personal account, and do not put an access token, OAuth code, email address, user ID, or raw deletion response in logs, screenshots, workflow summaries, or retained artifacts.
 
-1. Confirm the reviewed `delete-account` function version is deployed to the intended Supabase project and that the canonical deletion URL is allowlisted in Supabase Auth redirect configuration.
+1. Confirm the deletion-recovery migration and reviewed `delete-account` and `account-deletion-status` function versions are deployed to the intended Supabase project, and that the canonical deletion URL is allowlisted in Supabase Auth redirect configuration.
 2. Confirm the repository variables documented in [`reference/configuration.md`](reference/configuration.md#public-browser-account-deletion) are set, then record the successful VersionDeck build and Pages deployment revisions.
 3. In a fresh browser profile, load the canonical deletion page. It must not show the unavailable-configuration state, and browser developer tools must show revisioned same-origin deletion assets with no service-role value.
 4. Verify the production preflight independently:
@@ -179,9 +179,9 @@ Use a disposable Google/Supabase account with non-sensitive test rows and privat
      "https://iajvkvvvhwjdiuaufymh.supabase.co/functions/v1/delete-account"
    ```
 
-   Expect HTTP `204`, `Access-Control-Allow-Origin: https://zuhak5.github.io`, `Vary: Origin`, and the documented methods and headers. Repeat with an unapproved origin and expect rejection with no allow-origin header. Do not use wildcard expectations.
+   Expect HTTP `204`, `Access-Control-Allow-Origin: https://zuhak5.github.io`, `Vary: Origin`, and the documented methods and headers. Repeat for `/functions/v1/account-deletion-status` with `Access-Control-Request-Headers: apikey,content-type`, then repeat both with an unapproved origin and expect rejection with no allow-origin header. Do not use wildcard expectations.
 5. Start Google sign-in and verify the browser returns to the exact canonical callback, removes OAuth parameters from the address bar, shows a generic verified-identity state without displaying an email address, and leaves deletion disabled until the confirmation checkbox is selected.
-6. Submit deletion once. Confirm the browser reports success only after the strict receipt check. In protected backend tooling, verify the disposable Auth user, owned Postgres rows, and private `user-media` objects are removed. Redact the matching `user_id` from retained evidence.
+6. Submit deletion once. Exercise an ambiguous-response/reload recovery where controlled tooling permits, confirm status lookup reuses the original logical-operation key, and confirm the browser reports success only after the strict receipt check. In protected backend tooling, verify the disposable Auth user, owned Postgres rows, and private `user-media` objects are removed. Redact the matching `user_id` and never retain the recovery key.
 7. Confirm an installed test client for that deleted account observes a revoked/deleted session and follows local cleanup or recovery. Record this separately: the browser receipt alone cannot prove device-local cleanup.
 8. With a VersionDeck service worker already controlling the site, switch the browser offline and reload the deletion URL. Expect the explicit network-required response, never cached release content or a deletion-success state.
 

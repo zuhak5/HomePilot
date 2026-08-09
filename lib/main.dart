@@ -3962,17 +3962,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   @override
   void dispose() {
-    _setPermissionOverlayNativeAdSuspension(false);
+    _setPermissionOverlayNativeAdSuspension(false, deferProviderUpdate: true);
     WidgetsBinding.instance.removeObserver(this);
     _homeDataTimer?.cancel();
     super.dispose();
   }
 
-  void _setPermissionOverlayNativeAdSuspension(bool shouldSuspend) {
+  void _setPermissionOverlayNativeAdSuspension(
+    bool shouldSuspend, {
+    bool deferProviderUpdate = false,
+  }) {
     if (_permissionOverlaySuspendsNativeAds == shouldSuspend) return;
     _permissionOverlaySuspendsNativeAds = shouldSuspend;
     if (shouldSuspend) {
       _nativeAdPresentationDepth.push();
+    } else if (deferProviderUpdate) {
+      _nativeAdPresentationDepth.popAfterWidgetTeardown();
     } else {
       _nativeAdPresentationDepth.pop();
     }

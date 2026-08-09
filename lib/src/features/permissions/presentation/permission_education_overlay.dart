@@ -315,7 +315,8 @@ class _PermissionCapabilityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final nextAction = status?.nextAction ?? PermissionNextAction.request;
-    final opensSettings = nextAction == PermissionNextAction.openAppSettings ||
+    final opensSettings =
+        nextAction == PermissionNextAction.openAppSettings ||
         nextAction == PermissionNextAction.openLocationSettings ||
         nextAction == PermissionNextAction.openExactAlarmSettings;
     final statusMessage = _statusMessage(context);
@@ -565,9 +566,11 @@ class _PermissionCapabilityCard extends StatelessWidget {
                               : const Icon(
                                   Symbols.notifications_active_rounded,
                                 ),
-                          label: Text(opensSettings
-                              ? context.l10n.permissionSetupManageInSettings
-                              : context.l10n.enableNotificationsOnboarding),
+                          label: Text(
+                            opensSettings
+                                ? context.l10n.permissionSetupManageInSettings
+                                : context.l10n.enableNotificationsOnboarding,
+                          ),
                         ),
                       ),
                     ],
@@ -600,11 +603,17 @@ class _PermissionCapabilityCard extends StatelessWidget {
                                   ),
                                 )
                               : const Icon(Symbols.alarm_on_rounded),
-                          label: Text(opensSettings
-                              ? context.l10n.permissionSetupManageInSettings
-                              : exactIsGated
-                              ? context.l10n.permissionExactRequiresDeviceReminders
-                              : context.l10n.permissionSetupAllowPreciseTiming),
+                          label: Text(
+                            opensSettings
+                                ? context.l10n.permissionSetupManageInSettings
+                                : exactIsGated
+                                ? context
+                                      .l10n
+                                      .permissionExactRequiresDeviceReminders
+                                : context
+                                      .l10n
+                                      .permissionSetupAllowPreciseTiming,
+                          ),
                         ),
                       ),
                     ],

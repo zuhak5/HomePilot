@@ -3603,11 +3603,11 @@ class AppLocalizationsAr extends AppLocalizations {
   String get enableAlarmsAndRemindersOnboarding => 'تفعيل التذكيرات';
 
   @override
-  String get permissionSetup => 'إعداد الموقع والإشعارات والتذكيرات';
+  String get permissionSetup => 'الأذونات والإعداد';
 
   @override
   String get permissionSetupSubtitle =>
-      'راجع كيفية استخدام HomePilot للموقع والتذكيرات.';
+      'اختر منطقة الطقس، ثم تحكم في تذكيرات الجهاز والتوقيت الدقيق الاختياري.';
 
   @override
   String get permissionsAlreadyEnabled =>
@@ -3649,4 +3649,53 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get permissionSetupManageInSettings => 'إدارة في الإعدادات';
+
+  @override
+  String get permissionSetupChangeLocation => 'تغيير الموقع';
+
+  @override
+  String permissionSelectedArea(String area) {
+    return 'المنطقة المحددة: $area';
+  }
+
+  @override
+  String get permissionUsingCurrentLocation => 'يُستخدم الموقع الحالي';
+
+  @override
+  String get permissionLocationAccessRequired =>
+      'يلزم إذن الموقع لاستخدام الموقع الحالي.';
+
+  @override
+  String get permissionNotificationAccessRequired =>
+      'يلزم إذن إشعارات أندرويد لتذكيرات الجهاز.';
+
+  @override
+  String get permissionDeviceRemindersOff =>
+      'تذكيرات الجهاز متوقفة في HomePilot.';
+
+  @override
+  String get permissionExactRequiresDeviceReminders =>
+      'شغّل تذكيرات الجهاز قبل تفعيل التوقيت الدقيق.';
+
+  @override
+  String get permissionActionCouldNotComplete =>
+      'تعذر إكمال الإجراء. حاول مرة أخرى.';
+
+  @override
+  String get permissionSettingsCouldNotOpen =>
+      'تعذر فتح إعدادات أندرويد. حاول من إعدادات الجهاز.';
+
+  @override
+  String get homePilotAlerts => 'تنبيهات HomePilot';
+
+  @override
+  String get homePilotAlertsDescription =>
+      'يتحكم في كل قنوات تنبيه HomePilot. ما زالت تذكيرات الجهاز تتطلب إذن أندرويد.';
+
+  @override
+  String get weatherAlertsInboxDescription =>
+      'تحذيرات الطقس التي تظهر في صندوق HomePilot؛ ويتبع إرسالها للجهاز إعداد التذكيرات.';
+
+  @override
+  String get fix => 'إصلاح';
 }

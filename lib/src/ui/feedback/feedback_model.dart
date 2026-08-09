@@ -101,13 +101,11 @@ class HkFeedbackItem {
       semanticLabel: semanticLabel ?? this.semanticLabel,
       batchSemanticLabelBuilder:
           batchSemanticLabelBuilder ?? this.batchSemanticLabelBuilder,
-      actionSuccessMessage:
-          actionSuccessMessage ?? this.actionSuccessMessage,
+      actionSuccessMessage: actionSuccessMessage ?? this.actionSuccessMessage,
       batchActionSuccessMessageBuilder:
           batchActionSuccessMessageBuilder ??
           this.batchActionSuccessMessageBuilder,
-      actionFailureMessage:
-          actionFailureMessage ?? this.actionFailureMessage,
+      actionFailureMessage: actionFailureMessage ?? this.actionFailureMessage,
       bottomOffset: bottomOffset ?? this.bottomOffset,
       margin: margin ?? this.margin,
       reserveFloatingActionButton:

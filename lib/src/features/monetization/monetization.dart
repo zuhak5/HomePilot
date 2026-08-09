@@ -98,6 +98,12 @@ class NativeAdPresentationDepth extends Notifier<int> {
   void push() => state++;
 
   void pop() => state = (state - 1).clamp(0, 1 << 20);
+
+  void popAfterWidgetTeardown() {
+    scheduleMicrotask(() {
+      if (ref.mounted) pop();
+    });
+  }
 }
 
 Future<T> runWithNativeAdsSuspended<T>(

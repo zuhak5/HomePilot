@@ -50,7 +50,7 @@ Supabase provides:
 - Postgres tables, indexes, RLS policies, and RPCs.
 - Private `user-media` Storage.
 - Realtime invalidation signals.
-- Edge Functions for protected workflows such as account deletion and AdMob server-side verification.
+- Edge Functions for protected workflows such as account deletion, deletion-status recovery, and AdMob server-side verification.
 
 The backend is authoritative for ownership, point balances, charged operations, verified rewards, and globally coordinated revisions.
 
@@ -62,9 +62,9 @@ See `sync-protocol.md`.
 
 ## Authentication and deletion
 
-Production authentication is Google-based. Session state is stored through Supabase and secure platform storage. Account deletion is a coordinated workflow across Flutter, synchronization, Storage, Postgres, and Auth and requires recent same-identity reauthentication.
+Production authentication is Google-based. Session state is stored through Supabase and secure platform storage. Account deletion is a coordinated workflow across Flutter, synchronization, Storage, Postgres, and Auth and requires recent same-identity reauthentication. Each destructive operation uses one 32-byte recovery key, retained only while unresolved, so an ambiguous response can be reconciled without weakening identity or receipt validation.
 
-The public VersionDeck deletion page is an entry point, not an unauthenticated delete API. It performs Google OAuth with PKCE through Supabase, keeps access tokens in memory, requires explicit confirmation, calls the protected `delete-account` Edge Function with the authenticated bearer token, and accepts success only from a matching deletion receipt. Repository tests encode the browser and function contracts; they do not prove that the reviewed site, OAuth redirect, or function revision is deployed. See [Authentication and account deletion](auth-and-account-deletion.md).
+The public VersionDeck deletion page is an entry point, not an unauthenticated delete API. It performs Google OAuth with PKCE through Supabase, keeps access tokens in memory, requires explicit confirmation, calls the protected `delete-account` Edge Function with the authenticated bearer token and recovery key, and accepts success only from a matching deletion receipt. After reload or an ambiguous response, it can query the capability- and subject-bound `account-deletion-status` function with the same key while keeping bearer tokens out of persistent browser storage. Repository tests encode the browser and function contracts; they do not prove that the reviewed site, OAuth redirect, or function revision is deployed. See [Authentication and account deletion](auth-and-account-deletion.md).
 
 ## Monetization
 
@@ -101,7 +101,7 @@ Sentry is optional by configuration. Events are scrubbed and should contain only
 
 ## Build and distribution
 
-`validate-google-backend.yml` is the exact-SHA prerequisite for both Android release rails. It checks Deno formatting, type safety, and tests for AdMob SSV and account deletion; browser deletion and static Google/Android contracts; and Supabase lint/database authorization tests against a local CI stack. A green run is repository/CI evidence, not proof of hosted Supabase deployment.
+`validate-google-backend.yml` is the exact-SHA prerequisite for both Android release rails. It checks Deno formatting, type safety, and tests for AdMob SSV, account deletion, and deletion-status recovery; browser deletion and static Google/Android contracts; and Supabase lint/database authorization tests against a local CI stack. A green run is repository/CI evidence, not proof of hosted Supabase deployment.
 
 The manually dispatched Play rail builds and verifies one signed production AAB, captures manifest/dependency/signature evidence, uploads retained Actions artifacts, and attests provenance. It contains no Google Play API upload or rollout step. Play Console acceptance, App Signing, declarations, and device delivery require the separately authorized operator process in the [Google Play release runbook](../operations/google-play-release-runbook.md).
 

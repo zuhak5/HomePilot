@@ -17,6 +17,7 @@ Depending on the features used, HomePilot can process:
 - A manually selected weather area, or approximate location when the user explicitly grants coarse-location permission and chooses the current-location option. Manual configuration does not mean Android location permission was granted. HomePilot stores weather coordinates rounded to two decimal places and does not request fine or background location in the current Android manifest.
 - Advertising consent state, ad events, reward claims, point balances, charged-creation records, and fraud-prevention metadata used by the monetization system.
 - Limited diagnostic and release metadata when Sentry is enabled.
+- Account-deletion recovery metadata while a destructive request is unresolved: a high-entropy recovery key and expected account ID in device secure storage or browser `sessionStorage`, plus only hashed capability/binding values and bounded operation state in the private backend table.
 
 ## Where data is stored
 
@@ -24,7 +25,7 @@ HomePilot is offline-first. Application data is stored in a local SQLite databas
 
 When a user signs in and synchronization is enabled, supported data is stored in the project's Supabase Postgres database and private Supabase Storage. Local synchronization metadata is retained to support offline work, retries, conflict handling, and account isolation.
 
-Sensitive session material is stored through platform secure storage where supported.
+Sensitive session material is stored through platform secure storage where supported. A pending in-app deletion operation stores its recovery key and expected account ID there until authoritative completion or safe cancellation. The browser keeps an unresolved deletion recovery record only in `sessionStorage`; access and refresh tokens are not persistently stored by the deletion page.
 
 ## Third-party services
 
@@ -66,9 +67,13 @@ Android platform backup is disabled for the application in the current manifest;
 
 Local data remains until it is deleted through application behavior, cleared by the user or operating system, removed during sign-out/account cleanup, or replaced through restore.
 
-For in-app account deletion, HomePilot requires recent same-identity Google reauthentication, suspends synchronization, invokes the protected `delete-account` Edge Function, verifies the deletion result, and completes device-local database, media, session, notification, and cache cleanup. Restart recovery is designed to finish local cleanup if cloud deletion succeeded before the app stopped.
+For in-app account deletion, HomePilot requires recent same-identity Google reauthentication, suspends synchronization, creates a secure recovery operation, invokes the protected `delete-account` Edge Function, and verifies the deletion result. If the destructive response is ambiguous or the app restarts, it queries `account-deletion-status` with the same key and expected account before completing device-local database, media, session, notification, cache, and recovery-record cleanup. Pending or temporary status preserves the synchronization barrier and record; a definitive not-found result clears the stale record without claiming deletion.
 
-The external web resource performs real Google OAuth through Supabase with PKCE, verifies the authenticated user, requires explicit confirmation, calls the same protected Edge Function, and accepts success only when the response is a completed receipt for that same user. The backend removes the account's synchronized Postgres data, private Supabase Storage objects, cleanup job, and Auth user. The browser cannot inspect or erase HomePilot data, media, notifications, secure storage, or caches remaining on an installed device; users must clear or uninstall the app on each device. It also cannot erase copies held in user-exported backups or independently retained by service providers under their own disclosed obligations.
+The external web resource performs real Google OAuth through Supabase with PKCE, verifies the authenticated user, requires explicit confirmation, and calls the same protected Edge Function. It generates a 32-byte recovery key with Web Crypto, keeps the unresolved key and expected user ID in `sessionStorage`, and can query the status function after a reload or ambiguous response without persisting a bearer token. It accepts success only from a completed receipt for that same user. The backend removes the account's synchronized Postgres data, private Supabase Storage objects, cleanup job, and Auth user.
+
+The private deletion-recovery table stores a SHA-256 request hash, a SHA-256 subject binding, bounded stage/error metadata, and the active user UUID only until completion; it does not store the raw recovery key. Completion clears the active UUID. Operations expire after seven days by default and an hourly scheduled job prunes expired rows. Hosted database backup, replica, log, or legal-hold retention remains an operator/service-policy concern rather than repository proof.
+
+The browser cannot inspect or erase HomePilot data, media, notifications, secure storage, or caches remaining on an installed device; users must clear or uninstall the app on each device. It also cannot erase copies held in user-exported backups or independently retained by service providers under their own disclosed obligations.
 
 Backup files previously exported outside the application are not automatically deleted by account deletion.
 

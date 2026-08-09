@@ -3538,11 +3538,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get enableAlarmsAndRemindersOnboarding => 'Enable reminders';
 
   @override
-  String get permissionSetup => 'Location, notifications, and reminders setup';
+  String get permissionSetup => 'Permissions & setup';
 
   @override
   String get permissionSetupSubtitle =>
-      'Review how HomePilot uses location and reminders.';
+      'Choose a weather area, then control device reminders and optional precise timing.';
 
   @override
   String get permissionsAlreadyEnabled =>
@@ -3583,4 +3583,53 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get permissionSetupManageInSettings => 'Manage in settings';
+
+  @override
+  String get permissionSetupChangeLocation => 'Change location';
+
+  @override
+  String permissionSelectedArea(String area) {
+    return 'Selected area: $area';
+  }
+
+  @override
+  String get permissionUsingCurrentLocation => 'Using current location';
+
+  @override
+  String get permissionLocationAccessRequired =>
+      'Location access is required to use the current location.';
+
+  @override
+  String get permissionNotificationAccessRequired =>
+      'Android notification access is required for device reminders.';
+
+  @override
+  String get permissionDeviceRemindersOff =>
+      'Device reminders are off in HomePilot.';
+
+  @override
+  String get permissionExactRequiresDeviceReminders =>
+      'Turn on device reminders before enabling precise timing.';
+
+  @override
+  String get permissionActionCouldNotComplete =>
+      'That action could not be completed. Try again.';
+
+  @override
+  String get permissionSettingsCouldNotOpen =>
+      'Android settings could not be opened. Try again from device settings.';
+
+  @override
+  String get homePilotAlerts => 'HomePilot alerts';
+
+  @override
+  String get homePilotAlertsDescription =>
+      'Controls every HomePilot alert channel. Device reminders still require Android access.';
+
+  @override
+  String get weatherAlertsInboxDescription =>
+      'Weather warnings shown in HomePilot\'s inbox; device delivery follows the reminder setting.';
+
+  @override
+  String get fix => 'Fix';
 }
