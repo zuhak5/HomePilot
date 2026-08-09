@@ -81,7 +81,7 @@ The backend and Android release workflows enforce locked `deno fmt --check`, `de
 
 ## Account-deletion recovery operations
 
-[`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql) adds a private service-role-only operation table for ambiguous deletion recovery. It stores a unique request hash, a subject binding, the active user UUID only while needed, bounded stage/error metadata, timestamps, and a seven-day default expiry. Row Level Security is enabled without client policies. Completion clears the active user UUID, and a scheduled hourly prune at minute 17 removes expired rows. [`0014_account_deletion_recovery.test.sql`](../../supabase/tests/database/0014_account_deletion_recovery.test.sql) checks the schema, privileges, RLS, completion behavior, and pruning contract.
+[`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql) adds a private service-role-only operation table for ambiguous deletion recovery. It stores a unique request hash, a subject binding, the active user UUID only while needed, bounded stage/error metadata, timestamps, and a seven-day default expiry. Row Level Security is enabled without client policies; the later hosted-Advisor cleanup adds an explicit service-role policy without granting client access. Completion clears the active user UUID, and a scheduled hourly prune at minute 17 removes expired rows. [`0014_account_deletion_recovery.test.sql`](../../supabase/tests/database/0014_account_deletion_recovery.test.sql) checks the schema, privileges, RLS, completion behavior, and pruning contract.
 
 ## Deployment evidence
 

@@ -20,11 +20,9 @@ select has_index(
   'notification_inbox_dedupe_uidx',
   'inbox dedupe index exists'
 );
-select has_index(
-  'public',
-  'notification_inbox',
-  'notification_inbox_created_idx',
-  'inbox pagination index exists'
+select ok(
+  to_regclass('public.notification_inbox_created_idx') is null,
+  'obsolete inbox created-time index is retired'
 );
 select ok(
   not exists (

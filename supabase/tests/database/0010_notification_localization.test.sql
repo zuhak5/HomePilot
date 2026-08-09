@@ -197,17 +197,15 @@ select ok(
   (
     select bool_and(to_regclass(format('public.%I', index_name)) is not null)
     from unnest(array[
-      'asset_photos_user_id_asset_id_idx',
       'asset_tags_user_id_tag_id_idx',
       'assets_user_id_category_id_idx',
       'assets_user_id_room_id_idx',
       'maintenance_plans_user_id_asset_id_idx',
       'maintenance_records_user_id_plan_id_idx',
-      'notification_inbox_user_id_plan_id_idx',
-      'rooms_user_id_area_id_idx'
+      'notification_inbox_user_id_plan_id_idx'
     ]) as index_name
   ),
-  'all eight live relationship indexes are represented by migrations'
+  'all six non-redundant relationship indexes are represented by migrations'
 );
 select ok(
   (
