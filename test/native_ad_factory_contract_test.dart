@@ -155,6 +155,34 @@ void main() {
     ]);
   });
 
+  test('every routed content screen declares a native ad placement', () {
+    final main = File('lib/main.dart').readAsStringSync();
+    for (final placement in const [
+      'home',
+      'assets',
+      'room_detail',
+      'thing_detail',
+      'task_detail',
+      'maintenance',
+      'calendar',
+      'more',
+      'search',
+      'trash',
+      'statistics',
+      'account',
+      'backup',
+      'notifications',
+      'settings',
+      'permission_setup',
+    ]) {
+      expect(
+        main,
+        contains("placement: '$placement'"),
+        reason: 'Missing native ad placement for $placement.',
+      );
+    }
+  });
+
   test('mounted native ads enforce the shared cache expiry deadline', () {
     final flutter = File(
       'lib/src/features/monetization/monetization.dart',

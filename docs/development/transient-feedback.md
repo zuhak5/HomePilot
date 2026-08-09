@@ -35,16 +35,29 @@ Trash screen is confirmed separately and intentionally has no Undo action.
 
 ## Layout and localization
 
-SnackBars use floating placement. Trash helpers reserve bottom navigation,
-keyboard, safe-area, and optional floating-action-button clearance with
-directional margins. User-visible content comes from the English and Arabic
-localization sources; mixed Trash batches reuse the localized item-count and
-Trash labels. Verify narrow width, landscape, right-to-left layout, and 200%
-text scaling whenever the feedback layout changes.
+SnackBars use floating placement with a directional 16-dp horizontal margin
+and a 12-dp visual gap. Flutter's `Scaffold` owns vertical collision avoidance
+for the actual bottom navigation, persistent footer, floating action button,
+safe area, and keyboard-adjusted content bounds. Feature routes must not add
+those insets again: duplicated route-specific clearance pushes feedback too
+high and becomes stale when screen chrome changes. User-visible content comes
+from the English and Arabic localization sources; mixed Trash batches reuse the
+localized item-count and Trash labels. Verify narrow width, landscape,
+right-to-left layout, and 200% text scaling whenever the feedback layout
+changes.
+
+When feedback originates inside a `PopupRoute` such as a modal bottom sheet,
+the coordinator uses the root overlay instead of the page Scaffold messenger.
+That keeps the same feedback bar, queue, timeout, action, and dismissal
+semantics while placing it above the modal barrier and sheet. The overlay uses
+the same directional 16-dp sides and 12-dp visual bottom gap, plus the larger of
+the keyboard or bottom safe-area obstruction.
 
 ## Validation
 
-Focused coordinator coverage is in `test/feedback_coordinator_test.dart`.
+Focused coordinator coverage is in `test/feedback_coordinator_test.dart`,
+including the 12-dp gap above real Scaffold bottom navigation and floating
+actions, and interactive feedback above a modal-sheet barrier.
 Widget integration coverage is in `test/widget_test.dart`. Tests cover protected
 Undo, compatible and incompatible batches, visible count, deadline reset,
 LIFO/exactly-once execution, callback failure, accessible persistence, and the

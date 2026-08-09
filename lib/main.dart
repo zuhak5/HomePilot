@@ -1927,19 +1927,21 @@ final streakRefreshProvider = FutureProvider.autoDispose<StreakState>((
 Page<void> _appRoutePage(
   BuildContext context,
   GoRouterState state,
-  Widget child,
-) {
+  Widget child, {
+  bool bodyHasBackdrop = false,
+}) {
+  final routeChild = bodyHasBackdrop ? child : _AppRouteBackdrop(child: child);
   if (_prefersReducedMotion(context)) {
     return NoTransitionPage<void>(
       key: state.pageKey,
       name: normalizeSentryRoute(state.fullPath ?? state.uri.path),
-      child: child,
+      child: routeChild,
     );
   }
   return CustomTransitionPage<void>(
     key: state.pageKey,
     name: normalizeSentryRoute(state.fullPath ?? state.uri.path),
-    child: child,
+    child: routeChild,
     transitionDuration: _routeTransitionDuration,
     reverseTransitionDuration: _routeTransitionReverseDuration,
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -1963,6 +1965,23 @@ Page<void> _appRoutePage(
       );
     },
   );
+}
+
+class _AppRouteBackdrop extends StatelessWidget {
+  const _AppRouteBackdrop({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return hk_ui.ProductivityBackdrop(
+      child: Theme(
+        data: theme.copyWith(scaffoldBackgroundColor: Colors.transparent),
+        child: child,
+      ),
+    );
+  }
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -2007,6 +2026,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               MaintenanceScreen(
                 initialFilter: state.uri.queryParameters['filter'],
               ),
+              bodyHasBackdrop: true,
             ),
           ),
           GoRoute(
@@ -2019,8 +2039,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/calendar',
-            pageBuilder: (context, state) =>
-                _appRoutePage(context, state, const CalendarScreen()),
+            pageBuilder: (context, state) => _appRoutePage(
+              context,
+              state,
+              const CalendarScreen(),
+              bodyHasBackdrop: true,
+            ),
           ),
           GoRoute(
             path: '/more',
@@ -2056,8 +2080,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/backup',
-            pageBuilder: (context, state) =>
-                _appRoutePage(context, state, const BackupScreen()),
+            pageBuilder: (context, state) => _appRoutePage(
+              context,
+              state,
+              const BackupScreen(),
+              bodyHasBackdrop: true,
+            ),
           ),
           GoRoute(
             path: '/notifications',
@@ -2070,6 +2098,9 @@ final routerProvider = Provider<GoRouter>((ref) {
               context,
               state,
               PermissionSetupScreen(
+                sponsoredContent: const HkNativeAdCard(
+                  placement: 'permission_setup',
+                ),
                 onChooseLocationManually: (context) =>
                     showModalBottomSheet<HomeLocation>(
                       context: context,
@@ -4126,7 +4157,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                               ),
                               const SizedBox(height: HkSpacing.sm),
                               const HkNativeAdCard(placement: 'home'),
-                              const SizedBox(height: HkSpacing.sm),
                               if (homeTaskSections.isEmpty)
                                 hk_ui.PremiumEmptyState(
                                   icon: hasThings
@@ -4558,51 +4588,72 @@ class _DashboardHeader extends ConsumerWidget {
     // scroll-depth affordance (overlapsContent) continues to function.
     return RepaintBoundary(
       key: const ValueKey('dashboard-header-card'),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          border: Border(
-            bottom: BorderSide(
-              color: scheme.outlineVariant.withValues(
-                alpha: overlapsContent ? 0.28 : 0,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  scheme.surface.withValues(alpha: 0.99),
+                  scheme.surface.withValues(alpha: 0.96),
+                  Color.alphaBlend(
+                    scheme.primary.withValues(
+                      alpha: overlapsContent ? 0.035 : 0.018,
+                    ),
+                    scheme.surface,
+                  ).withValues(alpha: 0.94),
+                ],
+                stops: const [0, 0.72, 1],
               ),
+              boxShadow: overlapsContent
+                  ? [
+                      BoxShadow(
+                        color: scheme.primary.withValues(alpha: 0.07),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ]
+                  : const [],
             ),
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1180),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final screenWidth = constraints.maxWidth;
-                  final isCompact = screenWidth < 360;
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      HkSpacing.md,
-                      HkSpacing.xs,
-                      HkSpacing.md,
-                      HkSpacing.xs,
-                    ),
-                    child: _DashboardHeaderActions(
-                      screenWidth: screenWidth,
-                      isCompact: isCompact,
-                      unreadCount: unreadCount,
-                      notificationEducationLink: notificationEducationLink,
-                      notificationEducationTargetKey:
-                          notificationEducationTargetKey,
-                      avatarUrl: session?.avatarUrl,
-                      avatarProvider: snapshot?.avatarProvider,
-                      fallbackName: greetingName,
-                      onSearch: () => context.push('/search'),
-                      onPoints: () => showPointsWalletSheet(context, ref),
-                      onNotifications:
-                          onNotificationEducationTap ??
-                          () => context.push('/notifications'),
-                    ),
-                  );
-                },
+            child: SafeArea(
+              bottom: false,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final screenWidth = constraints.maxWidth;
+                      final isCompact = screenWidth < 360;
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          HkSpacing.md,
+                          HkSpacing.xs,
+                          HkSpacing.md,
+                          HkSpacing.xs,
+                        ),
+                        child: _DashboardHeaderActions(
+                          screenWidth: screenWidth,
+                          isCompact: isCompact,
+                          unreadCount: unreadCount,
+                          notificationEducationLink: notificationEducationLink,
+                          notificationEducationTargetKey:
+                              notificationEducationTargetKey,
+                          avatarUrl: session?.avatarUrl,
+                          avatarProvider: snapshot?.avatarProvider,
+                          fallbackName: greetingName,
+                          onSearch: () => context.push('/search'),
+                          onPoints: () => showPointsWalletSheet(context, ref),
+                          onNotifications:
+                              onNotificationEducationTap ??
+                              () => context.push('/notifications'),
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ),
             ),
           ),
@@ -5425,6 +5476,9 @@ class _WeatherCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final current = weather;
     final day = _isLocalDaytime(localNow);
+    final usesCurrentLocation =
+        capability?.mode == WeatherAreaMode.device &&
+        capability?.effectiveState == EffectiveCapabilityState.active;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -5530,19 +5584,31 @@ class _WeatherCard extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      _shortWeatherLocationLabel(
-                                        context,
-                                        current.location.label,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w800,
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            _shortWeatherLocationLabel(
+                                              context,
+                                              current.location.label,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleSmall
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                           ),
+                                        ),
+                                        if (usesCurrentLocation) ...[
+                                          const SizedBox(
+                                            width: HkSpacing.space6,
+                                          ),
+                                          const _WeatherCurrentLocationBadge(),
+                                        ],
+                                      ],
                                     ),
                                     const SizedBox(height: HkSpacing.space2),
                                     Text(
@@ -5592,7 +5658,7 @@ class _WeatherCard extends StatelessWidget {
                       WeatherDetailChips(weather: current),
                     ],
                   ),
-                if (capability != null) ...[
+                if (capability != null && !usesCurrentLocation) ...[
                   const SizedBox(height: HkSpacing.xs),
                   _WeatherCapabilityStatus(
                     capability: capability!,
@@ -5603,6 +5669,50 @@ class _WeatherCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WeatherCurrentLocationBadge extends StatelessWidget {
+  const _WeatherCurrentLocationBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: context.l10n.permissionUsingCurrentLocation,
+      child: Semantics(
+        container: true,
+        label: context.l10n.permissionUsingCurrentLocation,
+        child: ExcludeSemantics(
+          child: Container(
+            padding: const EdgeInsetsDirectional.fromSTEB(6, 3, 7, 3),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(HkRadii.full),
+              border: Border.all(color: scheme.primary.withValues(alpha: 0.16)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Symbols.my_location_rounded,
+                  size: 12,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: HkSpacing.space4),
+                Text(
+                  context.l10n.weatherCurrentLocationShort,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -6123,6 +6233,7 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
             onPressed: () => showAreaEditorSheet(context),
             icon: const Icon(Symbols.add_home_rounded),
           ),
+          const SizedBox(width: HkSpacing.xs),
         ],
       ),
       floatingActionButton: selectedAreaRooms.isEmpty
@@ -6200,7 +6311,6 @@ class _RoomsScreenState extends ConsumerState<RoomsScreen> {
               ),
               children: [
                 const HkNativeAdCard(placement: 'assets'),
-                const SizedBox(height: HkSpacing.sm),
                 AreaSelector(
                   areas: areaItems,
                   selectedAreaId: selectedArea,
@@ -6988,7 +7098,6 @@ class RoomDetailScreen extends ConsumerWidget {
             ),
             children: [
               const HkNativeAdCard(placement: 'room_detail'),
-              const SizedBox(height: HkSpacing.sm),
               hk_ui.PremiumCard(
                 child: Row(
                   children: [
@@ -7203,6 +7312,7 @@ class TaskDetailScreen extends ConsumerWidget {
                 HkSpacing.bottomAction,
               ),
               children: [
+                const HkNativeAdCard(placement: 'task_detail'),
                 hk_ui.PremiumCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -7599,13 +7709,6 @@ List<Widget> _taskMetadataRows(BuildContext context, TaskMetadata? metadata) {
         label: context.l10n.materials,
         value: metadata.requiredMaterials.join(', '),
       ),
-    if (metadata.dependencyPlanIds.isNotEmpty)
-      _DetailRow(
-        icon: Symbols.account_tree_rounded,
-        label: context.l10n.dependsOn,
-        value:
-            '${metadata.dependencyPlanIds.length} linked ${metadata.dependencyPlanIds.length == 1 ? 'task' : 'tasks'}',
-      ),
     if (metadata.reminderRecommendation?.trim().isNotEmpty ?? false)
       _DetailRow(
         icon: Symbols.notification_important_rounded,
@@ -7709,7 +7812,6 @@ class _ThingDetailScreenState extends ConsumerState<ThingDetailScreen> {
               children: [
                 if (!hasCriticalAlert) ...[
                   const HkNativeAdCard(placement: 'thing_detail'),
-                  const SizedBox(height: HkSpacing.sm),
                 ],
                 hk_ui.PremiumCard(
                   child: Column(
@@ -8645,7 +8747,12 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
       appBar: AppBar(
         title: Text(_taskScreenTitle(context, widget.initialFilter)),
         actions: [
-          HkPointsPill(onTap: () => showPointsWalletSheet(context, ref)),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: HkSpacing.gutter),
+            child: HkPointsPill(
+              onTap: () => showPointsWalletSheet(context, ref),
+            ),
+          ),
         ],
       ),
       floatingActionButton: showFab
@@ -8748,7 +8855,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                 ),
                 children: [
                   const HkNativeAdCard(placement: 'maintenance'),
-                  const SizedBox(height: HkSpacing.sm),
                   for (final group in groups)
                     TaskGroup(
                       title: widget.initialFilter == null
@@ -9076,7 +9182,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           ),
           children: [
             const HkNativeAdCard(placement: 'calendar'),
-            const SizedBox(height: HkSpacing.sm),
             hk_ui.PremiumEntrance(
               child: _CalendarSummaryCard(
                 overdue: buckets.overdueCount,
@@ -9226,7 +9331,6 @@ class MoreScreen extends ConsumerWidget {
         ),
         children: [
           const HkNativeAdCard(placement: 'more'),
-          const SizedBox(height: HkSpacing.sm),
           hk_ui.ToolTile(
             icon: Symbols.stars_rounded,
             title: context.l10n.earnFreePoints,
@@ -9403,7 +9507,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             const SizedBox(height: HkSpacing.sm),
             const HkNativeAdCard(placement: 'search'),
           ],
-          const SizedBox(height: HkSpacing.sm),
+          if (_results.isEmpty) const SizedBox(height: HkSpacing.sm),
           if (!hasQuery)
             hk_ui.PremiumEmptyState(
               icon: Symbols.manage_search_rounded,
@@ -9509,6 +9613,7 @@ class TrashScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
         children: [
+          const HkNativeAdCard(placement: 'trash'),
           hk_ui.PremiumCard(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
@@ -9890,7 +9995,6 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
           final children = <Widget>[
             if (!hasCriticalGuidance) ...[
               const HkNativeAdCard(placement: 'notifications'),
-              const SizedBox(height: HkSpacing.sm),
             ],
             _NotificationSummaryCard(
               total: items.length,
@@ -10931,7 +11035,6 @@ class StatisticsScreen extends ConsumerWidget {
                   return Column(
                     children: [
                       const HkNativeAdCard(placement: 'statistics'),
-                      const SizedBox(height: HkSpacing.sm),
                       Row(
                         children: [
                           Expanded(
@@ -11070,6 +11173,7 @@ class AccountScreenHost extends ConsumerWidget {
     return AccountScreen(
       profile: profile,
       onSaveNickname: (nickname) => _saveAccountNickname(ref, nickname),
+      sponsoredContent: const HkNativeAdCard(placement: 'account'),
     );
   }
 }
@@ -11161,656 +11265,731 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }.toList()..sort();
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n.settings)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-        children: [
-          hk_ui.PremiumCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Symbols.contrast_rounded),
-                    const SizedBox(width: HkSpacing.xs),
-                    Expanded(
-                      child: Text(
-                        context.l10n.appearance,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: HkSpacing.xs),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compactSegments = constraints.maxWidth < 420;
-                    return SizedBox(
-                      width: double.infinity,
-                      child: SegmentedButton<ThemePreference>(
-                        showSelectedIcon: false,
-                        segments: [
-                          ButtonSegment(
-                            value: ThemePreference.light,
-                            label: Text(context.l10n.light),
-                            icon: Icon(Symbols.light_mode_rounded),
-                          ),
-                          ButtonSegment(
-                            value: ThemePreference.dark,
-                            label: Text(context.l10n.dark),
-                            icon: Icon(Symbols.dark_mode_rounded),
-                          ),
-                          ButtonSegment(
-                            value: ThemePreference.system,
-                            label: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                compactSegments
-                                    ? context.l10n.auto
-                                    : context.l10n.automatic,
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                            icon: const Icon(Symbols.schedule_rounded),
-                          ),
-                        ],
-                        selected: {themePreference},
-                        onSelectionChanged: (selection) {
-                          final preference = selection.single;
-                          _setThemePreference(context, ref, preference);
-                        },
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: HkSpacing.space6),
-                Text(
-                  themePreference == ThemePreference.system
-                      ? context
-                            .l10n
-                            .automaticUsesYourLocalTimeLightFrom6AmTo6PmDarkOvernight
-                      : context
-                            .l10n
-                            .manualSelectionStaysActiveUntilYouChooseAnotherMode,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: HkSpacing.xs),
-          hk_ui.PremiumCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Symbols.language_rounded),
-                    const SizedBox(width: HkSpacing.xs),
-                    Text(
-                      context.l10n.language,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: HkSpacing.xs),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<AppLanguage>(
-                    key: const ValueKey('settings-language-selector'),
-                    showSelectedIcon: false,
-                    segments: [
-                      ButtonSegment(
-                        value: AppLanguage.en,
-                        label: Text(
-                          'English',
-                          textDirection: TextDirection.ltr,
-                        ),
-                      ),
-                      ButtonSegment(
-                        value: AppLanguage.ar,
-                        label: Text(
-                          'العربية',
-                          textDirection: TextDirection.rtl,
-                        ),
-                      ),
-                    ],
-                    selected: {localePreference.language},
-                    onSelectionChanged: (selection) =>
-                        _setAppLanguage(context, ref, selection.single),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: HkSpacing.xs),
-          if (consent?.privacyOptionsRequired ?? false) ...[
+      body: Scrollbar(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 112),
+          children: [
+            const HkNativeAdCard(placement: 'settings'),
             hk_ui.PremiumCard(
-              child: ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Symbols.privacy_tip_rounded),
-                title: Text(context.l10n.privacyChoices),
-                subtitle: Text(context.l10n.privacyChoicesSubtitle),
-                trailing: const Icon(Symbols.chevron_right_rounded),
-                onTap: () =>
-                    ref.read(consentServiceProvider).showPrivacyOptions(),
-              ),
-            ),
-            const SizedBox(height: HkSpacing.xs),
-          ],
-          hk_ui.PremiumCard(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                weather == null
-                    ? Symbols.location_on_rounded
-                    : _weatherIcon(weather.weatherCode),
-              ),
-              title: Text(context.l10n.weatherLocation),
-              subtitle: Text(
-                weather == null
-                    ? context.l10n.setACityZipOrCurrentDeviceLocation
-                    : '${location?.label ?? context.l10n.home}\n${_localizedWeatherSummary(context, weather.weatherCode)} \u00B7 ${_formatInteger(context, weather.temperature.round())}\u00B0C',
-              ),
-              trailing: Wrap(
-                spacing: 4,
+              padding: const EdgeInsets.all(HkSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  IconButton(
-                    tooltip: context.l10n.searchLocation,
-                    onPressed: () => _searchLocation(context, ref),
-                    icon: const Icon(Symbols.search_rounded),
+                  _SettingsCardHeader(
+                    icon: Symbols.contrast_rounded,
+                    title: context.l10n.appearance,
                   ),
-                  IconButton(
-                    tooltip: context.l10n.useDeviceLocation,
-                    onPressed: () => _useDeviceLocation(context, ref),
-                    icon: const Icon(Symbols.my_location_rounded),
+                  const SizedBox(height: HkSpacing.sm),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compactSegments = constraints.maxWidth < 420;
+                      return SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<ThemePreference>(
+                          showSelectedIcon: false,
+                          segments: [
+                            ButtonSegment(
+                              value: ThemePreference.light,
+                              label: Text(context.l10n.light),
+                              icon: Icon(Symbols.light_mode_rounded),
+                            ),
+                            ButtonSegment(
+                              value: ThemePreference.dark,
+                              label: Text(context.l10n.dark),
+                              icon: Icon(Symbols.dark_mode_rounded),
+                            ),
+                            ButtonSegment(
+                              value: ThemePreference.system,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  compactSegments
+                                      ? context.l10n.auto
+                                      : context.l10n.automatic,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                              icon: const Icon(Symbols.schedule_rounded),
+                            ),
+                          ],
+                          selected: {themePreference},
+                          onSelectionChanged: (selection) {
+                            final preference = selection.single;
+                            _setThemePreference(context, ref, preference);
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: HkSpacing.space6),
+                  Text(
+                    themePreference == ThemePreference.system
+                        ? context
+                              .l10n
+                              .automaticUsesYourLocalTimeLightFrom6AmTo6PmDarkOvernight
+                        : context
+                              .l10n
+                              .manualSelectionStaysActiveUntilYouChooseAnotherMode,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: HkSpacing.xs),
-          hk_ui.PremiumCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  context.l10n.notifications,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: HkSpacing.xs),
-                Text(
-                  context.l10n.permissions,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: HkSpacing.space4),
-                if (capabilitySetup == null)
-                  const LinearProgressIndicator()
-                else
-                  Column(
-                    children: [
-                      _NotificationStatusRow(
-                        icon: Symbols.notifications_rounded,
-                        label: context.l10n.deviceReminders,
-                        value: _effectiveCapabilityLabel(
-                          context,
-                          capabilitySetup.notifications.deviceReminderState,
-                        ),
-                        good:
-                            capabilitySetup.notifications.deviceReminderState ==
-                            EffectiveCapabilityState.active,
-                      ),
-                      _NotificationStatusRow(
-                        icon: Symbols.alarm_on_rounded,
-                        label: context.l10n.alarmsAndReminders,
-                        value: _effectiveCapabilityLabel(
-                          context,
-                          capabilitySetup.notifications.exactTimingState,
-                          approximateWhenDegraded: true,
-                        ),
-                        good:
-                            capabilitySetup.notifications.exactTimingState ==
-                            EffectiveCapabilityState.active,
-                      ),
-                      _NotificationStatusRow(
-                        icon: Symbols.inbox_rounded,
-                        label: context.l10n.inAppInbox,
-                        value: _effectiveCapabilityLabel(
-                          context,
-                          capabilitySetup.notifications.inboxState,
-                        ),
-                        good:
-                            capabilitySetup.notifications.inboxState ==
-                            EffectiveCapabilityState.active,
-                      ),
-                      _NotificationStatusRow(
-                        icon: Symbols.rainy_rounded,
-                        label: context.l10n.weatherAlerts,
-                        value: _effectiveCapabilityLabel(
-                          context,
-                          capabilitySetup.notifications.weatherAlertState,
-                        ),
-                        good:
-                            capabilitySetup.notifications.weatherAlertState ==
-                            EffectiveCapabilityState.active,
-                      ),
-                    ],
+            const SizedBox(height: HkSpacing.sm),
+            hk_ui.PremiumCard(
+              padding: const EdgeInsets.all(HkSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SettingsCardHeader(
+                    icon: Symbols.language_rounded,
+                    title: context.l10n.language,
                   ),
-                const SizedBox(height: HkSpacing.xs),
-                ListTile(
-                  key: const ValueKey('settings-permission-education'),
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.health_and_safety_rounded),
-                  title: Text(context.l10n.permissionSetup),
-                  subtitle: Text(context.l10n.permissionSetupSubtitle),
-                  trailing: const Icon(Symbols.chevron_right_rounded),
-                  onTap: () => _openPermissionSetup(context, ref),
-                ),
-                const SizedBox(height: HkSpacing.xs),
-                Text(
-                  context.l10n.preferences,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: HkSpacing.space4),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Icons.notifications_active_outlined),
-                  title: Text(context.l10n.homePilotAlerts),
-                  subtitle: Text(context.l10n.homePilotAlertsDescription),
-                  value: notificationPreferences.enabled,
-                  onChanged: (value) => _saveNotificationPreferences(
-                    context,
-                    ref,
-                    notificationPreferences.copyWith(enabled: value),
-                  ),
-                ),
-                if (capabilitySetup != null &&
-                    notificationPreferences.allowsLocalReminders &&
-                    capabilitySetup.notifications.deviceReminderState !=
-                        EffectiveCapabilityState.active)
-                  _EffectiveCapabilityPreferenceTile(
-                    key: const ValueKey('device-reminders-recovery'),
-                    icon: Symbols.alarm_rounded,
-                    title: context.l10n.deviceReminders,
-                    subtitle: context.l10n.scheduledAndroidReminderDelivery,
-                    state: capabilitySetup.notifications.deviceReminderState,
-                    onFix: () => _enableDeviceReminders(context, ref),
-                  )
-                else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Symbols.alarm_rounded),
-                    title: Text(context.l10n.deviceReminders),
-                    subtitle: Text(
-                      context.l10n.scheduledAndroidReminderDelivery,
-                    ),
-                    value:
-                        notificationPreferences.enabled &&
-                        notificationPreferences.localReminders,
-                    onChanged: notificationPreferences.enabled
-                        ? (value) => value
-                              ? _enableDeviceReminders(context, ref)
-                              : _saveNotificationPreferences(
-                                  context,
-                                  ref,
-                                  notificationPreferences.copyWith(
-                                    localReminders: false,
-                                    preferExactReminders: false,
-                                  ),
-                                )
-                        : null,
-                  ),
-                if (capabilitySetup != null &&
-                    notificationPreferences.preferExactReminders &&
-                    capabilitySetup.notifications.exactTimingState !=
-                        EffectiveCapabilityState.active)
-                  _EffectiveCapabilityPreferenceTile(
-                    key: const ValueKey('exact-reminders-recovery'),
-                    icon: Symbols.alarm_on_rounded,
-                    title: context.l10n.preciseReminderAlarms,
-                    subtitle:
-                        context.l10n.askAndroidForAlarmsAndRemindersAccess,
-                    state: capabilitySetup.notifications.exactTimingState,
-                    approximateWhenDegraded: true,
-                    onFix: notificationPreferences.allowsLocalReminders
-                        ? () => _enableExactTiming(context, ref)
-                        : null,
-                  )
-                else
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Symbols.alarm_on_rounded),
-                    title: Text(context.l10n.preciseReminderAlarms),
-                    subtitle: Text(
-                      context.l10n.askAndroidForAlarmsAndRemindersAccess,
-                    ),
-                    value:
-                        notificationPreferences.enabled &&
-                        notificationPreferences.preferExactReminders,
-                    onChanged: notificationPreferences.allowsLocalReminders
-                        ? (value) => value
-                              ? _enableExactTiming(context, ref)
-                              : _saveNotificationPreferences(
-                                  context,
-                                  ref,
-                                  notificationPreferences.copyWith(
-                                    preferExactReminders: false,
-                                  ),
-                                )
-                        : null,
-                  ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.inbox_rounded),
-                  title: Text(context.l10n.inAppInbox),
-                  subtitle: Text(
-                    context.l10n.unreadTaskWeatherAndDigestUpdates,
-                  ),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.inAppInbox,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(inAppInbox: value),
-                        )
-                      : null,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.rainy_rounded),
-                  title: Text(context.l10n.weatherAlerts),
-                  subtitle: Text(context.l10n.weatherAlertsInboxDescription),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.weatherAlerts,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(
-                            weatherAlerts: value,
+                  const SizedBox(height: HkSpacing.sm),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<AppLanguage>(
+                      key: const ValueKey('settings-language-selector'),
+                      showSelectedIcon: false,
+                      segments: [
+                        ButtonSegment(
+                          value: AppLanguage.en,
+                          label: Text(
+                            'English',
+                            textDirection: TextDirection.ltr,
                           ),
-                        )
-                      : null,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.do_not_disturb_on_rounded),
-                  title: Text(context.l10n.quietHours),
-                  subtitle: Text(
-                    '${_minutesLabel(context, notificationPreferences.quietHoursStartMinutes)} - ${_minutesLabel(context, notificationPreferences.quietHoursEndMinutes)}',
-                  ),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.quietHoursEnabled,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(
-                            quietHoursEnabled: value,
+                        ),
+                        ButtonSegment(
+                          value: AppLanguage.ar,
+                          label: Text(
+                            'العربية',
+                            textDirection: TextDirection.rtl,
                           ),
-                        )
-                      : null,
-                ),
-                if (notificationPreferences.quietHoursEnabled) ...[
-                  Padding(
-                    padding: const EdgeInsetsDirectional.only(
-                      start: HkSpacing.sm,
+                        ),
+                      ],
+                      selected: {localePreference.language},
+                      onSelectionChanged: (selection) =>
+                          _setAppLanguage(context, ref, selection.single),
                     ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: HkSpacing.sm),
+            if (consent?.privacyOptionsRequired ?? false) ...[
+              hk_ui.PremiumCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: HkSpacing.space6,
+                  vertical: HkSpacing.xs,
+                ),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const _SettingsTileIcon(
+                    icon: Symbols.privacy_tip_rounded,
+                  ),
+                  title: Text(context.l10n.privacyChoices),
+                  subtitle: Text(context.l10n.privacyChoicesSubtitle),
+                  trailing: Icon(
+                    Directionality.of(context) == TextDirection.rtl
+                        ? Symbols.chevron_left_rounded
+                        : Symbols.chevron_right_rounded,
+                  ),
+                  onTap: () =>
+                      ref.read(consentServiceProvider).showPrivacyOptions(),
+                ),
+              ),
+              const SizedBox(height: HkSpacing.sm),
+            ],
+            hk_ui.PremiumCard(
+              padding: const EdgeInsets.symmetric(
+                horizontal: HkSpacing.space6,
+                vertical: HkSpacing.xs,
+              ),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: _SettingsTileIcon(
+                  icon: weather == null
+                      ? Symbols.location_on_rounded
+                      : _weatherIcon(weather.weatherCode),
+                ),
+                title: Text(context.l10n.weatherLocation),
+                subtitle: Text(
+                  weather == null
+                      ? context.l10n.setACityZipOrCurrentDeviceLocation
+                      : '${location?.label ?? context.l10n.home}\n${_localizedWeatherSummary(context, weather.weatherCode)} \u00B7 ${_formatInteger(context, weather.temperature.round())}\u00B0C',
+                ),
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    IconButton(
+                      tooltip: context.l10n.searchLocation,
+                      onPressed: () => _searchLocation(context, ref),
+                      icon: const Icon(Symbols.search_rounded),
+                    ),
+                    IconButton(
+                      tooltip: context.l10n.useDeviceLocation,
+                      onPressed: () => _useDeviceLocation(context, ref),
+                      icon: const Icon(Symbols.my_location_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: HkSpacing.sm),
+            hk_ui.PremiumCard(
+              padding: const EdgeInsets.all(HkSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SettingsCardHeader(
+                    icon: Symbols.notifications_active_rounded,
+                    title: context.l10n.notifications,
+                  ),
+                  const SizedBox(height: HkSpacing.md),
+                  _SettingsSubsectionLabel(label: context.l10n.permissions),
+                  const SizedBox(height: HkSpacing.xs),
+                  _SettingsPanel(
                     child: Column(
                       children: [
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Symbols.bedtime_rounded),
-                          title: Text(context.l10n.quietHoursStart),
-                          subtitle: Text(
-                            _minutesLabel(
+                        if (capabilitySetup == null)
+                          const Padding(
+                            padding: EdgeInsets.all(HkSpacing.sm),
+                            child: LinearProgressIndicator(),
+                          )
+                        else ...[
+                          _NotificationStatusRow(
+                            icon: Symbols.notifications_rounded,
+                            label: context.l10n.deviceReminders,
+                            value: _effectiveCapabilityLabel(
                               context,
-                              notificationPreferences.quietHoursStartMinutes,
+                              capabilitySetup.notifications.deviceReminderState,
                             ),
+                            good:
+                                capabilitySetup
+                                    .notifications
+                                    .deviceReminderState ==
+                                EffectiveCapabilityState.active,
                           ),
+                          _NotificationStatusRow(
+                            icon: Symbols.alarm_on_rounded,
+                            label: context.l10n.alarmsAndReminders,
+                            value: _effectiveCapabilityLabel(
+                              context,
+                              capabilitySetup.notifications.exactTimingState,
+                              approximateWhenDegraded: true,
+                            ),
+                            good:
+                                capabilitySetup
+                                    .notifications
+                                    .exactTimingState ==
+                                EffectiveCapabilityState.active,
+                          ),
+                          _NotificationStatusRow(
+                            icon: Symbols.inbox_rounded,
+                            label: context.l10n.inAppInbox,
+                            value: _effectiveCapabilityLabel(
+                              context,
+                              capabilitySetup.notifications.inboxState,
+                            ),
+                            good:
+                                capabilitySetup.notifications.inboxState ==
+                                EffectiveCapabilityState.active,
+                          ),
+                          _NotificationStatusRow(
+                            icon: Symbols.rainy_rounded,
+                            label: context.l10n.weatherAlerts,
+                            value: _effectiveCapabilityLabel(
+                              context,
+                              capabilitySetup.notifications.weatherAlertState,
+                            ),
+                            good:
+                                capabilitySetup
+                                    .notifications
+                                    .weatherAlertState ==
+                                EffectiveCapabilityState.active,
+                          ),
+                        ],
+                        const Divider(height: HkSpacing.md),
+                        ListTile(
+                          key: const ValueKey('settings-permission-education'),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: HkSpacing.xs,
+                          ),
+                          leading: const _SettingsTileIcon(
+                            icon: Symbols.health_and_safety_rounded,
+                          ),
+                          title: Text(
+                            context.l10n.permissionSetup,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(context.l10n.permissionSetupSubtitle),
                           trailing: Icon(
                             Directionality.of(context) == TextDirection.rtl
                                 ? Symbols.chevron_left_rounded
                                 : Symbols.chevron_right_rounded,
                           ),
-                          onTap: notificationPreferences.enabled
-                              ? () => _pickQuietHour(
-                                  context,
-                                  ref,
-                                  notificationPreferences,
-                                  start: true,
-                                )
-                              : null,
+                          onTap: () => _openPermissionSetup(context, ref),
                         ),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Symbols.wb_sunny_rounded),
-                          title: Text(context.l10n.quietHoursEnd),
-                          subtitle: Text(
-                            _minutesLabel(
-                              context,
-                              notificationPreferences.quietHoursEndMinutes,
-                            ),
-                          ),
-                          trailing: const Icon(Symbols.chevron_right_rounded),
-                          onTap: notificationPreferences.enabled
-                              ? () => _pickQuietHour(
-                                  context,
-                                  ref,
-                                  notificationPreferences,
-                                  start: false,
-                                )
-                              : null,
-                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: HkSpacing.md),
+                  _SettingsSubsectionLabel(label: context.l10n.preferences),
+                  const SizedBox(height: HkSpacing.xs),
+                  _SettingsPanel(
+                    child: Column(
+                      children: [
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          secondary: const Icon(Symbols.priority_high_rounded),
-                          title: Text(context.l10n.criticalRemindersBypass),
+                          secondary: const Icon(
+                            Icons.notifications_active_outlined,
+                          ),
+                          title: Text(context.l10n.homePilotAlerts),
                           subtitle: Text(
-                            context
+                            context.l10n.homePilotAlertsDescription,
+                          ),
+                          value: notificationPreferences.enabled,
+                          onChanged: (value) => _saveNotificationPreferences(
+                            context,
+                            ref,
+                            notificationPreferences.copyWith(enabled: value),
+                          ),
+                        ),
+                        const _SettingsPreferenceDivider(),
+                        if (capabilitySetup != null &&
+                            notificationPreferences.allowsLocalReminders &&
+                            capabilitySetup.notifications.deviceReminderState !=
+                                EffectiveCapabilityState.active)
+                          _EffectiveCapabilityPreferenceTile(
+                            key: const ValueKey('device-reminders-recovery'),
+                            icon: Symbols.alarm_rounded,
+                            title: context.l10n.deviceReminders,
+                            subtitle:
+                                context.l10n.scheduledAndroidReminderDelivery,
+                            state: capabilitySetup
+                                .notifications
+                                .deviceReminderState,
+                            onFix: () => _enableDeviceReminders(context, ref),
+                          )
+                        else
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            secondary: const Icon(Symbols.alarm_rounded),
+                            title: Text(context.l10n.deviceReminders),
+                            subtitle: Text(
+                              context.l10n.scheduledAndroidReminderDelivery,
+                            ),
+                            value:
+                                notificationPreferences.enabled &&
+                                notificationPreferences.localReminders,
+                            onChanged: notificationPreferences.enabled
+                                ? (value) => value
+                                      ? _enableDeviceReminders(context, ref)
+                                      : _saveNotificationPreferences(
+                                          context,
+                                          ref,
+                                          notificationPreferences.copyWith(
+                                            localReminders: false,
+                                            preferExactReminders: false,
+                                          ),
+                                        )
+                                : null,
+                          ),
+                        if (capabilitySetup != null &&
+                            notificationPreferences.preferExactReminders &&
+                            capabilitySetup.notifications.exactTimingState !=
+                                EffectiveCapabilityState.active)
+                          _EffectiveCapabilityPreferenceTile(
+                            key: const ValueKey('exact-reminders-recovery'),
+                            icon: Symbols.alarm_on_rounded,
+                            title: context.l10n.preciseReminderAlarms,
+                            subtitle: context
                                 .l10n
-                                .criticalTasksCanStillAlertDuringQuietHours,
+                                .askAndroidForAlarmsAndRemindersAccess,
+                            state:
+                                capabilitySetup.notifications.exactTimingState,
+                            approximateWhenDegraded: true,
+                            onFix: notificationPreferences.allowsLocalReminders
+                                ? () => _enableExactTiming(context, ref)
+                                : null,
+                          )
+                        else
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            secondary: const Icon(Symbols.alarm_on_rounded),
+                            title: Text(context.l10n.preciseReminderAlarms),
+                            subtitle: Text(
+                              context
+                                  .l10n
+                                  .askAndroidForAlarmsAndRemindersAccess,
+                            ),
+                            value:
+                                notificationPreferences.enabled &&
+                                notificationPreferences.preferExactReminders,
+                            onChanged:
+                                notificationPreferences.allowsLocalReminders
+                                ? (value) => value
+                                      ? _enableExactTiming(context, ref)
+                                      : _saveNotificationPreferences(
+                                          context,
+                                          ref,
+                                          notificationPreferences.copyWith(
+                                            preferExactReminders: false,
+                                          ),
+                                        )
+                                : null,
+                          ),
+                        const _SettingsPreferenceDivider(),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Symbols.inbox_rounded),
+                          title: Text(context.l10n.inAppInbox),
+                          subtitle: Text(
+                            context.l10n.unreadTaskWeatherAndDigestUpdates,
                           ),
                           value:
                               notificationPreferences.enabled &&
-                              notificationPreferences.criticalBypassQuietHours,
+                              notificationPreferences.inAppInbox,
                           onChanged: notificationPreferences.enabled
                               ? (value) => _saveNotificationPreferences(
                                   context,
                                   ref,
                                   notificationPreferences.copyWith(
-                                    criticalBypassQuietHours: value,
+                                    inAppInbox: value,
                                   ),
                                 )
                               : null,
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Symbols.rainy_rounded),
+                          title: Text(context.l10n.weatherAlerts),
+                          subtitle: Text(
+                            context.l10n.weatherAlertsInboxDescription,
+                          ),
+                          value:
+                              notificationPreferences.enabled &&
+                              notificationPreferences.weatherAlerts,
+                          onChanged: notificationPreferences.enabled
+                              ? (value) => _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    weatherAlerts: value,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        const _SettingsPreferenceDivider(),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(
+                            Symbols.do_not_disturb_on_rounded,
+                          ),
+                          title: Text(context.l10n.quietHours),
+                          subtitle: Text(
+                            '${_minutesLabel(context, notificationPreferences.quietHoursStartMinutes)} - ${_minutesLabel(context, notificationPreferences.quietHoursEndMinutes)}',
+                          ),
+                          value:
+                              notificationPreferences.enabled &&
+                              notificationPreferences.quietHoursEnabled,
+                          onChanged: notificationPreferences.enabled
+                              ? (value) => _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    quietHoursEnabled: value,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        if (notificationPreferences.quietHoursEnabled) ...[
+                          Padding(
+                            padding: const EdgeInsetsDirectional.only(
+                              start: HkSpacing.sm,
+                            ),
+                            child: Column(
+                              children: [
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(Symbols.bedtime_rounded),
+                                  title: Text(context.l10n.quietHoursStart),
+                                  subtitle: Text(
+                                    _minutesLabel(
+                                      context,
+                                      notificationPreferences
+                                          .quietHoursStartMinutes,
+                                    ),
+                                  ),
+                                  trailing: Icon(
+                                    Directionality.of(context) ==
+                                            TextDirection.rtl
+                                        ? Symbols.chevron_left_rounded
+                                        : Symbols.chevron_right_rounded,
+                                  ),
+                                  onTap: notificationPreferences.enabled
+                                      ? () => _pickQuietHour(
+                                          context,
+                                          ref,
+                                          notificationPreferences,
+                                          start: true,
+                                        )
+                                      : null,
+                                ),
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(Symbols.wb_sunny_rounded),
+                                  title: Text(context.l10n.quietHoursEnd),
+                                  subtitle: Text(
+                                    _minutesLabel(
+                                      context,
+                                      notificationPreferences
+                                          .quietHoursEndMinutes,
+                                    ),
+                                  ),
+                                  trailing: const Icon(
+                                    Symbols.chevron_right_rounded,
+                                  ),
+                                  onTap: notificationPreferences.enabled
+                                      ? () => _pickQuietHour(
+                                          context,
+                                          ref,
+                                          notificationPreferences,
+                                          start: false,
+                                        )
+                                      : null,
+                                ),
+                                SwitchListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  secondary: const Icon(
+                                    Symbols.priority_high_rounded,
+                                  ),
+                                  title: Text(
+                                    context.l10n.criticalRemindersBypass,
+                                  ),
+                                  subtitle: Text(
+                                    context
+                                        .l10n
+                                        .criticalTasksCanStillAlertDuringQuietHours,
+                                  ),
+                                  value:
+                                      notificationPreferences.enabled &&
+                                      notificationPreferences
+                                          .criticalBypassQuietHours,
+                                  onChanged: notificationPreferences.enabled
+                                      ? (value) => _saveNotificationPreferences(
+                                          context,
+                                          ref,
+                                          notificationPreferences.copyWith(
+                                            criticalBypassQuietHours: value,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Symbols.privacy_tip_rounded),
+                          title: Text(context.l10n.hideLockScreenDetails),
+                          subtitle: Text(
+                            context.l10n.showGenericReminderTextOutsideTheApp,
+                          ),
+                          value:
+                              notificationPreferences.enabled &&
+                              notificationPreferences.privacyMode,
+                          onChanged: notificationPreferences.enabled
+                              ? (value) => _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    privacyMode: value,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Symbols.summarize_rounded),
+                          title: Text(context.l10n.dailyDigest),
+                          subtitle: Text(context.l10n.groupedReminderSummary),
+                          value:
+                              notificationPreferences.enabled &&
+                              notificationPreferences.dailyDigest,
+                          onChanged: notificationPreferences.enabled
+                              ? (value) => _saveNotificationPreferences(
+                                  context,
+                                  ref,
+                                  notificationPreferences.copyWith(
+                                    dailyDigest: value,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        const _SettingsPreferenceDivider(),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Symbols.snooze_rounded),
+                          title: Text(context.l10n.defaultSnooze),
+                          subtitle: Text(
+                            _durationLabel(
+                              context,
+                              Duration(
+                                minutes: notificationPreferences
+                                    .defaultSnoozeMinutes,
+                              ),
+                            ),
+                          ),
+                          trailing: DropdownButton<int>(
+                            value: notificationPreferences.defaultSnoozeMinutes,
+                            items: [
+                              for (final minutes in snoozeOptions)
+                                DropdownMenuItem(
+                                  value: minutes,
+                                  child: Text(
+                                    _durationLabel(
+                                      context,
+                                      Duration(minutes: minutes),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            onChanged: notificationPreferences.enabled
+                                ? (minutes) {
+                                    if (minutes == null) {
+                                      return;
+                                    }
+                                    _saveNotificationPreferences(
+                                      context,
+                                      ref,
+                                      notificationPreferences.copyWith(
+                                        defaultSnoozeMinutes: minutes,
+                                      ),
+                                    );
+                                  }
+                                : null,
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Symbols.notifications_rounded),
+                          title: Text(context.l10n.maxRemindersPerDay),
+                          subtitle: Text(
+                            context.l10n.reminderCountLabel(
+                              notificationPreferences.maxRemindersPerDay,
+                            ),
+                          ),
+                          trailing: DropdownButton<int>(
+                            value: notificationPreferences.maxRemindersPerDay,
+                            items: [
+                              for (final count in const [2, 4, 6, 8, 12, 24])
+                                DropdownMenuItem(
+                                  value: count,
+                                  child: Text(_formatInteger(context, count)),
+                                ),
+                            ],
+                            onChanged: notificationPreferences.enabled
+                                ? (count) {
+                                    if (count == null) {
+                                      return;
+                                    }
+                                    _saveNotificationPreferences(
+                                      context,
+                                      ref,
+                                      notificationPreferences.copyWith(
+                                        maxRemindersPerDay: count,
+                                      ),
+                                    );
+                                  }
+                                : null,
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Symbols.schedule_rounded),
+                          title: Text(context.l10n.reminderTime),
+                          subtitle: Text(
+                            _hourLabel(
+                              context,
+                              notificationPreferences.reminderHour,
+                            ),
+                          ),
+                          trailing: DropdownButton<int>(
+                            value: notificationPreferences.reminderHour,
+                            items: [
+                              for (final hour in reminderHours)
+                                DropdownMenuItem(
+                                  value: hour,
+                                  child: Text(_hourLabel(context, hour)),
+                                ),
+                            ],
+                            onChanged: notificationPreferences.enabled
+                                ? (hour) {
+                                    if (hour == null) {
+                                      return;
+                                    }
+                                    _saveNotificationPreferences(
+                                      context,
+                                      ref,
+                                      notificationPreferences.copyWith(
+                                        reminderHour: hour,
+                                      ),
+                                    );
+                                  }
+                                : null,
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Symbols.event_note_rounded),
+                          title: Text(context.l10n.digestTime),
+                          subtitle: Text(
+                            _hourLabel(
+                              context,
+                              notificationPreferences.digestHour,
+                            ),
+                          ),
+                          trailing: DropdownButton<int>(
+                            value: notificationPreferences.digestHour,
+                            items: [
+                              for (final hour in digestHours)
+                                DropdownMenuItem(
+                                  value: hour,
+                                  child: Text(_hourLabel(context, hour)),
+                                ),
+                            ],
+                            onChanged: notificationPreferences.enabled
+                                ? (hour) {
+                                    if (hour == null) {
+                                      return;
+                                    }
+                                    _saveNotificationPreferences(
+                                      context,
+                                      ref,
+                                      notificationPreferences.copyWith(
+                                        digestHour: hour,
+                                      ),
+                                    );
+                                  }
+                                : null,
+                          ),
+                        ),
+                        _ReminderSettingsActions(
+                          onSendTest: () => _sendTestNotification(context, ref),
                         ),
                       ],
                     ),
                   ),
                 ],
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.privacy_tip_rounded),
-                  title: Text(context.l10n.hideLockScreenDetails),
-                  subtitle: Text(
-                    context.l10n.showGenericReminderTextOutsideTheApp,
-                  ),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.privacyMode,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(privacyMode: value),
-                        )
-                      : null,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Symbols.summarize_rounded),
-                  title: Text(context.l10n.dailyDigest),
-                  subtitle: Text(context.l10n.groupedReminderSummary),
-                  value:
-                      notificationPreferences.enabled &&
-                      notificationPreferences.dailyDigest,
-                  onChanged: notificationPreferences.enabled
-                      ? (value) => _saveNotificationPreferences(
-                          context,
-                          ref,
-                          notificationPreferences.copyWith(dailyDigest: value),
-                        )
-                      : null,
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.snooze_rounded),
-                  title: Text(context.l10n.defaultSnooze),
-                  subtitle: Text(
-                    _durationLabel(
-                      context,
-                      Duration(
-                        minutes: notificationPreferences.defaultSnoozeMinutes,
-                      ),
-                    ),
-                  ),
-                  trailing: DropdownButton<int>(
-                    value: notificationPreferences.defaultSnoozeMinutes,
-                    items: [
-                      for (final minutes in snoozeOptions)
-                        DropdownMenuItem(
-                          value: minutes,
-                          child: Text(
-                            _durationLabel(context, Duration(minutes: minutes)),
-                          ),
-                        ),
-                    ],
-                    onChanged: notificationPreferences.enabled
-                        ? (minutes) {
-                            if (minutes == null) {
-                              return;
-                            }
-                            _saveNotificationPreferences(
-                              context,
-                              ref,
-                              notificationPreferences.copyWith(
-                                defaultSnoozeMinutes: minutes,
-                              ),
-                            );
-                          }
-                        : null,
-                  ),
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.notifications_rounded),
-                  title: Text(context.l10n.maxRemindersPerDay),
-                  subtitle: Text(
-                    context.l10n.reminderCountLabel(
-                      notificationPreferences.maxRemindersPerDay,
-                    ),
-                  ),
-                  trailing: DropdownButton<int>(
-                    value: notificationPreferences.maxRemindersPerDay,
-                    items: [
-                      for (final count in const [2, 4, 6, 8, 12, 24])
-                        DropdownMenuItem(
-                          value: count,
-                          child: Text(_formatInteger(context, count)),
-                        ),
-                    ],
-                    onChanged: notificationPreferences.enabled
-                        ? (count) {
-                            if (count == null) {
-                              return;
-                            }
-                            _saveNotificationPreferences(
-                              context,
-                              ref,
-                              notificationPreferences.copyWith(
-                                maxRemindersPerDay: count,
-                              ),
-                            );
-                          }
-                        : null,
-                  ),
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.schedule_rounded),
-                  title: Text(context.l10n.reminderTime),
-                  subtitle: Text(
-                    _hourLabel(context, notificationPreferences.reminderHour),
-                  ),
-                  trailing: DropdownButton<int>(
-                    value: notificationPreferences.reminderHour,
-                    items: [
-                      for (final hour in reminderHours)
-                        DropdownMenuItem(
-                          value: hour,
-                          child: Text(_hourLabel(context, hour)),
-                        ),
-                    ],
-                    onChanged: notificationPreferences.enabled
-                        ? (hour) {
-                            if (hour == null) {
-                              return;
-                            }
-                            _saveNotificationPreferences(
-                              context,
-                              ref,
-                              notificationPreferences.copyWith(
-                                reminderHour: hour,
-                              ),
-                            );
-                          }
-                        : null,
-                  ),
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.event_note_rounded),
-                  title: Text(context.l10n.digestTime),
-                  subtitle: Text(
-                    _hourLabel(context, notificationPreferences.digestHour),
-                  ),
-                  trailing: DropdownButton<int>(
-                    value: notificationPreferences.digestHour,
-                    items: [
-                      for (final hour in digestHours)
-                        DropdownMenuItem(
-                          value: hour,
-                          child: Text(_hourLabel(context, hour)),
-                        ),
-                    ],
-                    onChanged: notificationPreferences.enabled
-                        ? (hour) {
-                            if (hour == null) {
-                              return;
-                            }
-                            _saveNotificationPreferences(
-                              context,
-                              ref,
-                              notificationPreferences.copyWith(
-                                digestHour: hour,
-                              ),
-                            );
-                          }
-                        : null,
-                  ),
-                ),
-                _ReminderSettingsActions(
-                  onSendTest: () => _sendTestNotification(context, ref),
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -12196,6 +12375,125 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 }
 
+class _SettingsCardHeader extends StatelessWidget {
+  const _SettingsCardHeader({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _SettingsTileIcon(icon: icon),
+        const SizedBox(width: HkSpacing.sm),
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsSubsectionLabel extends StatelessWidget {
+  const _SettingsSubsectionLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: HkSpacing.space4),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsPanel extends StatelessWidget {
+  const _SettingsPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLow.withValues(alpha: 0.72),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(HkRadii.lg),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.72)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: HkSpacing.space4,
+          vertical: HkSpacing.space4,
+        ),
+        child: IconTheme(
+          data: IconThemeData(color: scheme.primary),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsTileIcon extends StatelessWidget {
+  const _SettingsTileIcon({
+    required this.icon,
+    this.color,
+    this.size = 40,
+    this.iconSize = 21,
+  });
+
+  final IconData icon;
+  final Color? color;
+  final double size;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedColor = color ?? Theme.of(context).colorScheme.primary;
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: resolvedColor.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(HkRadii.md),
+      ),
+      child: Icon(icon, size: iconSize, color: resolvedColor),
+    );
+  }
+}
+
+class _SettingsPreferenceDivider extends StatelessWidget {
+  const _SettingsPreferenceDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: HkSpacing.space4,
+      indent: 52,
+      endIndent: HkSpacing.xs,
+      color: Theme.of(
+        context,
+      ).colorScheme.outlineVariant.withValues(alpha: 0.72),
+    );
+  }
+}
+
 class _ReminderSettingsActions extends StatelessWidget {
   const _ReminderSettingsActions({required this.onSendTest});
 
@@ -12203,9 +12501,15 @@ class _ReminderSettingsActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: AlignmentDirectional.centerStart,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        HkSpacing.xs,
+        HkSpacing.xs,
+        HkSpacing.xs,
+        HkSpacing.space4,
+      ),
       child: SizedBox(
+        width: double.infinity,
         height: 48,
         child: OutlinedButton.icon(
           onPressed: onSendTest,
@@ -12233,16 +12537,50 @@ class _NotificationStatusRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = good ? HkColors.green : HkColors.tertiary;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: HkSpacing.xs),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: color),
-          const SizedBox(width: HkSpacing.xs),
-          Expanded(child: Text(label)),
-          hk_ui.StatusPill(label: value, color: color, compact: true),
-        ],
-      ),
+    final status = hk_ui.StatusPill(label: value, color: color, compact: true);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScaler = MediaQuery.textScalerOf(context);
+        final stacked =
+            constraints.maxWidth < 276 || textScaler.scale(14) > 17.5;
+        final labelRow = Row(
+          children: [
+            _SettingsTileIcon(icon: icon, color: color, size: 32, iconSize: 18),
+            const SizedBox(width: HkSpacing.xs),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        );
+        return Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: HkSpacing.xs,
+            vertical: HkSpacing.space6,
+          ),
+          child: stacked
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    labelRow,
+                    const SizedBox(height: HkSpacing.space6),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: status,
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: labelRow),
+                    const SizedBox(width: HkSpacing.xs),
+                    status,
+                  ],
+                ),
+        );
+      },
     );
   }
 }
@@ -12267,29 +12605,76 @@ class _EffectiveCapabilityPreferenceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.error;
+    final scheme = Theme.of(context).colorScheme;
+    final color = switch (state) {
+      EffectiveCapabilityState.active => HkColors.green,
+      EffectiveCapabilityState.degraded => HkColors.tertiary,
+      EffectiveCapabilityState.blocked => scheme.error,
+      EffectiveCapabilityState.disabledByUser => scheme.onSurfaceVariant,
+      EffectiveCapabilityState.notConfigured => HkColors.tertiary,
+      EffectiveCapabilityState.unavailable => scheme.onSurfaceVariant,
+    };
     return Semantics(
       container: true,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: color),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: HkSpacing.xs,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: HkSpacing.xs,
+          vertical: HkSpacing.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            hk_ui.StatusPill(
-              label: _effectiveCapabilityLabel(
-                context,
-                state,
-                approximateWhenDegraded: approximateWhenDegraded,
-              ),
-              color: color,
-              compact: true,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SettingsTileIcon(icon: icon, color: color),
+                const SizedBox(width: HkSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: HkSpacing.space4),
+                      Text(
+                        subtitle,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            if (onFix != null)
-              TextButton(onPressed: onFix, child: Text(context.l10n.fix)),
+            const SizedBox(height: HkSpacing.xs),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.end,
+                spacing: HkSpacing.space4,
+                runSpacing: HkSpacing.space4,
+                children: [
+                  hk_ui.StatusPill(
+                    label: _effectiveCapabilityLabel(
+                      context,
+                      state,
+                      approximateWhenDegraded: approximateWhenDegraded,
+                    ),
+                    color: color,
+                    compact: true,
+                  ),
+                  if (onFix != null)
+                    TextButton(onPressed: onFix, child: Text(context.l10n.fix)),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -12475,6 +12860,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                   96 + bottomPadding,
                 ),
                 children: [
+                  const HkNativeAdCard(placement: 'backup'),
                   _BackupStatusPanel(
                     status: last,
                     description: _statusDescription(context, last),
@@ -14021,7 +14407,6 @@ Future<bool> setTaskEnabledWithFeedback(
                 ),
         ),
         severity: hk_ui.HkToastSeverity.error,
-        bottomOffset: _taskDeletionSnackBarBottomOffset(context),
       );
     }
     return false;
@@ -14052,7 +14437,6 @@ Future<bool> setTaskEnabledWithFeedback(
         ),
       ),
       severity: hk_ui.HkToastSeverity.error,
-      bottomOffset: _taskDeletionSnackBarBottomOffset(context),
     );
     return true;
   }
@@ -14063,7 +14447,6 @@ Future<bool> setTaskEnabledWithFeedback(
           ? context.l10n.taskEnabledConfirmation
           : context.l10n.taskDisabledConfirmation,
     ),
-    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
   );
   return true;
 }
@@ -14876,32 +15259,166 @@ Future<void> showPointShortageDialog(
       {'attempted_action': attemptedAction},
     ),
   );
-  final earn = await runWithNativeAdsSuspended(
+  await runWithNativeAdsSuspended(
     context,
-    () => showDialog<bool>(
+    () => showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(context.l10n.needOnePoint),
-        content: Text(context.l10n.pointShortageDescription),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(context.l10n.keepEditing),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(context.l10n.earnAPoint),
-          ),
-        ],
-      ),
+      builder: (context) => const _PointShortageDialog(),
     ),
   );
-  if (earn == true && context.mounted) {
-    await showEarnPointsFlow(context, ref, entryPoint: 'shortage');
+}
+
+class _PointShortageDialog extends ConsumerStatefulWidget {
+  const _PointShortageDialog();
+
+  @override
+  ConsumerState<_PointShortageDialog> createState() =>
+      _PointShortageDialogState();
+}
+
+class _PointShortageDialogState extends ConsumerState<_PointShortageDialog> {
+  bool _loading = false;
+  bool _verificationPending = false;
+  String? _status;
+  bool _statusIsError = false;
+
+  Future<void> _tryReward() async {
+    if (_loading || _verificationPending) return;
+    final config =
+        ref.read(monetizationConfigProvider).value ??
+        const MonetizationConfig.failClosed();
+    if (!config.adsEnabled || !config.rewardedAdsEnabled) {
+      setState(() {
+        _status = context.l10n.pointRewardsUnavailable;
+        _statusIsError = true;
+      });
+      return;
+    }
+
+    final wallet = ref.read(pointWalletProvider).value;
+    setState(() {
+      _loading = true;
+      _status = context.l10n.loadingRewardedAd;
+      _statusIsError = false;
+    });
+    final result = await ref
+        .read(homePilotAdsProvider)
+        .showReward(
+          RewardAdType.rewardedAd,
+          timeZone: wallet?.timeZone,
+          entryPoint: 'shortage',
+        );
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      switch (result) {
+        case RewardShowResult.shownAwaitingServerVerification:
+          _verificationPending = true;
+          _status = context.l10n.rewardVerificationPending;
+          _statusIsError = false;
+        case RewardShowResult.unavailable:
+          _status = context.l10n.noRewardedAdAvailable;
+          _statusIsError = true;
+        case RewardShowResult.rejected:
+          _status = context.l10n.rewardUnavailableOrClaimed;
+          _statusIsError = true;
+        case RewardShowResult.dismissed:
+          _status = context.l10n.rewardAdClosedEarly;
+          _statusIsError = true;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final balance = ref.watch(pointWalletProvider).value?.balance ?? 0;
+    return AlertDialog(
+      icon: Icon(Symbols.stars_rounded, color: scheme.primary, size: 32),
+      title: Text(context.l10n.needOnePoint),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: HkSpacing.sm,
+                  vertical: HkSpacing.space6,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(HkRadii.full),
+                ),
+                child: Text(
+                  context.l10n.pointsCount(balance),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: scheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: HkSpacing.sm),
+            Text(context.l10n.pointShortageDescription),
+            if (_status case final status?) ...[
+              const SizedBox(height: HkSpacing.sm),
+              Semantics(
+                liveRegion: true,
+                child: Container(
+                  key: const ValueKey('point-shortage-status'),
+                  padding: const EdgeInsets.all(HkSpacing.xs),
+                  decoration: BoxDecoration(
+                    color: (_statusIsError ? scheme.error : scheme.primary)
+                        .withValues(alpha: 0.09),
+                    borderRadius: BorderRadius.circular(HkRadii.md),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_loading)
+                        const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        Icon(
+                          _statusIsError
+                              ? Symbols.info_rounded
+                              : Symbols.verified_rounded,
+                          size: 20,
+                          color: _statusIsError ? scheme.error : scheme.primary,
+                        ),
+                      const SizedBox(width: HkSpacing.xs),
+                      Expanded(child: Text(status)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _loading ? null : () => Navigator.of(context).pop(),
+          child: Text(context.l10n.keepEditing),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('point-shortage-watch-ad'),
+          onPressed: _loading || _verificationPending ? null : _tryReward,
+          icon: const Icon(Symbols.play_circle_rounded),
+          label: Text(context.l10n.earnAPoint),
+        ),
+      ],
+    );
   }
 }
 
 bool _isInsufficientPointsError(Object error) {
+  if (error is InsufficientPointsException) return true;
   if (error case PostgrestException(:final message)) {
     return message == 'INSUFFICIENT_POINTS';
   }
@@ -15002,8 +15519,6 @@ Future<bool> moveTaskToTrashWithUndo(
   hk_ui.showTaskMovedToTrashSnackBar(
     context,
     duration: const Duration(seconds: 5),
-    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
-    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
     onUndo: () async {
       try {
         await ref.read(maintenanceRepositoryProvider).restorePlan(task.plan.id);
@@ -15025,65 +15540,6 @@ Future<bool> moveTaskToTrashWithUndo(
     },
   );
   return true;
-}
-
-double _taskDeletionSnackBarBottomOffset(BuildContext context) {
-  final path = _routePathOf(context);
-  var bottomChromeHeight = 0.0;
-  if (_routeShowsShellBottomNav(path)) {
-    bottomChromeHeight = math.max(
-      bottomChromeHeight,
-      hk_ui.kHomePilotBottomNavVisualHeight,
-    );
-  }
-  if (_routeShowsTaskFab(path)) {
-    final width = MediaQuery.sizeOf(context).width;
-    if (width < 560) {
-      bottomChromeHeight = math.max(
-        bottomChromeHeight,
-        hk_ui.kHomePilotFloatingActionButtonClearance,
-      );
-    }
-  }
-  if (_routeShowsTaskDetailActionBar(path)) {
-    bottomChromeHeight = math.max(
-      bottomChromeHeight,
-      hk_ui.kHomePilotBottomActionBarHeight,
-    );
-  }
-  return MediaQuery.viewPaddingOf(context).bottom +
-      bottomChromeHeight +
-      hk_ui.kHomePilotSnackBarBottomSpacing;
-}
-
-String? _routePathOf(BuildContext context) {
-  try {
-    return GoRouterState.of(context).uri.path;
-  } on Object {
-    try {
-      return GoRouter.of(context).routeInformationProvider.value.uri.path;
-    } on Object {
-      return null;
-    }
-  }
-}
-
-bool _routeShowsShellBottomNav(String? path) {
-  return const {
-    '/',
-    '/assets',
-    '/maintenance',
-    '/calendar',
-    '/more',
-  }.contains(path);
-}
-
-bool _routeShowsTaskFab(String? path) {
-  return path == '/' || path == '/maintenance';
-}
-
-bool _routeShowsTaskDetailActionBar(String? path) {
-  return path?.startsWith('/maintenance/') ?? false;
 }
 
 Future<bool> deleteThingWithConfirmation(
@@ -15117,8 +15573,6 @@ Future<bool> deleteThingWithConfirmation(
   hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(asset.name)),
-    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
-    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
     onUndo: () async {
       try {
         await ref.read(assetRepositoryProvider).restoreAsset(asset.id);
@@ -15179,8 +15633,6 @@ Future<bool> deleteRoomWithConfirmation(
   hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(room.name)),
-    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
-    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
     onUndo: () async {
       try {
         await ref.read(assetRepositoryProvider).restoreRoom(room.id);
@@ -15248,8 +15700,6 @@ Future<bool> deleteAreaWithConfirmation(
   hk_ui.showMovedToTrashSnackBar(
     context,
     content: Text(context.l10n.nameMovedToTrash(area.name)),
-    bottomOffset: _taskDeletionSnackBarBottomOffset(context),
-    reserveFloatingActionButton: _routeShowsTaskFab(_routePathOf(context)),
     onUndo: () async {
       try {
         await ref.read(assetRepositoryProvider).restoreArea(area.id);
@@ -15849,7 +16299,6 @@ Map<String, dynamic> _taskMetadataPayload(TaskMetadata? metadata) =>
         'location_label': metadata.locationLabel,
         'estimated_duration_minutes': metadata.estimatedDurationMinutes,
         'required_materials': metadata.requiredMaterials,
-        'dependency_plan_ids': metadata.dependencyPlanIds,
         'reminder_recommendation': metadata.reminderRecommendation,
         'sort_order': metadata.sortOrder,
       };
@@ -17346,7 +17795,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
   late final TextEditingController _reminderDaysController;
   late final TextEditingController _reminderRecommendationController;
   String? _assetId;
-  Set<String> _dependencyPlanIds = const {};
   late RecurrenceUnit _unit;
   late PriorityLevel _priority;
   late HealthGroup _healthGroup;
@@ -17387,7 +17835,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
     _reminderRecommendationController = TextEditingController(
       text: metadata?.reminderRecommendation ?? '',
     );
-    _dependencyPlanIds = {...metadata?.dependencyPlanIds ?? const <String>[]};
     _assetId = plan?.assetId ?? widget.assetId;
     _unit = plan?.recurrence.unit ?? RecurrenceUnit.months;
     _priority = plan?.priority ?? PriorityLevel.medium;
@@ -17439,7 +17886,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
       'materials': _materialsController.text,
       'reminder_days': _reminderDaysController.text,
       'reminder_recommendation': _reminderRecommendationController.text,
-      'dependency_ids': _dependencyPlanIds.toList(growable: false),
     });
   }
 
@@ -17464,7 +17910,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
         ? '0'
         : text('reminder_days');
     _reminderRecommendationController.text = text('reminder_recommendation');
-    final dependencies = draft['dependency_ids'];
     setState(() {
       _assetId = draft['asset_id'] as String? ?? widget.assetId;
       _unit =
@@ -17485,9 +17930,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
       _dueDate =
           DateTime.tryParse(text('due_date'))?.toLocal() ??
           _defaultPlanDueDate();
-      _dependencyPlanIds = dependencies is List
-          ? dependencies.whereType<String>().toSet()
-          : const {};
     });
   }
 
@@ -17540,14 +17982,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
               _assetId != null && items.any((item) => item.id == _assetId)
               ? _assetId
               : items.first.id;
-          final dependencyCandidates =
-              (ref.watch(tasksProvider).value ?? const <TaskItem>[])
-                  .where(
-                    (task) =>
-                        task.asset.id == selected &&
-                        task.plan.id != widget.task?.plan.id,
-                  )
-                  .toList(growable: false);
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -17585,10 +18019,7 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
                       child: DynamicText(item.name, contentType: 'asset.name'),
                     ),
                 ],
-                onChanged: (value) => setState(() {
-                  _assetId = value;
-                  _dependencyPlanIds = const {};
-                }),
+                onChanged: (value) => setState(() => _assetId = value),
               ),
               const SizedBox(height: HkSpacing.xs),
               TextField(
@@ -17741,43 +18172,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
                   hintText: context.l10n.optionalContextForNotifications,
                 ),
               ),
-              if (dependencyCandidates.isNotEmpty) ...[
-                const SizedBox(height: HkSpacing.xs),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: EdgeInsets.zero,
-                  leading: const Icon(Symbols.account_tree_rounded),
-                  title: Text(context.l10n.dependencyTasks),
-                  subtitle: Text(
-                    _dependencyPlanIds.isEmpty
-                        ? context.l10n.noDependenciesSelected
-                        : context.l10n.selectedCount(_dependencyPlanIds.length),
-                  ),
-                  children: [
-                    for (final candidate in dependencyCandidates.take(8))
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: _dependencyPlanIds.contains(candidate.plan.id),
-                        title: DynamicText(
-                          candidate.plan.title,
-                          contentType: 'maintenance_plan.title',
-                        ),
-                        subtitle: Text(
-                          _formatShortDate(context, candidate.plan.nextDueDate),
-                        ),
-                        onChanged: (selected) => setState(() {
-                          final next = {..._dependencyPlanIds};
-                          if (selected ?? false) {
-                            next.add(candidate.plan.id);
-                          } else {
-                            next.remove(candidate.plan.id);
-                          }
-                          _dependencyPlanIds = next;
-                        }),
-                      ),
-                  ],
-                ),
-              ],
               const SizedBox(height: HkSpacing.xs),
               Row(
                 children: [
@@ -17924,7 +18318,9 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
         if (!success) {
           final state = creationController.value;
           if (mounted && state.failure != null) {
-            if (_isInsufficientPointsError(state.failure!.message)) {
+            if (state.failure!.code ==
+                    TaskCreationFailureCode.insufficientPoints ||
+                _isInsufficientPointsError(state.failure!.message)) {
               await showPointShortageDialog(
                 context,
                 ref,
@@ -17980,7 +18376,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
           _reminderRecommendationController.clear();
           setState(() {
             _dueDate = _defaultPlanDueDate();
-            _dependencyPlanIds = const {};
           });
           hk_ui.showToast(context, content: Text(context.l10n.taskCreated));
         }
@@ -18018,7 +18413,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
       locationLabel: _nullableEditText(_locationController.text),
       estimatedDurationMinutes: duration,
       requiredMaterials: _commaList(_materialsController.text),
-      dependencyPlanIds: _dependencyPlanIds.toList(growable: false),
       reminderRecommendation: _nullableEditText(
         _reminderRecommendationController.text,
       ),
@@ -18027,7 +18421,6 @@ class _PlanEditorDialogState extends ConsumerState<PlanEditorDialog> {
         metadata.locationLabel == null &&
         metadata.estimatedDurationMinutes == null &&
         metadata.requiredMaterials.isEmpty &&
-        metadata.dependencyPlanIds.isEmpty &&
         metadata.reminderRecommendation == null) {
       return null;
     }

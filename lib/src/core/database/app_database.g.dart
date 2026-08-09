@@ -5940,18 +5940,6 @@ class $MaintenancePlanMetadataTable extends MaintenancePlanMetadata
         requiredDuringInsert: false,
         defaultValue: const Constant('[]'),
       );
-  static const VerificationMeta _dependencyPlanIdsJsonMeta =
-      const VerificationMeta('dependencyPlanIdsJson');
-  @override
-  late final GeneratedColumn<String> dependencyPlanIdsJson =
-      GeneratedColumn<String>(
-        'dependency_plan_ids_json',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: false,
-        defaultValue: const Constant('[]'),
-      );
   static const VerificationMeta _reminderRecommendationMeta =
       const VerificationMeta('reminderRecommendation');
   @override
@@ -6005,7 +5993,6 @@ class $MaintenancePlanMetadataTable extends MaintenancePlanMetadata
     locationLabel,
     estimatedDurationMinutes,
     requiredMaterialsJson,
-    dependencyPlanIdsJson,
     reminderRecommendation,
     sortOrder,
     createdAt,
@@ -6061,15 +6048,6 @@ class $MaintenancePlanMetadataTable extends MaintenancePlanMetadata
         requiredMaterialsJson.isAcceptableOrUnknown(
           data['required_materials_json']!,
           _requiredMaterialsJsonMeta,
-        ),
-      );
-    }
-    if (data.containsKey('dependency_plan_ids_json')) {
-      context.handle(
-        _dependencyPlanIdsJsonMeta,
-        dependencyPlanIdsJson.isAcceptableOrUnknown(
-          data['dependency_plan_ids_json']!,
-          _dependencyPlanIdsJsonMeta,
         ),
       );
     }
@@ -6132,10 +6110,6 @@ class $MaintenancePlanMetadataTable extends MaintenancePlanMetadata
         DriftSqlType.string,
         data['${effectivePrefix}required_materials_json'],
       )!,
-      dependencyPlanIdsJson: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}dependency_plan_ids_json'],
-      )!,
       reminderRecommendation: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}reminder_recommendation'],
@@ -6168,7 +6142,6 @@ class MaintenancePlanMetadataRow extends DataClass
   final String? locationLabel;
   final int? estimatedDurationMinutes;
   final String requiredMaterialsJson;
-  final String dependencyPlanIdsJson;
   final String? reminderRecommendation;
   final int? sortOrder;
   final DateTime createdAt;
@@ -6179,7 +6152,6 @@ class MaintenancePlanMetadataRow extends DataClass
     this.locationLabel,
     this.estimatedDurationMinutes,
     required this.requiredMaterialsJson,
-    required this.dependencyPlanIdsJson,
     this.reminderRecommendation,
     this.sortOrder,
     required this.createdAt,
@@ -6201,7 +6173,6 @@ class MaintenancePlanMetadataRow extends DataClass
       );
     }
     map['required_materials_json'] = Variable<String>(requiredMaterialsJson);
-    map['dependency_plan_ids_json'] = Variable<String>(dependencyPlanIdsJson);
     if (!nullToAbsent || reminderRecommendation != null) {
       map['reminder_recommendation'] = Variable<String>(reminderRecommendation);
     }
@@ -6226,7 +6197,6 @@ class MaintenancePlanMetadataRow extends DataClass
           ? const Value.absent()
           : Value(estimatedDurationMinutes),
       requiredMaterialsJson: Value(requiredMaterialsJson),
-      dependencyPlanIdsJson: Value(dependencyPlanIdsJson),
       reminderRecommendation: reminderRecommendation == null && nullToAbsent
           ? const Value.absent()
           : Value(reminderRecommendation),
@@ -6253,9 +6223,6 @@ class MaintenancePlanMetadataRow extends DataClass
       requiredMaterialsJson: serializer.fromJson<String>(
         json['requiredMaterialsJson'],
       ),
-      dependencyPlanIdsJson: serializer.fromJson<String>(
-        json['dependencyPlanIdsJson'],
-      ),
       reminderRecommendation: serializer.fromJson<String?>(
         json['reminderRecommendation'],
       ),
@@ -6275,7 +6242,6 @@ class MaintenancePlanMetadataRow extends DataClass
         estimatedDurationMinutes,
       ),
       'requiredMaterialsJson': serializer.toJson<String>(requiredMaterialsJson),
-      'dependencyPlanIdsJson': serializer.toJson<String>(dependencyPlanIdsJson),
       'reminderRecommendation': serializer.toJson<String?>(
         reminderRecommendation,
       ),
@@ -6291,7 +6257,6 @@ class MaintenancePlanMetadataRow extends DataClass
     Value<String?> locationLabel = const Value.absent(),
     Value<int?> estimatedDurationMinutes = const Value.absent(),
     String? requiredMaterialsJson,
-    String? dependencyPlanIdsJson,
     Value<String?> reminderRecommendation = const Value.absent(),
     Value<int?> sortOrder = const Value.absent(),
     DateTime? createdAt,
@@ -6306,7 +6271,6 @@ class MaintenancePlanMetadataRow extends DataClass
         ? estimatedDurationMinutes.value
         : this.estimatedDurationMinutes,
     requiredMaterialsJson: requiredMaterialsJson ?? this.requiredMaterialsJson,
-    dependencyPlanIdsJson: dependencyPlanIdsJson ?? this.dependencyPlanIdsJson,
     reminderRecommendation: reminderRecommendation.present
         ? reminderRecommendation.value
         : this.reminderRecommendation,
@@ -6329,9 +6293,6 @@ class MaintenancePlanMetadataRow extends DataClass
       requiredMaterialsJson: data.requiredMaterialsJson.present
           ? data.requiredMaterialsJson.value
           : this.requiredMaterialsJson,
-      dependencyPlanIdsJson: data.dependencyPlanIdsJson.present
-          ? data.dependencyPlanIdsJson.value
-          : this.dependencyPlanIdsJson,
       reminderRecommendation: data.reminderRecommendation.present
           ? data.reminderRecommendation.value
           : this.reminderRecommendation,
@@ -6349,7 +6310,6 @@ class MaintenancePlanMetadataRow extends DataClass
           ..write('locationLabel: $locationLabel, ')
           ..write('estimatedDurationMinutes: $estimatedDurationMinutes, ')
           ..write('requiredMaterialsJson: $requiredMaterialsJson, ')
-          ..write('dependencyPlanIdsJson: $dependencyPlanIdsJson, ')
           ..write('reminderRecommendation: $reminderRecommendation, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
@@ -6365,7 +6325,6 @@ class MaintenancePlanMetadataRow extends DataClass
     locationLabel,
     estimatedDurationMinutes,
     requiredMaterialsJson,
-    dependencyPlanIdsJson,
     reminderRecommendation,
     sortOrder,
     createdAt,
@@ -6380,7 +6339,6 @@ class MaintenancePlanMetadataRow extends DataClass
           other.locationLabel == this.locationLabel &&
           other.estimatedDurationMinutes == this.estimatedDurationMinutes &&
           other.requiredMaterialsJson == this.requiredMaterialsJson &&
-          other.dependencyPlanIdsJson == this.dependencyPlanIdsJson &&
           other.reminderRecommendation == this.reminderRecommendation &&
           other.sortOrder == this.sortOrder &&
           other.createdAt == this.createdAt &&
@@ -6394,7 +6352,6 @@ class MaintenancePlanMetadataCompanion
   final Value<String?> locationLabel;
   final Value<int?> estimatedDurationMinutes;
   final Value<String> requiredMaterialsJson;
-  final Value<String> dependencyPlanIdsJson;
   final Value<String?> reminderRecommendation;
   final Value<int?> sortOrder;
   final Value<DateTime> createdAt;
@@ -6406,7 +6363,6 @@ class MaintenancePlanMetadataCompanion
     this.locationLabel = const Value.absent(),
     this.estimatedDurationMinutes = const Value.absent(),
     this.requiredMaterialsJson = const Value.absent(),
-    this.dependencyPlanIdsJson = const Value.absent(),
     this.reminderRecommendation = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -6419,7 +6375,6 @@ class MaintenancePlanMetadataCompanion
     this.locationLabel = const Value.absent(),
     this.estimatedDurationMinutes = const Value.absent(),
     this.requiredMaterialsJson = const Value.absent(),
-    this.dependencyPlanIdsJson = const Value.absent(),
     this.reminderRecommendation = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -6432,7 +6387,6 @@ class MaintenancePlanMetadataCompanion
     Expression<String>? locationLabel,
     Expression<int>? estimatedDurationMinutes,
     Expression<String>? requiredMaterialsJson,
-    Expression<String>? dependencyPlanIdsJson,
     Expression<String>? reminderRecommendation,
     Expression<int>? sortOrder,
     Expression<DateTime>? createdAt,
@@ -6447,8 +6401,6 @@ class MaintenancePlanMetadataCompanion
         'estimated_duration_minutes': estimatedDurationMinutes,
       if (requiredMaterialsJson != null)
         'required_materials_json': requiredMaterialsJson,
-      if (dependencyPlanIdsJson != null)
-        'dependency_plan_ids_json': dependencyPlanIdsJson,
       if (reminderRecommendation != null)
         'reminder_recommendation': reminderRecommendation,
       if (sortOrder != null) 'sort_order': sortOrder,
@@ -6464,7 +6416,6 @@ class MaintenancePlanMetadataCompanion
     Value<String?>? locationLabel,
     Value<int?>? estimatedDurationMinutes,
     Value<String>? requiredMaterialsJson,
-    Value<String>? dependencyPlanIdsJson,
     Value<String?>? reminderRecommendation,
     Value<int?>? sortOrder,
     Value<DateTime>? createdAt,
@@ -6479,8 +6430,6 @@ class MaintenancePlanMetadataCompanion
           estimatedDurationMinutes ?? this.estimatedDurationMinutes,
       requiredMaterialsJson:
           requiredMaterialsJson ?? this.requiredMaterialsJson,
-      dependencyPlanIdsJson:
-          dependencyPlanIdsJson ?? this.dependencyPlanIdsJson,
       reminderRecommendation:
           reminderRecommendation ?? this.reminderRecommendation,
       sortOrder: sortOrder ?? this.sortOrder,
@@ -6512,11 +6461,6 @@ class MaintenancePlanMetadataCompanion
         requiredMaterialsJson.value,
       );
     }
-    if (dependencyPlanIdsJson.present) {
-      map['dependency_plan_ids_json'] = Variable<String>(
-        dependencyPlanIdsJson.value,
-      );
-    }
     if (reminderRecommendation.present) {
       map['reminder_recommendation'] = Variable<String>(
         reminderRecommendation.value,
@@ -6545,7 +6489,6 @@ class MaintenancePlanMetadataCompanion
           ..write('locationLabel: $locationLabel, ')
           ..write('estimatedDurationMinutes: $estimatedDurationMinutes, ')
           ..write('requiredMaterialsJson: $requiredMaterialsJson, ')
-          ..write('dependencyPlanIdsJson: $dependencyPlanIdsJson, ')
           ..write('reminderRecommendation: $reminderRecommendation, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
@@ -19346,7 +19289,6 @@ typedef $$MaintenancePlanMetadataTableCreateCompanionBuilder =
       Value<String?> locationLabel,
       Value<int?> estimatedDurationMinutes,
       Value<String> requiredMaterialsJson,
-      Value<String> dependencyPlanIdsJson,
       Value<String?> reminderRecommendation,
       Value<int?> sortOrder,
       Value<DateTime> createdAt,
@@ -19360,7 +19302,6 @@ typedef $$MaintenancePlanMetadataTableUpdateCompanionBuilder =
       Value<String?> locationLabel,
       Value<int?> estimatedDurationMinutes,
       Value<String> requiredMaterialsJson,
-      Value<String> dependencyPlanIdsJson,
       Value<String?> reminderRecommendation,
       Value<int?> sortOrder,
       Value<DateTime> createdAt,
@@ -19426,11 +19367,6 @@ class $$MaintenancePlanMetadataTableFilterComposer
 
   ColumnFilters<String> get requiredMaterialsJson => $composableBuilder(
     column: $table.requiredMaterialsJson,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get dependencyPlanIdsJson => $composableBuilder(
-    column: $table.dependencyPlanIdsJson,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -19507,11 +19443,6 @@ class $$MaintenancePlanMetadataTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get dependencyPlanIdsJson => $composableBuilder(
-    column: $table.dependencyPlanIdsJson,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get reminderRecommendation => $composableBuilder(
     column: $table.reminderRecommendation,
     builder: (column) => ColumnOrderings(column),
@@ -19580,11 +19511,6 @@ class $$MaintenancePlanMetadataTableAnnotationComposer
 
   GeneratedColumn<String> get requiredMaterialsJson => $composableBuilder(
     column: $table.requiredMaterialsJson,
-    builder: (column) => column,
-  );
-
-  GeneratedColumn<String> get dependencyPlanIdsJson => $composableBuilder(
-    column: $table.dependencyPlanIdsJson,
     builder: (column) => column,
   );
 
@@ -19673,7 +19599,6 @@ class $$MaintenancePlanMetadataTableTableManager
                 Value<String?> locationLabel = const Value.absent(),
                 Value<int?> estimatedDurationMinutes = const Value.absent(),
                 Value<String> requiredMaterialsJson = const Value.absent(),
-                Value<String> dependencyPlanIdsJson = const Value.absent(),
                 Value<String?> reminderRecommendation = const Value.absent(),
                 Value<int?> sortOrder = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -19685,7 +19610,6 @@ class $$MaintenancePlanMetadataTableTableManager
                 locationLabel: locationLabel,
                 estimatedDurationMinutes: estimatedDurationMinutes,
                 requiredMaterialsJson: requiredMaterialsJson,
-                dependencyPlanIdsJson: dependencyPlanIdsJson,
                 reminderRecommendation: reminderRecommendation,
                 sortOrder: sortOrder,
                 createdAt: createdAt,
@@ -19699,7 +19623,6 @@ class $$MaintenancePlanMetadataTableTableManager
                 Value<String?> locationLabel = const Value.absent(),
                 Value<int?> estimatedDurationMinutes = const Value.absent(),
                 Value<String> requiredMaterialsJson = const Value.absent(),
-                Value<String> dependencyPlanIdsJson = const Value.absent(),
                 Value<String?> reminderRecommendation = const Value.absent(),
                 Value<int?> sortOrder = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -19711,7 +19634,6 @@ class $$MaintenancePlanMetadataTableTableManager
                 locationLabel: locationLabel,
                 estimatedDurationMinutes: estimatedDurationMinutes,
                 requiredMaterialsJson: requiredMaterialsJson,
-                dependencyPlanIdsJson: dependencyPlanIdsJson,
                 reminderRecommendation: reminderRecommendation,
                 sortOrder: sortOrder,
                 createdAt: createdAt,

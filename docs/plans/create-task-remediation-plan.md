@@ -1,6 +1,12 @@
 # HomePilot Create Task Remediation Plan
 
 > **Historical implementation record:** The status below applies to the named historical baseline and audit only. This file is not a current runbook or release-validation artifact; executable Flutter, synchronization, migration, and test sources remain authoritative.
+>
+> **Build 44 retirement note:** References below to task dependency fields
+> describe the historical design only. The user-facing dependency feature and
+> its local/cloud columns were removed by the current implementation and the
+> forward `20260809193000_remove_task_dependencies.sql` migration. The unrelated
+> completion-outbox predecessor remains part of sync integrity.
 
 **Status:** Completed; all implementation, RPC migration, Flutter state, operation journaling, metadata shape validation, and automated test validations are fully executed and verified.
 **Repository:** `zuhak5/HomePilot`  

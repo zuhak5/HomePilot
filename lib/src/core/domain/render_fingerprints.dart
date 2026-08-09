@@ -187,7 +187,6 @@ int _taskMetadataFingerprint(TaskMetadata? metadata) => metadata == null
         metadata.locationLabel,
         metadata.estimatedDurationMinutes,
         Object.hashAll(metadata.requiredMaterials),
-        Object.hashAll(metadata.dependencyPlanIds),
         metadata.reminderRecommendation,
         metadata.sortOrder,
       ]);

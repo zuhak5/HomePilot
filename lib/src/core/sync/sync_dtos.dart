@@ -377,7 +377,6 @@ const syncEntitySpecs = <SyncEntitySpec>[
       'location_label',
       'estimated_duration_minutes',
       'required_materials_json',
-      'dependency_plan_ids_json',
       'reminder_recommendation',
       'sort_order',
       'created_at',

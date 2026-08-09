@@ -589,7 +589,6 @@
   "copy": "Copy",
   "includeRelatedTasks": "Include related tasks",
   "includePhotos": "Include photos",
-  "dependencyTasks": "Dependency tasks",
   "nicknameUpdated": "Nickname updated.",
   "nickname": "Nickname",
   "clear": "Clear",
@@ -813,7 +812,6 @@
   "reminder": "Reminder",
   "duration": "Duration",
   "materials": "Materials",
-  "dependsOn": "Depends on",
   "moveOrCopy": "Move or copy",
   "relatedTasks": "Related tasks",
   "noTasksYet": "No tasks yet",
@@ -1344,9 +1342,6 @@
   "changeItemTypeWarning": "Type-specific fields from the previous type will not be saved.",
   "maintenancePlansNeedItemBody": "Maintenance plans need an item so HomePilot can organize the work.",
   "planEditorIntro": "Set the cadence, priority, and next date for recurring work.",
-  "noDependenciesSelected": "No dependencies selected",
-  "selectedCount": "{count, plural, =1{1 selected} other{{count} selected}}",
-  "@selectedCount": {"placeholders": {"count": {"type": "int"}}},
   "petTypeDog": "Dog",
   "petTypeCat": "Cat",
   "petTypeFish": "Fish",
@@ -1364,7 +1359,7 @@
   "fishTypeKoi": "Koi",
   "accountSignOutBody": "HomePilot requires Google sign-in. You will return to the sign-in screen until you authenticate again.",
   "signedOut": "Signed out.",
-  "deleteAccountBody": "This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. You will be asked to authenticate with Google again.",
+  "deleteAccountBody": "This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. HomePilot will verify the signed-in Google account and only show Google''s account chooser if silent verification is unavailable.",
   "accountDeleted": "Account deleted.",
   "accountDeletionFailed": "Account deletion could not be completed. Sign in again and retry.",
   "notSet": "Not set",
@@ -1484,6 +1479,7 @@
   ,"permissionSelectedArea": "Selected area: {area}"
   ,"@permissionSelectedArea": {"placeholders": {"area": {"type": "String"}}}
   ,"permissionUsingCurrentLocation": "Using current location"
+  ,"weatherCurrentLocationShort": "Current"
   ,"permissionLocationAccessRequired": "Location access is required to use the current location."
   ,"permissionNotificationAccessRequired": "Android notification access is required for device reminders."
   ,"permissionDeviceRemindersOff": "Device reminders are off in HomePilot."

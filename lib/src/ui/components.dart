@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -25,12 +24,6 @@ const double kHomePilotBottomNavVisualHeight = 74;
 const double kHomePilotBottomActionBarHeight = HkSpacing.bottomAction;
 const double kHomePilotFloatingActionButtonBottomInset = 16;
 const double kHomePilotHeaderActionHeight = HkSpacing.space48;
-const double kHomePilotFloatingActionButtonClearance =
-    HkSpacing.bottomNav +
-    kHomePilotFabHeight +
-    kHomePilotFloatingActionButtonBottomInset;
-const double kHomePilotSnackBarHorizontalMargin = HkSpacing.gutter;
-const double kHomePilotSnackBarBottomSpacing = HkSpacing.sm;
 const Duration kToastDuration = Duration(seconds: 2);
 const Duration kActionToastDuration = Duration(seconds: 3);
 const Duration kErrorToastDuration = Duration(seconds: 4);
@@ -285,7 +278,6 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showToast(
   required Widget content,
   SnackBarAction? action,
   HkToastSeverity severity = HkToastSeverity.normal,
-  double? bottomOffset,
   Duration? duration,
 }) {
   final tone = severity == HkToastSeverity.error
@@ -305,7 +297,6 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showToast(
             : (severity == HkToastSeverity.error
                   ? kErrorToastDuration
                   : kToastDuration)),
-    bottomOffset: bottomOffset,
   );
   return FeedbackCoordinator.instance.show(context, item);
 }
@@ -336,8 +327,6 @@ showTaskMovedToTrashSnackBar(
   FutureOr<void> Function()? onFinalize,
   String? actionLabel,
   Duration duration = const Duration(seconds: 5),
-  double? bottomOffset,
-  bool reserveFloatingActionButton = false,
 }) {
   return showMovedToTrashSnackBar(
     context,
@@ -346,8 +335,6 @@ showTaskMovedToTrashSnackBar(
     onFinalize: onFinalize,
     actionLabel: actionLabel,
     duration: duration,
-    bottomOffset: bottomOffset,
-    reserveFloatingActionButton: reserveFloatingActionButton,
   );
 }
 
@@ -359,16 +346,7 @@ showMovedToTrashSnackBar(
   FutureOr<void> Function()? onFinalize,
   String? actionLabel,
   Duration duration = const Duration(seconds: 5),
-  double? bottomOffset,
-  bool reserveFloatingActionButton = false,
 }) {
-  final safeBottom = MediaQuery.maybeOf(context)?.viewPadding.bottom ?? 0;
-  final keyboardBottom = MediaQuery.maybeOf(context)?.viewInsets.bottom ?? 0;
-  final mediaSize = MediaQuery.maybeOf(context)?.size;
-  final reserveTrailing =
-      reserveFloatingActionButton && mediaSize != null && mediaSize.width >= 560
-      ? kHomePilotFabWidth + HkSpacing.gutter
-      : 0.0;
   return _showUndoSnackBar(
     context,
     content: content,
@@ -376,14 +354,6 @@ showMovedToTrashSnackBar(
     onFinalize: onFinalize,
     actionLabel: actionLabel ?? context.l10n.undo,
     duration: duration,
-    margin: EdgeInsetsDirectional.fromSTEB(
-      kHomePilotSnackBarHorizontalMargin,
-      0,
-      kHomePilotSnackBarHorizontalMargin + reserveTrailing,
-      bottomOffset ??
-          math.max(safeBottom, keyboardBottom) +
-              kHomePilotSnackBarBottomSpacing,
-    ),
     batchItemType: 'trash',
     batchMessageBuilder: (count) => count == 1
         ? Text(context.l10n.taskMovedToTrash)
@@ -842,7 +812,21 @@ class ProductivityBackdrop extends StatelessWidget {
           ],
         ),
       ),
-      child: child,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              scheme.surface,
+              scheme.surface.withValues(alpha: 0.76),
+              scheme.surface.withValues(alpha: 0),
+            ],
+            stops: const [0, 0.08, 0.22],
+          ),
+        ),
+        child: child,
+      ),
     );
   }
 }

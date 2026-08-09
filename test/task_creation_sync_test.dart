@@ -138,7 +138,6 @@ void main() {
           'user_id': 'user-1',
           'task_type': 'inspection',
           'required_materials_json': '[]',
-          'dependency_plan_ids_json': '[]',
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),
           'revision': 1,

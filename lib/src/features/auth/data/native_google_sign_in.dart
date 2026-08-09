@@ -11,6 +11,7 @@ class GoogleSignInTokens {
 
 abstract interface class GoogleSignInGateway {
   Future<GoogleSignInTokens> signIn();
+  Future<GoogleSignInTokens?> reauthenticateSilently();
   Future<void> signOut();
   Future<void> disconnect();
 }
@@ -53,23 +54,47 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
     try {
       await _initialize();
       final account = await _googleSignIn.authenticate();
-      final idToken = account.authentication.idToken;
-      final authorizationClient = account.authorizationClient;
-      final authorization =
-          await authorizationClient.authorizationForScopes(
-            _authorizationScopes,
-          ) ??
-          await authorizationClient.authorizeScopes(_authorizationScopes);
-      final accessToken = authorization.accessToken;
-      if (idToken == null) {
-        throw const SupabaseFailure(
-          kind: SupabaseFailureKind.authentication,
-          message: 'Google did not return the ID token required to sign in.',
-        );
-      }
-      return GoogleSignInTokens(idToken: idToken, accessToken: accessToken);
+      return _tokensFor(account);
     } on GoogleSignInException catch (error) {
-      throw switch (error.code) {
+      throw _mapGoogleException(error);
+    }
+  }
+
+  @override
+  Future<GoogleSignInTokens?> reauthenticateSilently() async {
+    try {
+      await _initialize();
+      final attempt = _googleSignIn.attemptLightweightAuthentication();
+      if (attempt == null) return null;
+      final account = await attempt;
+      return account == null ? null : _tokensFor(account);
+    } on GoogleSignInException catch (error) {
+      throw _mapGoogleException(error);
+    }
+  }
+
+  Future<GoogleSignInTokens> _tokensFor(GoogleSignInAccount account) async {
+    final idToken = account.authentication.idToken;
+    final authorizationClient = account.authorizationClient;
+    final authorization =
+        await authorizationClient.authorizationForScopes(
+          _authorizationScopes,
+        ) ??
+        await authorizationClient.authorizeScopes(_authorizationScopes);
+    if (idToken == null) {
+      throw const SupabaseFailure(
+        kind: SupabaseFailureKind.authentication,
+        message: 'Google did not return the ID token required to sign in.',
+      );
+    }
+    return GoogleSignInTokens(
+      idToken: idToken,
+      accessToken: authorization.accessToken,
+    );
+  }
+
+  SupabaseFailure _mapGoogleException(GoogleSignInException error) =>
+      switch (error.code) {
         GoogleSignInExceptionCode.canceled ||
         GoogleSignInExceptionCode.interrupted => const SupabaseFailure(
           kind: SupabaseFailureKind.cancelled,
@@ -86,8 +111,6 @@ class NativeGoogleSignInGateway implements GoogleSignInGateway {
           message: 'Google sign-in failed.',
         ),
       };
-    }
-  }
 
   @override
   Future<void> signOut() async {

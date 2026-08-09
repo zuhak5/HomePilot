@@ -179,7 +179,12 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
 
-      final tokens = await _googleSignIn.signIn();
+      // Reuse the already authenticated Google identity when the platform can
+      // refresh it without account selection. Fall back to the interactive
+      // flow only when lightweight reauthentication is unavailable.
+      final tokens =
+          await _googleSignIn.reauthenticateSilently() ??
+          await _googleSignIn.signIn();
       final reauthenticated = await _client.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: tokens.idToken,

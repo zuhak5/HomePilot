@@ -1546,9 +1546,6 @@ class AppLocalizationsAr extends AppLocalizations {
   String get includePhotos => 'تضمين الصور';
 
   @override
-  String get dependencyTasks => 'مهام الاعتماد';
-
-  @override
   String get nicknameUpdated => 'تم تحديث الاسم.';
 
   @override
@@ -1753,9 +1750,6 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get materials => 'المواد';
-
-  @override
-  String get dependsOn => 'يعتمد على';
 
   @override
   String get moveOrCopy => 'نقل أو نسخ';
@@ -3231,23 +3225,6 @@ class AppLocalizationsAr extends AppLocalizations {
       'اضبط الوتيرة والأولوية والتاريخ التالي للعمل المتكرر.';
 
   @override
-  String get noDependenciesSelected => 'لم يتم تحديد أي تبعيات';
-
-  @override
-  String selectedCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count محدد',
-      many: '$count محددًا',
-      few: '$count محددة',
-      two: 'اثنان محددان',
-      one: 'واحد محدد',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get petTypeDog => 'كلب';
 
   @override
@@ -3301,7 +3278,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get deleteAccountBody =>
-      'سيؤدي هذا إلى حذف حساب HomePilot وبيانات السحابة والوسائط الخاصة وبيانات التطبيق المحلية والنسخ الاحتياطية الخاصة بالتطبيق نهائيًا. سيُطلب منك المصادقة عبر Google مرة أخرى.';
+      'سيؤدي هذا إلى حذف حساب HomePilot وبيانات السحابة والوسائط الخاصة وبيانات التطبيق المحلية والنسخ الاحتياطية الخاصة بالتطبيق نهائيًا. سيتحقق HomePilot من حساب Google المسجل، ولن يعرض أداة اختيار الحساب إلا إذا تعذر التحقق تلقائيًا.';
 
   @override
   String get accountDeleted => 'تم حذف الحساب.';
@@ -3660,6 +3637,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get permissionUsingCurrentLocation => 'يُستخدم الموقع الحالي';
+
+  @override
+  String get weatherCurrentLocationShort => 'الحالي';
 
   @override
   String get permissionLocationAccessRequired =>

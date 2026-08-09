@@ -16,12 +16,14 @@ class PermissionSetupScreen extends ConsumerStatefulWidget {
   const PermissionSetupScreen({
     this.source = PermissionEducationSource.settings,
     this.onChooseLocationManually,
+    this.sponsoredContent,
     super.key,
   });
 
   final PermissionEducationSource source;
   final Future<HomeLocation?> Function(BuildContext context)?
   onChooseLocationManually;
+  final Widget? sponsoredContent;
 
   @override
   ConsumerState<PermissionSetupScreen> createState() =>
@@ -89,6 +91,7 @@ class _PermissionSetupScreenState extends ConsumerState<PermissionSetupScreen>
             child: ListView(
               padding: const EdgeInsets.all(HkSpacing.gutter),
               children: [
+                if (widget.sponsoredContent case final content?) ...[content],
                 Text(
                   context.l10n.permissionSetupSubtitle,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(

@@ -358,6 +358,15 @@ class PointDebitResult {
   final Map<String, dynamic>? metadata;
 }
 
+class InsufficientPointsException implements Exception {
+  const InsufficientPointsException({required this.balance});
+
+  final int balance;
+
+  @override
+  String toString() => 'INSUFFICIENT_POINTS';
+}
+
 abstract class MonetizationRepository {
   const MonetizationRepository();
 
@@ -443,19 +452,35 @@ class SupabaseMonetizationRepository extends MonetizationRepository {
 
   @override
   Future<PointDebitResult> createAsset(Map<String, dynamic> operation) async {
-    final data = await client.rpc<Map<String, dynamic>>(
-      'create_asset_with_point_debit',
-      params: {'p_operation': operation},
-    );
-    return PointDebitResult.fromJson(data);
+    return _createWithPointDebit('create_asset_with_point_debit', operation);
   }
 
   @override
   Future<PointDebitResult> createTask(Map<String, dynamic> operation) async {
-    final data = await client.rpc<Map<String, dynamic>>(
-      'create_task_with_point_debit',
-      params: {'p_operation': operation},
-    );
+    return _createWithPointDebit('create_task_with_point_debit', operation);
+  }
+
+  Future<PointDebitResult> _createWithPointDebit(
+    String functionName,
+    Map<String, dynamic> operation,
+  ) async {
+    late final Map<String, dynamic> data;
+    try {
+      data = await client.rpc<Map<String, dynamic>>(
+        functionName,
+        params: {'p_operation': operation},
+      );
+    } on PostgrestException catch (error) {
+      // Compatibility with the immediately previous backend. Build 44 returns
+      // this expected business state as HTTP 200 to avoid warning/error noise.
+      if (error.message == 'INSUFFICIENT_POINTS') {
+        throw const InsufficientPointsException(balance: 0);
+      }
+      rethrow;
+    }
+    if (data['status'] == 'insufficient_points') {
+      throw InsufficientPointsException(balance: data['balance'] as int? ?? 0);
+    }
     return PointDebitResult.fromJson(data);
   }
 
@@ -734,12 +759,18 @@ class HomePilotAdUnits {
       'assets' ||
       'room_detail' ||
       'thing_detail' ||
+      'task_detail' ||
       'maintenance' ||
       'calendar' ||
       'more' ||
       'search' ||
       'notifications' ||
-      'statistics' => 'ca-app-pub-5274007212820203/5230396474',
+      'statistics' ||
+      'account' ||
+      'backup' ||
+      'trash' ||
+      'settings' ||
+      'permission_setup' => 'ca-app-pub-5274007212820203/5230396474',
       _ => throw ArgumentError.value(placement, 'placement'),
     };
   }
@@ -1651,6 +1682,7 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
   Widget build(BuildContext context) {
     return HkNativeAdSlotFrame(
       collapsed: !_enabled || _failed,
+      bottomSpacing: HkSpacing.sm,
       child: _displayLease != null
           ? ClipRRect(
               borderRadius: BorderRadius.circular(18),
@@ -1957,7 +1989,7 @@ class _HkNativeAdCardState extends ConsumerState<HkNativeAdCard> {
   }
 
   Map<String, Object> _nativePalette(ColorScheme scheme) => {
-    'backgroundColor': _nativeHex(scheme.surface),
+    'backgroundColor': _nativeHex(scheme.surfaceContainerLowest),
     'borderColor': _nativeHex(scheme.outlineVariant),
     'headlineColor': _nativeHex(scheme.onSurface),
     'bodyColor': _nativeHex(scheme.onSurfaceVariant),
@@ -2004,7 +2036,7 @@ class HkNativeAdLoadingSkeleton extends StatelessWidget {
       child: DecoratedBox(
         key: const ValueKey('native-ad-loading-skeleton'),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow,
+          color: scheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: scheme.outlineVariant),
         ),
@@ -2093,20 +2125,27 @@ class HkNativeAdSlotFrame extends StatelessWidget {
   const HkNativeAdSlotFrame({
     required this.collapsed,
     required this.child,
+    this.bottomSpacing = 0,
     super.key,
   });
 
   final bool collapsed;
   final Widget child;
+  final double bottomSpacing;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedSize(
       duration: const Duration(milliseconds: 180),
       child: SizedBox(
-        height: collapsed ? 0 : 112,
+        height: collapsed ? 0 : 112 + bottomSpacing,
         width: double.infinity,
-        child: collapsed ? null : child,
+        child: collapsed
+            ? null
+            : Padding(
+                padding: EdgeInsets.only(bottom: bottomSpacing),
+                child: child,
+              ),
       ),
     );
   }
@@ -2179,18 +2218,52 @@ class HkPointsPill extends ConsumerWidget {
                       Container(
                         width: starCircleSize,
                         height: starCircleSize,
-                        decoration: const BoxDecoration(
-                          // spec: badge_green_bg #ECFDF5
-                          color: HkColors.headerBadgeGreenBg,
-                          shape: BoxShape.circle,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              scheme.primaryContainer,
+                              Color.alphaBlend(
+                                scheme.tertiary.withValues(alpha: 0.13),
+                                scheme.primaryContainer,
+                              ),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(HkRadii.md),
+                          border: Border.all(
+                            color: scheme.primary.withValues(alpha: 0.14),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: scheme.primary.withValues(alpha: 0.12),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
                         ),
                         alignment: Alignment.center,
-                        child: const Icon(
-                          Symbols.star_rounded,
-                          size: 18,
-                          // spec: badge_green_icon #10B981 solid filled
-                          color: HkColors.headerBadgeGreenIcon,
-                          fill: 1,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            Icon(
+                              Symbols.star_rounded,
+                              size: 19,
+                              color: scheme.primary,
+                              fill: 1,
+                            ),
+                            PositionedDirectional(
+                              end: 3,
+                              top: 3,
+                              child: Icon(
+                                Symbols.auto_awesome_rounded,
+                                size: 7,
+                                color: scheme.tertiary,
+                                fill: 1,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       SizedBox(width: innerGap),

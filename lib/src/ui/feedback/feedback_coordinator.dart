@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:homepilot/src/core/services/feedback_messenger.dart';
 import 'package:homepilot/src/core/utils/redacting_logger.dart';
@@ -20,6 +18,8 @@ class FeedbackCoordinator extends ChangeNotifier {
   bool _accessibleNavigation = false;
   ScaffoldMessengerState? _messenger;
   BuildContext? _lastContext;
+  OverlayEntry? _overlayEntry;
+  Timer? _overlayTimer;
 
   HkFeedbackItem? get activeItem => _activeItem;
   int get pendingCount => _pendingQueue.length;
@@ -147,6 +147,21 @@ class FeedbackCoordinator extends ChangeNotifier {
     BuildContext context,
     HkFeedbackItem item,
   ) {
+    final modalOverlay = ModalRoute.of(context) is PopupRoute
+        ? Overlay.maybeOf(context, rootOverlay: true)
+        : null;
+    if (modalOverlay != null) {
+      _messenger = null;
+      _lastContext = context;
+      _accessibleNavigation =
+          MediaQuery.maybeOf(context)?.accessibleNavigation ?? false;
+      _activeItem = item;
+      _actionExecuted = false;
+      notifyListeners();
+      _presentActiveOverlay(modalOverlay, item);
+      return null;
+    }
+
     final messenger =
         ScaffoldMessenger.maybeOf(context) ??
         (hkRootScaffoldMessengerKey.currentState?.mounted == true
@@ -172,6 +187,7 @@ class FeedbackCoordinator extends ChangeNotifier {
     HkFeedbackItem item,
     BuildContext context,
   ) {
+    _removeOverlayPresentation();
     final token = ++_currentToken;
     messenger.hideCurrentSnackBar();
     final controller = messenger.showSnackBar(
@@ -213,37 +229,99 @@ class FeedbackCoordinator extends ChangeNotifier {
     return controller;
   }
 
+  void _presentActiveOverlay(OverlayState overlay, HkFeedbackItem item) {
+    _removeOverlayPresentation();
+    final token = ++_currentToken;
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) {
+        final media = MediaQuery.maybeOf(context);
+        final safeBottom = media?.viewPadding.bottom ?? 0;
+        final keyboardBottom = media?.viewInsets.bottom ?? 0;
+        final obstruction = keyboardBottom > safeBottom
+            ? keyboardBottom
+            : safeBottom;
+        return PositionedDirectional(
+          key: const ValueKey('feedback-modal-overlay'),
+          start: 16,
+          end: 16,
+          bottom: obstruction + 12,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, child) => Transform.translate(
+              offset: Offset(0, 12 * (1 - value)),
+              child: Opacity(opacity: value, child: child),
+            ),
+            child: AnimatedBuilder(
+              animation: this,
+              builder: (context, child) {
+                final current = _currentToken == token ? _activeItem : null;
+                final rendered = current ?? item;
+                return HkFeedbackBar(
+                  item: rendered,
+                  message: rendered.message,
+                  onAction: rendered.actionLabel == null ? null : handleAction,
+                  onDismiss: dismissCurrent,
+                  showCountdown:
+                      !_accessibleNavigation &&
+                      rendered.mode == HkFeedbackMode.undoable,
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+    _overlayEntry = entry;
+    overlay.insert(entry);
+    _restartOverlayTimeout(item);
+  }
+
+  void _restartOverlayTimeout(HkFeedbackItem item) {
+    _overlayTimer?.cancel();
+    _overlayTimer = null;
+    if (_accessibleNavigation && item.actionLabel != null) return;
+    _overlayTimer = Timer(item.duration, () {
+      if (identical(_activeItem, item) || _activeItem?.id == item.id) {
+        unawaited(_dismissCurrent(HkFeedbackDismissReason.timeout));
+      }
+    });
+  }
+
+  void _removeOverlayPresentation() {
+    _overlayTimer?.cancel();
+    _overlayTimer = null;
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
   EdgeInsetsGeometry _resolvedMargin(
     BuildContext context,
     HkFeedbackItem item,
   ) {
     if (item.margin != null) return item.margin!;
-    final media = MediaQuery.maybeOf(context);
-    final safeBottom = media?.viewPadding.bottom ?? 0;
-    final keyboardBottom = media?.viewInsets.bottom ?? 0;
-    final reserveTrailing =
-        item.reserveFloatingActionButton && (media?.size.width ?? 0) >= 560
-        ? 152.0
-        : 0.0;
-    return EdgeInsetsDirectional.fromSTEB(
-      16,
-      0,
-      16 + reserveTrailing,
-      item.bottomOffset ?? math.max(safeBottom, keyboardBottom) + 12,
-    );
+    // Floating SnackBars are positioned by Scaffold above its real bottom
+    // navigation, persistent footer, FAB, safe area, and keyboard-adjusted
+    // content bounds. Keep this margin to the visual gap only; duplicating
+    // those insets here pushes feedback unnecessarily high.
+    return const EdgeInsetsDirectional.fromSTEB(16, 0, 16, 12);
   }
 
   void _refreshActivePresentation() {
     final item = _activeItem;
-    final messenger = _messenger;
     final context = _lastContext;
-    if (item == null ||
-        messenger == null ||
-        !messenger.mounted ||
-        context == null ||
-        !context.mounted) {
+    if (item == null || context == null || !context.mounted) {
       return;
     }
+    if (_overlayEntry != null) {
+      final overlay = Overlay.maybeOf(context, rootOverlay: true);
+      if (overlay != null) _presentActiveOverlay(overlay, item);
+      return;
+    }
+    final messenger = _messenger;
+    if (messenger == null || !messenger.mounted) return;
     _presentActive(messenger, item, context);
   }
 
@@ -253,6 +331,7 @@ class FeedbackCoordinator extends ChangeNotifier {
     final item = _activeItem!;
     _activeItem = null;
     _currentToken++;
+    _removeOverlayPresentation();
     _messenger?.hideCurrentSnackBar();
     notifyListeners();
 
@@ -305,6 +384,7 @@ class FeedbackCoordinator extends ChangeNotifier {
     final item = _activeItem!;
     _activeItem = null;
     _currentToken++;
+    _removeOverlayPresentation();
     _messenger?.hideCurrentSnackBar();
     notifyListeners();
     try {
@@ -329,6 +409,7 @@ class FeedbackCoordinator extends ChangeNotifier {
     _actionExecuted = true;
     _activeItem = null;
     _currentToken++;
+    _removeOverlayPresentation();
     if (item.onFinalize != null) {
       unawaited(
         Future<void>.sync(item.onFinalize!).catchError((Object error) {
@@ -378,6 +459,7 @@ class FeedbackCoordinator extends ChangeNotifier {
     _pendingQueue.clear();
     _actionExecuted = false;
     _accessibleNavigation = false;
+    _removeOverlayPresentation();
     _messenger = null;
     _lastContext = null;
     try {

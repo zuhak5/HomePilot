@@ -37,6 +37,12 @@ Invoked when user enables "Precise reminder alarms" in Reminder Settings or task
 1. Explains Android special access requirement
 2. Actions: Allow precise timing / Use approximate timing
 
+Android does not expose exact alarms through the same runtime-permission dialog
+used for location or notifications. It is special app access, so HomePilot's
+explanation is followed by the system **Alarms & reminders** settings surface;
+its appearance and whether it is a page or app list vary by Android/OEM. This is
+why HomePilot does not request it automatically at startup.
+
 ---
 
 ## Privacy Boundary

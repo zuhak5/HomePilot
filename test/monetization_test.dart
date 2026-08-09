@@ -451,18 +451,52 @@ void main() {
       'assets',
       'room_detail',
       'thing_detail',
+      'task_detail',
       'maintenance',
       'calendar',
       'more',
       'search',
       'notifications',
       'statistics',
+      'account',
+      'backup',
+      'trash',
+      'settings',
+      'permission_setup',
     ];
     for (final placement in secondaryPlacements) {
       expect(production.native(placement), contains('5230396474'));
     }
     expect(() => production.native('typo'), throwsArgumentError);
   });
+
+  testWidgets(
+    'native ad loading surface follows content cards in both themes',
+    (tester) async {
+      for (final brightness in Brightness.values) {
+        final scheme = ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: brightness,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(colorScheme: scheme),
+            home: const Scaffold(body: HkNativeAdLoadingSkeleton()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final decoration =
+            tester
+                    .widget<DecoratedBox>(
+                      find.byKey(const ValueKey('native-ad-loading-skeleton')),
+                    )
+                    .decoration
+                as BoxDecoration;
+        expect(decoration.color, scheme.surfaceContainerLowest);
+      }
+    },
+  );
 
   test('pending reward claim preserves recovery metadata', () {
     final claim = PendingRewardClaim.fromJson({
@@ -500,13 +534,13 @@ void main() {
       await store.save('task_user_asset', {
         'operation_id': 'operation-1',
         'title': 'Inspect seals',
-        'dependencies': ['a', 'b'],
+        'materials': ['cloth', 'sealant'],
       });
 
       expect(await store.load('task_user_asset'), {
         'operation_id': 'operation-1',
         'title': 'Inspect seals',
-        'dependencies': ['a', 'b'],
+        'materials': ['cloth', 'sealant'],
       });
       await store.clear('task_user_asset');
       verify(
@@ -541,7 +575,7 @@ void main() {
     });
   });
 
-  testWidgets('native slot reserves 112dp then collapses after no-fill', (
+  testWidgets('native slot owns visible spacing and removes it after no-fill', (
     tester,
   ) async {
     Future<void> pumpSlot(bool collapsed) async {
@@ -550,6 +584,7 @@ void main() {
           home: Scaffold(
             body: HkNativeAdSlotFrame(
               collapsed: collapsed,
+              bottomSpacing: 12,
               child: const ColoredBox(color: Colors.green),
             ),
           ),
@@ -559,7 +594,7 @@ void main() {
     }
 
     await pumpSlot(false);
-    expect(tester.getSize(find.byType(HkNativeAdSlotFrame)).height, 112);
+    expect(tester.getSize(find.byType(HkNativeAdSlotFrame)).height, 124);
     await pumpSlot(true);
     expect(tester.getSize(find.byType(HkNativeAdSlotFrame)).height, 0);
   });

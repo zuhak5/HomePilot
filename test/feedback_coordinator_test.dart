@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homepilot/src/ui/feedback/feedback_coordinator.dart';
+import 'package:homepilot/src/ui/feedback/feedback_bar.dart';
 import 'package:homepilot/src/ui/feedback/feedback_model.dart';
 
 void main() {
@@ -204,6 +205,117 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('After failure'), findsOneWidget);
     coordinator.resetForTesting();
+  });
+
+  testWidgets('floating feedback keeps one visual gap above a Scaffold FAB', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    late BuildContext context;
+    const fabKey = ValueKey('feedback-test-fab');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (value) {
+              context = value;
+              return const SizedBox.expand();
+            },
+          ),
+          bottomNavigationBar: const SizedBox(height: 80),
+          floatingActionButton: FloatingActionButton(
+            key: fabKey,
+            onPressed: () {},
+          ),
+        ),
+      ),
+    );
+
+    coordinator.show(
+      context,
+      const HkFeedbackItem(id: 'fab', message: Text('Above the FAB')),
+    );
+    await tester.pumpAndSettle();
+
+    final feedback = tester.getRect(find.byType(HkFeedbackBar));
+    final fab = tester.getRect(find.byKey(fabKey));
+    expect(feedback.bottom, lessThan(fab.top));
+    expect(fab.top - feedback.bottom, closeTo(12, 1));
+  });
+
+  testWidgets(
+    'floating feedback keeps one visual gap above bottom navigation',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      late BuildContext context;
+      const navigationKey = ValueKey('feedback-test-navigation');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (value) {
+                context = value;
+                return const SizedBox.expand();
+              },
+            ),
+            bottomNavigationBar: const SizedBox(key: navigationKey, height: 80),
+          ),
+        ),
+      );
+
+      coordinator.show(
+        context,
+        const HkFeedbackItem(
+          id: 'navigation',
+          message: Text('Above navigation'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final feedback = tester.getRect(find.byType(HkFeedbackBar));
+      final navigation = tester.getRect(find.byKey(navigationKey));
+      expect(feedback.bottom, lessThan(navigation.top));
+      expect(navigation.top - feedback.bottom, closeTo(12, 1));
+    },
+  );
+
+  testWidgets('feedback triggered in a modal sheet stays above its barrier', (
+    tester,
+  ) async {
+    final pageContext = await pumpHarness(tester);
+    late BuildContext sheetContext;
+
+    showModalBottomSheet<void>(
+      context: pageContext,
+      builder: (context) {
+        sheetContext = context;
+        return const SizedBox(height: 320, child: Text('Open sheet'));
+      },
+    );
+    await tester.pumpAndSettle();
+
+    coordinator.show(
+      sheetContext,
+      const HkFeedbackItem(
+        id: 'modal-feedback',
+        message: Text('Visible above sheet'),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('feedback-modal-overlay')),
+      findsOneWidget,
+    );
+    expect(find.text('Visible above sheet'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('feedback-dismiss')));
+    await tester.pumpAndSettle();
+    expect(coordinator.activeItem, isNull);
+    expect(find.text('Visible above sheet'), findsNothing);
   });
 
   test('task, asset, room, and area Trash flows all expose restoration', () {

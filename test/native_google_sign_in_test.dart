@@ -127,4 +127,51 @@ void main() {
       ['email', 'profile'],
     ]);
   });
+
+  test(
+    'lightweight reauthentication reuses the existing Google account',
+    () async {
+      final account = _MockGoogleSignInAccount();
+      final authorizationClient = _MockGoogleSignInAuthorizationClient();
+      when(
+        () => googleSignIn.initialize(serverClientId: serverClientId),
+      ).thenAnswer((_) async {});
+      when(
+        () => googleSignIn.attemptLightweightAuthentication(),
+      ).thenAnswer((_) => Future.value(account));
+      when(() => account.authentication).thenReturn(
+        const GoogleSignInAuthentication(idToken: 'silent-id-token'),
+      );
+      when(() => account.authorizationClient).thenReturn(authorizationClient);
+      when(() => authorizationClient.authorizationForScopes(any())).thenAnswer(
+        (_) async => const GoogleSignInClientAuthorization(
+          accessToken: 'silent-access-token',
+        ),
+      );
+
+      final tokens = await gateway.reauthenticateSilently();
+
+      expect(tokens?.idToken, 'silent-id-token');
+      expect(tokens?.accessToken, 'silent-access-token');
+      verify(() => googleSignIn.attemptLightweightAuthentication()).called(1);
+      verifyNever(() => googleSignIn.authenticate());
+      verifyNever(() => authorizationClient.authorizeScopes(any()));
+    },
+  );
+
+  test(
+    'lightweight reauthentication reports unavailable without a chooser',
+    () async {
+      when(
+        () => googleSignIn.initialize(serverClientId: serverClientId),
+      ).thenAnswer((_) async {});
+      when(
+        () => googleSignIn.attemptLightweightAuthentication(),
+      ).thenReturn(null);
+
+      expect(await gateway.reauthenticateSilently(), isNull);
+
+      verifyNever(() => googleSignIn.authenticate());
+    },
+  );
 }

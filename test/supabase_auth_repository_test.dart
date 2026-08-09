@@ -36,9 +36,12 @@ class _MemoryAccountDeletionRecoveryStore
 
 class _FakeGoogleSignInGateway implements GoogleSignInGateway {
   Object? signInError;
+  Object? silentReauthenticationError;
   Object? signOutError;
   Object? disconnectError;
+  GoogleSignInTokens? silentReauthenticationTokens;
   var signInCalls = 0;
+  var silentReauthenticationCalls = 0;
   var signOutCalls = 0;
   var disconnectCalls = 0;
 
@@ -53,6 +56,16 @@ class _FakeGoogleSignInGateway implements GoogleSignInGateway {
       idToken: 'google-id-token',
       accessToken: 'google-access-token',
     );
+  }
+
+  @override
+  Future<GoogleSignInTokens?> reauthenticateSilently() async {
+    silentReauthenticationCalls++;
+    final error = silentReauthenticationError;
+    if (error != null) {
+      throw error;
+    }
+    return silentReauthenticationTokens;
   }
 
   @override
@@ -301,6 +314,10 @@ void main() {
       when(
         () => auth.signOut(scope: SignOutScope.local),
       ).thenAnswer((_) async {});
+      googleSignIn.silentReauthenticationTokens = const GoogleSignInTokens(
+        idToken: 'google-id-token',
+        accessToken: 'google-access-token',
+      );
       String? preparedUserId;
       String? cancelledUserId;
       String? cleanedUserId;
@@ -316,7 +333,8 @@ void main() {
 
       await repository.deleteAccount();
 
-      expect(googleSignIn.signInCalls, 1);
+      expect(googleSignIn.silentReauthenticationCalls, 1);
+      expect(googleSignIn.signInCalls, 0);
       expect(preparedUserId, 'user-1');
       expect(cancelledUserId, isNull);
       expect(cleanedUserId, 'user-1');

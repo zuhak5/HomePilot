@@ -215,8 +215,6 @@ class MaintenancePlanMetadata extends Table {
   IntColumn get estimatedDurationMinutes => integer().nullable()();
   TextColumn get requiredMaterialsJson =>
       text().withDefault(const Constant('[]'))();
-  TextColumn get dependencyPlanIdsJson =>
-      text().withDefault(const Constant('[]'))();
   TextColumn get reminderRecommendation => text().nullable()();
   IntColumn get sortOrder => integer().nullable()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -490,7 +488,7 @@ class AppDatabase extends _$AppDatabase {
 
   static const databaseName = 'homepilot';
   static const databaseFileName = '$databaseName.sqlite';
-  static const currentSchemaVersion = 24;
+  static const currentSchemaVersion = 25;
   static const _sqliteBusyTimeoutMs = 8000;
   static const _startupRecoveryAttempts = 5;
 
@@ -612,6 +610,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 24) {
         await _upgradeToV24(m);
+      }
+      if (from < 25) {
+        await _upgradeToV25();
       }
     },
     beforeOpen: (details) async {
@@ -1119,6 +1120,18 @@ WHERE entity IN ('maintenance_session', 'maintenance_session_task')
 
   Future<void> _upgradeToV24(Migrator m) async {
     await m.createTable(notificationReconciliationRequests);
+  }
+
+  Future<void> _upgradeToV25() async {
+    if (await _hasColumn(
+      'maintenance_plan_metadata',
+      'dependency_plan_ids_json',
+    )) {
+      await customStatement(
+        'ALTER TABLE maintenance_plan_metadata '
+        'DROP COLUMN dependency_plan_ids_json',
+      );
+    }
   }
 
   Future<void> _dropLegacyAiSyncTriggers() async {

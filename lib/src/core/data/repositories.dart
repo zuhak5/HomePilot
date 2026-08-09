@@ -1643,9 +1643,6 @@ class DriftMaintenanceRepository
             requiredMaterialsJson: Value(
               jsonEncode(metadata.requiredMaterials),
             ),
-            dependencyPlanIdsJson: Value(
-              jsonEncode(metadata.dependencyPlanIds),
-            ),
             reminderRecommendation: Value(
               _blankToNull(metadata.reminderRecommendation),
             ),
@@ -3316,9 +3313,6 @@ domain.MaintenancePlan _planFromRow(
           estimatedDurationMinutes: metadata.estimatedDurationMinutes,
           requiredMaterials: _stringListFromJson(
             metadata.requiredMaterialsJson,
-          ),
-          dependencyPlanIds: _stringListFromJson(
-            metadata.dependencyPlanIdsJson,
           ),
           reminderRecommendation: metadata.reminderRecommendation,
           sortOrder: metadata.sortOrder,

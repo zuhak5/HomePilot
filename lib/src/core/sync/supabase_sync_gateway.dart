@@ -434,18 +434,12 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
         for (final entry in keyValues.entries) {
           deleteQuery = deleteQuery.eq(entry.key, entry.value);
         }
-        Map<String, dynamic>? deleted;
-        try {
-          deleted = await _withDataTimeout(
-            () async => deleteQuery
-                .eq('revision', expectedRevision)
-                .select(record.spec.selectClause)
-                .maybeSingle(),
-          );
-        } on PostgrestException catch (error) {
-          if (error.code != 'PGRST116') rethrow;
-          deleted = null;
-        }
+        final deletedRows = await _withDataTimeout(
+          () async => deleteQuery
+              .eq('revision', expectedRevision)
+              .select(record.spec.selectClause),
+        );
+        final deleted = _zeroOrOneRemoteRow(deletedRows);
         if (deleted != null) {
           final cleanupPath = _remoteMediaPath(
             record.spec,
@@ -512,18 +506,12 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
       for (final entry in keyValues.entries) {
         query = query.eq(entry.key, entry.value);
       }
-      Map<String, dynamic>? response;
-      try {
-        response = await _withDataTimeout(
-          () async => query
-              .eq('revision', expectedRevision)
-              .select(record.spec.selectClause)
-              .maybeSingle(),
-        );
-      } on PostgrestException catch (error) {
-        if (error.code != 'PGRST116') rethrow;
-        response = null;
-      }
+      final responseRows = await _withDataTimeout(
+        () async => query
+            .eq('revision', expectedRevision)
+            .select(record.spec.selectClause),
+      );
+      final response = _zeroOrOneRemoteRow(responseRows);
       if (response == null) {
         return RemoteWriteResult.conflict(
           await fetch(
@@ -692,7 +680,8 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
       for (final entry in keyValues.entries) {
         query = query.eq(entry.key, entry.value);
       }
-      final response = await _withDataTimeout(() async => query.maybeSingle());
+      final responseRows = await _withDataTimeout(() async => query);
+      final response = _zeroOrOneRemoteRow(responseRows);
       if (response == null) return null;
       var record = SyncRecord.fromRemote(
         spec,
@@ -849,6 +838,14 @@ class SupabaseSyncGateway implements RealtimeSyncSource {
         .timeout(_storageTimeout);
     return _MediaUpload(objectPath: objectPath);
   }
+}
+
+Map<String, dynamic>? _zeroOrOneRemoteRow(List<Map<String, dynamic>> rows) {
+  if (rows.isEmpty) return null;
+  if (rows.length != 1) {
+    throw StateError('A uniquely filtered cloud write returned multiple rows.');
+  }
+  return Map<String, dynamic>.from(rows.single);
 }
 
 Future<T> _withDataTimeout<T>(Future<T> Function() action) {

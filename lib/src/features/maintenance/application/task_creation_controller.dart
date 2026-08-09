@@ -107,7 +107,6 @@ class TaskCreationController extends ValueNotifier<TaskCreationState> {
               if (metadata.estimatedDurationMinutes != null)
                 'estimated_duration_minutes': metadata.estimatedDurationMinutes,
               'required_materials': metadata.requiredMaterials,
-              'dependency_plan_ids': metadata.dependencyPlanIds,
               if (metadata.reminderRecommendation != null &&
                   metadata.reminderRecommendation!.trim().isNotEmpty)
                 'reminder_recommendation': metadata.reminderRecommendation!
@@ -144,6 +143,18 @@ class TaskCreationController extends ValueNotifier<TaskCreationState> {
         final PointDebitResult result;
         try {
           result = await monetizationRepo.createTask(requestPayload);
+        } on InsufficientPointsException {
+          await operationStore.saveOperation(
+            operation.copyWith(
+              state: TaskCreationOperationState.permanentRejected,
+              lastErrorCode: 'insufficient_points',
+              lastErrorMessage: 'INSUFFICIENT_POINTS',
+            ),
+          );
+          throw TaskCreationFailure(
+            'INSUFFICIENT_POINTS',
+            code: TaskCreationFailureCode.insufficientPoints,
+          );
         } catch (e) {
           // CTR-001: Timeout or network failure -> mark outcomeUnknown
           final updatedOp = operation.copyWith(

@@ -4,6 +4,28 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## 1.5.0 (Build 44) — 2026-08-09
+
+### Fixed and Improved
+
+- **App-wide feedback placement**: Removed duplicated route-specific bottom-navigation, safe-area, keyboard, footer, and floating-action offsets. Floating feedback now relies on the active Scaffold's real obstruction geometry and keeps one consistent 12-dp visual gap, preventing Trash Undo and ordinary toasts from appearing unnecessarily high.
+- **Modal-safe feedback**: Feedback triggered from bottom sheets, including rewarded-ad actions in the points wallet, now uses the root overlay so it remains visible and interactive above the sheet and modal barrier while preserving the shared queue, Undo, timeout, and dismissal rules.
+- **Settings polish and resilience**: Added clearer card and subsection hierarchy, consistent icon surfaces, inset permission and preference groups, responsive capability status rows, and a full-width exact-alarm recovery layout whose status and Fix action no longer squeeze the title. Added narrow 180%-text English/Arabic coverage and refreshed both Settings golden baselines.
+- **Dashboard and task-list polish**: Moved the current-location indicator beside the weather area, redesigned the points star badge, added proper trailing breathing room, retained the useful sticky dashboard header with a blurred graded boundary, and replaced abrupt page-top color seams with smooth theme-aware gradients.
+- **Consistent native ads**: Native cards and their loading state now use the same lowest card surface as task/content cards in light and dark themes. Every routed application content screen declares a collapsible native-ad placement, including task detail, Inbox, capability setup, and all Tools destinations; splash, authentication, system permission UI, dialogs, and sheets remain ad-free.
+- **Less confusing secure account deletion**: Recent same-account Google verification now tries the already signed-in account silently and opens Google's account chooser only when lightweight verification is unavailable. Same-user validation and the protected deletion/recovery protocol remain mandatory.
+- **Quiet optimistic conflict recovery**: Revision-mismatched cloud updates and deletes now use zero-or-one list responses, preventing expected PostgREST 406 warning entries while preserving canonical fetch and conflict reconciliation.
+- **Visible zero-points recovery**: A depleted wallet is now returned by creation RPCs as a structured HTTP-success business result instead of a PostgREST 400 warning. Task creation preserves the exact rejection reason, and task/item editors keep an accessible recovery dialog visible with the current balance, retryable rewarded-ad action, and explicit unavailable, dismissed, rejected, or verification-pending state.
+- **Hosted Supabase Advisor gate**: Added a protected, read-only GitHub Actions audit of both security and performance Advisors. It uploads sanitized evidence and fails on every error, warning, or information finding except the explicitly retained `Leaked Password Protection Disabled` notice.
+- **Task dependencies retired**: Removed the user-facing Dependency tasks feature from editors, details, offline drafts, domain models, render fingerprints, Drift and Supabase schemas, creation RPCs, sync DTOs, localization, tests, and documentation. The separate completion-outbox predecessor remains in place for safe causal synchronization.
+
+### Compatibility and evidence boundaries
+
+- Drift advances from schema 24 to 25 and preserves tasks and remaining metadata while discarding only retired dependency links. The backup ZIP format is unchanged; restored schema-24 databases migrate on open.
+- The forward Supabase migration `20260809193000_remove_task_dependencies.sql` must be applied before releasing this client. It preserves RLS, point authority, creation idempotency, and the unrelated completion causal-order contract while normalizing insufficient points into a non-writing structured business result.
+- No Android permission declaration, permission request timing, notification scheduling behavior, external dependency, or ad-consent gate changed.
+- Automated coverage verifies Scaffold and modal-overlay feedback geometry, responsive English/Arabic Settings layouts, native-ad placement/palette contracts, same-account deletion fallback behavior, zero-row sync handling, structured insufficient-points behavior with no entity write, persistent shortage recovery UI, and schema-24-to-25 task preservation. Physical-device confirmation is still required for OEM navigation modes, keyboard transitions, TalkBack, Google chooser behavior, rewarded-ad availability/verification, and final light/dark ad and layout rendering.
+
 ## 1.5.0 (Build 43) — 2026-08-09
 
 ### Fixed and Improved
