@@ -1,0 +1,115 @@
+name: Validate Google Backend and Release Contracts
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: homepilot-google-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deno-security:
+    name: Deno SSV tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.3"
+      - name: Verify Deno formatting
+        run: >-
+          deno fmt --check
+          supabase/functions/admob-ssv-handler/index.ts
+          supabase/functions/admob-ssv-handler/index_test.ts
+          supabase/functions/delete-account/index.ts
+          supabase/functions/delete-account/index_test.ts
+          supabase/functions/account-deletion-status/index.ts
+          supabase/functions/account-deletion-status/index_test.ts
+      - name: Type-check locked Edge Functions
+        run: |
+          cd supabase/functions/admob-ssv-handler && deno install --frozen && cd ../../..
+          cd supabase/functions/delete-account && deno install --frozen && cd ../../..
+          cd supabase/functions/account-deletion-status && deno install --frozen && cd ../../..
+          cd supabase/functions/admob-ssv-handler && deno check --frozen index.ts && cd ../../..
+          cd supabase/functions/delete-account && deno check --frozen index.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno check --frozen index.ts && cd ../../..
+      - name: Test locked Edge Functions
+        run: |
+          cd supabase/functions/admob-ssv-handler && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
+          cd supabase/functions/delete-account && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
+
+  web-and-static-contracts:
+    name: Google contract/static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Test account deletion browser flow
+        run: >-
+          node --test
+          tool/account-deletion-site.test.mjs
+          tool/release-workflows.test.mjs
+      - name: Validate Google and Android contracts
+        run: node tool/validate_google_release_contracts.mjs
+
+  database-security:
+    name: Supabase database tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Start local Supabase stack
+        run: npx supabase start
+      - name: Lint database schema
+        run: npm run supabase:lint
+      - name: Run database authorization and monetization tests
+        run: npm run supabase:test
+      - name: Stop local Supabase stack
+        if: always()
+        run: npx supabase stop --no-backup
+
+  hosted-advisors:
+    name: Hosted Supabase Advisors
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Query hosted security and performance advisors
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ADVISOR_REPORT: artifacts/supabase-advisors.json
+        run: node tool/audit_supabase_advisors.mjs
+      - name: Upload sanitized advisor evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: supabase-advisors-${{ github.sha }}
+          path: artifacts/supabase-advisors.json
+          if-no-files-found: error
+          retention-days: 14

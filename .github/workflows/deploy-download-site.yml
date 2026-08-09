@@ -1,0 +1,295 @@
+name: Deploy VersionDeck
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "download-site/**"
+      - "tool/build_account_deletion_site.mjs"
+      - "tool/build_versiondeck_site.mjs"
+      - "tool/generate_versiondeck_manifest.mjs"
+      - "tool/versiondeck_apk_verifier.mjs"
+      - "tool/versiondeck.test.mjs"
+      - "tool/build-status.test.mjs"
+      - "tool/account-deletion-site.test.mjs"
+      - "tool/validate_versiondeck.mjs"
+      - "docs/versiondeck-release-runbook.md"
+      - "docs/versiondeck-live-build-status.md"
+      - ".github/workflows/deploy-download-site.yml"
+  workflow_run:
+    workflows:
+      - Build Production APK
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      production_run_id:
+        description: "Successful Build Production APK run ID for the current main SHA"
+        required: true
+        type: string
+
+concurrency:
+  group: versiondeck-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
+  cancel-in-progress: false
+
+jobs:
+  verify-pr:
+    name: Validate VersionDeck changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check download-site/app.js
+          node --check download-site/account-deletion.js
+          node --check download-site/build-status.js
+          node --check download-site/cache-policy.js
+          node --check download-site/manifest-schema.js
+          node --check download-site/relative-time.js
+          node --check download-site/sw.js
+          node --check tool/build_versiondeck_site.mjs
+          node --check tool/build_account_deletion_site.mjs
+          node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/versiondeck_apk_verifier.mjs
+          node --check tool/validate_versiondeck.mjs
+          node --check tool/versiondeck.test.mjs
+          node --check tool/build-status.test.mjs
+          node --check tool/account-deletion-site.test.mjs
+
+      - name: Run VersionDeck tests
+        run: node --test tool/versiondeck.test.mjs tool/build-status.test.mjs tool/account-deletion-site.test.mjs
+
+      - name: Build and validate static pull-request artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(node -p "require('./download-site/releases.json').generatorCommit")"
+          node tool/build_versiondeck_site.mjs \
+            --source download-site \
+            --output .versiondeck-site \
+            --revision "$revision" \
+            --allow-inert-account-deletion-config true
+          node tool/validate_versiondeck.mjs .versiondeck-site
+
+  build:
+    name: Verify and build VersionDeck
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+
+    steps:
+      - name: Check out current VersionDeck source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify deployment source
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "$remote_sha"
+
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "### VersionDeck source" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`$source_sha\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            upstream_sha="${{ github.event.workflow_run.head_sha }}"
+            upstream_url="${{ github.event.workflow_run.html_url }}"
+            test -n "$upstream_sha"
+            test "$upstream_sha" = "$source_sha"
+            echo "- Production build commit: \`$upstream_sha\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Production build run: $upstream_url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            production_run_id="${{ inputs.production_run_id }}"
+            test -n "$production_run_id"
+            run_api="repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}"
+            run_name="$(gh api "$run_api" --jq '.name')"
+            run_conclusion="$(gh api "$run_api" --jq '.conclusion')"
+            run_event="$(gh api "$run_api" --jq '.event')"
+            run_branch="$(gh api "$run_api" --jq '.head_branch')"
+            run_sha="$(gh api "$run_api" --jq '.head_sha')"
+            run_url="$(gh api "$run_api" --jq '.html_url')"
+            test "$run_name" = "Build Production APK"
+            test "$run_conclusion" = "success"
+            test "$run_event" = "workflow_dispatch"
+            test "$run_branch" = "main"
+            test "$run_sha" = "$source_sha"
+            echo "- Production build commit: \`$run_sha\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Production build run: $run_url" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Verify release-verification tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh --version
+          test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f \
+            \( -name apksigner -o -name apksigner.bat \) -print -quit | grep .
+          find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f \
+            \( -name aapt2 -o -name aapt2.exe \) -print -quit | grep .
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check download-site/app.js
+          node --check download-site/account-deletion.js
+          node --check download-site/build-status.js
+          node --check download-site/cache-policy.js
+          node --check download-site/manifest-schema.js
+          node --check download-site/relative-time.js
+          node --check download-site/sw.js
+          node --check tool/build_versiondeck_site.mjs
+          node --check tool/build_account_deletion_site.mjs
+          node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/versiondeck_apk_verifier.mjs
+          node --check tool/validate_versiondeck.mjs
+          node --check tool/versiondeck.test.mjs
+          node --check tool/build-status.test.mjs
+          node --check tool/account-deletion-site.test.mjs
+
+      - name: Run VersionDeck tests
+        run: node --test tool/versiondeck.test.mjs tool/build-status.test.mjs tool/account-deletion-site.test.mjs
+
+      - name: Generate independently verified release manifest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSIONDECK_GENERATOR_COMMIT: ${{ steps.source.outputs.sha }}
+        run: node tool/generate_versiondeck_manifest.mjs
+
+      - name: Build revisioned VersionDeck artifact
+        env:
+          PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          ACCOUNT_DELETION_SITE_URL: ${{ vars.ACCOUNT_DELETION_SITE_URL }}
+        run: >-
+          node tool/build_versiondeck_site.mjs
+          --source download-site
+          --output .versiondeck-site
+          --revision ${{ steps.source.outputs.sha }}
+
+      - name: Validate generated site
+        run: node tool/validate_versiondeck.mjs .versiondeck-site
+
+      - name: Summarize generated manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const manifest = require("./.versiondeck-site/releases.json");
+          console.log("### Verified releases");
+          console.log(`- Schema: ${manifest.schemaVersion}`);
+          console.log(`- Verified entries: ${manifest.releases.length}`);
+          console.log(`- Latest stable ID: ${manifest.latestStableReleaseId ?? "none"}`);
+          console.log(`- Latest prerelease ID: ${manifest.latestPrereleaseReleaseId ?? "none"}`);
+          NODE
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: versiondeck-validation-${{ github.run_id }}
+          path: |
+            download-site/releases.json
+            .versiondeck-diagnostics/release-diagnostics.json
+            .versiondeck-site/asset-manifest.json
+            .versiondeck-site/build-info.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload VersionDeck artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .versiondeck-site
+
+  deploy:
+    name: Publish VersionDeck
+    if: ${{ needs.build.result == 'success' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+        with:
+          timeout: "1200000"
+
+      - name: Verify public VersionDeck manifest
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_url="${PAGE_URL%/}/releases.json"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error \
+              --header 'Cache-Control: no-cache' \
+              "$manifest_url?deployment=${GITHUB_RUN_ID}-${attempt}" \
+              --output /tmp/releases.json; then
+              if EXPECTED_SOURCE_SHA="$EXPECTED_SOURCE_SHA" node - <<'NODE'
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync("/tmp/releases.json", "utf8"));
+          if (manifest.schemaVersion !== 2) process.exit(1);
+          if (manifest.repository !== "zuhak5/HomePilot") process.exit(1);
+          if (manifest.generatorCommit !== process.env.EXPECTED_SOURCE_SHA) process.exit(1);
+          NODE
+              then
+                echo "Public VersionDeck manifest matches source $EXPECTED_SOURCE_SHA."
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "Public VersionDeck did not expose the expected manifest." >&2
+          exit 1

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-04T13:00:00.000Z",
+  "generatorCommit": "e5bbddc98fcc2f0843008f8c0152c3b967492a1b",
+  "repository": "zuhak5/HomePilot",
+  "package": {
+    "name": "com.homepilot.app",
+    "signerCertificateSha256": "3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51"
+  },
+  "latestStableReleaseId": null,
+  "latestPrereleaseReleaseId": null,
+  "releases": []
+}

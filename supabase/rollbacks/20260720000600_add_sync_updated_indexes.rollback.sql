@@ -1,0 +1,16 @@
+drop index concurrently if exists public.areas_user_updated_idx;
+drop index concurrently if exists public.rooms_user_updated_idx;
+drop index concurrently if exists public.assets_user_updated_idx;
+drop index concurrently if exists public.asset_photos_user_updated_idx;
+drop index concurrently if exists public.asset_tags_user_updated_idx;
+drop index concurrently if exists public.device_details_user_updated_idx;
+drop index concurrently if exists public.pet_details_user_updated_idx;
+drop index concurrently if exists public.plant_details_user_updated_idx;
+drop index concurrently if exists public.safety_details_user_updated_idx;
+drop index concurrently if exists public.tags_user_updated_idx;
+drop index concurrently if exists public.maintenance_plans_user_updated_idx;
+drop index concurrently if exists public.maintenance_plan_metadata_user_updated_idx;
+drop index concurrently if exists public.maintenance_records_user_updated_idx;
+drop index concurrently if exists public.notification_inbox_user_updated_idx;
+drop index concurrently if exists public.user_settings_user_updated_idx;
+drop index concurrently if exists public.streaks_user_updated_idx;
