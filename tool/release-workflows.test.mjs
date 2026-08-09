@@ -119,6 +119,31 @@ test('backend gate covers formatting, type safety, functions, and database', asy
   assert.match(workflow, /if: always\(\)/);
 });
 
+test('Supabase migration deployment requires exact main and explicit production confirmation', async () => {
+  const workflow = await read(
+    '.github/workflows/deploy-supabase-migrations.yml',
+  );
+  assert.match(workflow, /name: Deploy Supabase Migrations/);
+  assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+  assert.match(workflow, /test "\$INPUT_SOURCE_SHA" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /test "\$INPUT_SOURCE_SHA" = "\$remote_sha"/);
+  assert.match(workflow, /apply-pending-migrations/);
+  assert.match(workflow, /test "\$INPUT_PROJECT_REF" = "\$expected_ref"/);
+  assert.match(workflow, /environment: production/);
+  assert.match(
+    workflow,
+    /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/,
+  );
+  assert.match(
+    workflow,
+    /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/,
+  );
+  const dryRun = workflow.indexOf('name: Dry-run pending migrations');
+  const apply = workflow.indexOf('name: Apply pending migrations');
+  assert.ok(dryRun >= 0 && apply > dryRun);
+  assert.doesNotMatch(workflow, /--include-all|migration repair|include-seed/);
+});
+
 test('release evidence collector rejects analytics and unsafe manifests', async () => {
   const collector = await read('tool/collect_android_release_evidence.ps1');
   assert.match(collector, /prodReleaseRuntimeClasspath/);
