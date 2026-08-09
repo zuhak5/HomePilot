@@ -31,9 +31,10 @@ class FlutterDevicePermissionGateway implements DevicePermissionGateway {
   Future<DeviceLocationAccessState> checkLocationAccess() async {
     final delegate = _delegate;
     if (delegate is AppLocationAccessGateway) {
+      final locDelegate = delegate as AppLocationAccessGateway;
       final values = await Future.wait<Object?>([
-        delegate.checkLocationPermission(),
-        delegate.isLocationServiceEnabled(),
+        locDelegate.checkLocationPermission(),
+        locDelegate.isLocationServiceEnabled(),
       ]);
       return DeviceLocationAccessState(
         permissionState: values[0]! as AppPermissionState,

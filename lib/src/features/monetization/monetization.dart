@@ -1004,7 +1004,7 @@ class HomePilotAdsService {
           currentGeneration: _runtime.generation,
           formatAllowed: allows(format),
         )) {
-          disposeActiveAd?.call();
+          disposeActiveAd();
           finish(failed: true);
           return RewardShowResult.unavailable;
         }
@@ -1051,7 +1051,7 @@ class HomePilotAdsService {
           currentGeneration: _runtime.generation,
           formatAllowed: allows(format),
         )) {
-          disposeActiveAd?.call();
+          disposeActiveAd();
           finish(failed: true);
           return RewardShowResult.unavailable;
         }
