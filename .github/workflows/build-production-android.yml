@@ -235,29 +235,13 @@ jobs:
             throw "Could not determine whether Git tag $env:RELEASE_TAG exists."
           }
 
-          $EncodedTag = [System.Uri]::EscapeDataString($env:RELEASE_TAG)
-          try {
-            $ReleaseResponse = Invoke-WebRequest `
-              -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$EncodedTag" `
-              -Headers @{
-                Accept = "application/vnd.github+json"
-                Authorization = "Bearer $env:GH_TOKEN"
-                "X-GitHub-Api-Version" = "2022-11-28"
-              }
-            # If we get here, it succeeded, meaning the release exists!
+          $PreviousPreference = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          & gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $ReleaseExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $PreviousPreference
+          if ($ReleaseExitCode -eq 0) {
             throw "GitHub Release already exists: $env:RELEASE_TAG"
-          } catch [System.Net.WebException] {
-            if ($_.Exception.Response.StatusCode -ne [System.Net.HttpStatusCode]::NotFound) {
-              throw "Could not determine whether GitHub Release $env:RELEASE_TAG exists (HTTP $($_.Exception.Response.StatusCode))."
-            }
-            # 404 NotFound is expected, do nothing
-          } catch {
-            # In powershell 7+ it might not be a WebException
-            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
-              # 404 expected
-            } else {
-              throw "Could not determine whether GitHub Release $env:RELEASE_TAG exists: $_"
-            }
           }
 
       - name: Create production configuration
