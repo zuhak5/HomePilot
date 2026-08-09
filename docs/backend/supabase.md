@@ -129,8 +129,36 @@ These tests validate handler contracts with fakes. They do not deploy the functi
 
 Deploy migrations and functions through an explicit reviewed process with environment confirmation, dry-run or diff evidence where available, backward compatibility, and rollback/forward-fix planning. Mobile and backend release order must be documented when contracts change.
 
+## Hosted Advisors evidence
+
+The manual [`audit-supabase-advisors.yml`](../../.github/workflows/audit-supabase-advisors.yml)
+workflow queries both hosted Management API advisor families with a protected
+`SUPABASE_ACCESS_TOKEN` that has `advisors_read`; the project comes from
+`SUPABASE_PROJECT_REF` or the host in `SUPABASE_URL`. It uploads a sanitized
+JSON report and fails closed on missing credentials, an unavailable/changed API,
+an invalid response, or any security/performance finding at any level. The sole
+allowed finding is the exact title `Leaked Password Protection Disabled`; every
+other error, warning, or information finding fails the workflow. The Management
+API advisor endpoints are experimental/deprecated, so an endpoint removal is an
+explicit operator-visible failure rather than a false clean result.
+The final-SHA manual dispatch of
+[`validate-google-backend.yml`](../../.github/workflows/validate-google-backend.yml)
+runs the same audit as a protected job, so Android release gates cannot reuse a
+backend run that omitted hosted Advisor evidence.
+
 For public browser deletion, apply [`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql), then deploy and verify compatible `delete-account` and `account-deletion-status` functions before publishing an enabled deletion page or compatible mobile client. `delete-account` requires `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; status recovery requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep all of them only in protected function configuration. Then verify both production Pages preflights, intentionally disallowed origins, native no-`Origin` requests in a controlled test, ambiguous-response recovery with one unchanged key, and one disposable-account deletion. Evidence must record project/function identity, deployment version, HTTP status and CORS headers, strict receipt validation, Auth removal, Postgres cleanup, and private `user-media` cleanup without recording tokens, recovery keys, or direct user identifiers.
 
 ## Review checklist
 
 For every backend change, review authentication, RLS, cross-user denial, indexes, constraints, idempotency, synchronization, offline retry, privacy, account deletion, backup, tests, observability, deployment order, and compatibility with the previous mobile release.
+
+Before releasing Build 44 clients, apply
+[`20260809193000_remove_task_dependencies.sql`](../../supabase/migrations/20260809193000_remove_task_dependencies.sql).
+It replaces both point-debited creation implementations without the retired
+dependency metadata and then drops that column. It does not remove or alter the
+completion outbox's separate `depends_on_operation_id` causal-order field. The
+same forward migration changes a depleted wallet from a raised
+`INSUFFICIENT_POINTS` exception into a structured `insufficient_points` JSON
+result before any entity, operation, wallet, or ledger write. This prevents an
+expected product decision from appearing as a PostgREST HTTP 400 warning while
+keeping point authority and atomicity on the server.

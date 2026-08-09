@@ -476,7 +476,6 @@
   "copy": "نسخ",
   "includeRelatedTasks": "تضمين المهام المرتبطة",
   "includePhotos": "تضمين الصور",
-  "dependencyTasks": "مهام الاعتماد",
   "nicknameUpdated": "تم تحديث الاسم.",
   "nickname": "الاسم",
   "clear": "مسح",
@@ -527,7 +526,6 @@
   "reminder": "التذكير",
   "duration": "المدة",
   "materials": "المواد",
-  "dependsOn": "يعتمد على",
   "moveOrCopy": "نقل أو نسخ",
   "relatedTasks": "المهام المرتبطة",
   "noTasksYet": "لا توجد مهام بعد",
@@ -876,8 +874,6 @@
   "changeItemTypeWarning": "لن يتم حفظ الحقول الخاصة بالنوع السابق.",
   "maintenancePlansNeedItemBody": "تحتاج خطط الصيانة إلى عنصر لكي يتمكن HomePilot من تنظيم العمل.",
   "planEditorIntro": "اضبط الوتيرة والأولوية والتاريخ التالي للعمل المتكرر.",
-  "noDependenciesSelected": "لم يتم تحديد أي تبعيات",
-  "selectedCount": "{count, plural, =1{واحد محدد} =2{اثنان محددان} few{{count} محددة} many{{count} محددًا} other{{count} محدد}}",
   "petTypeDog": "كلب",
   "petTypeCat": "قطة",
   "petTypeFish": "سمكة",
@@ -895,7 +891,7 @@
   "fishTypeKoi": "كوي",
   "accountSignOutBody": "يتطلب HomePilot تسجيل الدخول عبر Google. ستعود إلى شاشة تسجيل الدخول حتى تصادق من جديد.",
   "signedOut": "تم تسجيل الخروج.",
-  "deleteAccountBody": "سيؤدي هذا إلى حذف حساب HomePilot وبيانات السحابة والوسائط الخاصة وبيانات التطبيق المحلية والنسخ الاحتياطية الخاصة بالتطبيق نهائيًا. سيُطلب منك المصادقة عبر Google مرة أخرى.",
+  "deleteAccountBody": "سيؤدي هذا إلى حذف حساب HomePilot وبيانات السحابة والوسائط الخاصة وبيانات التطبيق المحلية والنسخ الاحتياطية الخاصة بالتطبيق نهائيًا. سيتحقق HomePilot من حساب Google المسجل، ولن يعرض أداة اختيار الحساب إلا إذا تعذر التحقق تلقائيًا.",
   "accountDeleted": "تم حذف الحساب.",
   "accountDeletionFailed": "تعذر إكمال حذف الحساب. سجّل الدخول مرة أخرى ثم أعد المحاولة.",
   "notSet": "غير محدد",
@@ -1009,6 +1005,7 @@
   ,"permissionSelectedArea": "المنطقة المحددة: {area}"
   ,"@permissionSelectedArea": {"placeholders": {"area": {"type": "String"}}}
   ,"permissionUsingCurrentLocation": "يُستخدم الموقع الحالي"
+  ,"weatherCurrentLocationShort": "الحالي"
   ,"permissionLocationAccessRequired": "يلزم إذن الموقع لاستخدام الموقع الحالي."
   ,"permissionNotificationAccessRequired": "يلزم إذن إشعارات أندرويد لتذكيرات الجهاز."
   ,"permissionDeviceRemindersOff": "تذكيرات الجهاز متوقفة في HomePilot."

@@ -2367,6 +2367,83 @@ void main() {
     expect(settings.timeOfDayThemeEnabledValue, isTrue);
   });
 
+  testWidgets(
+    'Settings permission recovery stays readable on narrow scaled English and Arabic layouts',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      for (final locale in const [Locale('en'), Locale('ar')]) {
+        final language = AppLanguage.values.byName(locale.languageCode);
+        final l10n = lookupAppLocalizations(locale);
+        final settings = FakeSettingsRepository(
+          onboardingCompletedValue: true,
+          appLanguageValue: language,
+          appLanguageExplicitValue: true,
+        );
+        settings.notificationPreferencesValue = const NotificationPreferences(
+          preferExactReminders: true,
+        );
+        final permissions = FakeAppPermissionGateway(
+          states: {
+            AppPermissionKind.location: AppPermissionState.denied,
+            AppPermissionKind.notifications: AppPermissionState.granted,
+            AppPermissionKind.exactAlarms: AppPermissionState.denied,
+          },
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: _testOverrides(settings, permissionGateway: permissions),
+            child: MaterialApp(
+              locale: locale,
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              theme: testLightTheme(),
+              home: const SettingsScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final recovery = find.byKey(const ValueKey('exact-reminders-recovery'));
+        await tester.scrollUntilVisible(
+          recovery,
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+
+        final title = find.descendant(
+          of: recovery,
+          matching: find.text(l10n.preciseReminderAlarms),
+        );
+        final status = find.descendant(
+          of: recovery,
+          matching: find.text(l10n.approximateTiming),
+        );
+        expect(title, findsOneWidget);
+        expect(status, findsOneWidget);
+        expect(
+          tester.getTopLeft(status).dy,
+          greaterThan(tester.getTopLeft(title).dy),
+        );
+        expect(
+          Directionality.of(tester.element(recovery)),
+          locale.languageCode == 'ar' ? TextDirection.rtl : TextDirection.ltr,
+        );
+        expect(tester.takeException(), isNull);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await settings.close();
+      }
+    },
+  );
+
   testWidgets('Account nickname can be saved and cleared from the host', (
     tester,
   ) async {
@@ -5575,6 +5652,72 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'point shortage dialog remains visible when rewards are unavailable',
+    (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            monetizationConfigProvider.overrideWithValue(
+              const AsyncData(MonetizationConfig.failClosed()),
+            ),
+            pointWalletProvider.overrideWithValue(
+              AsyncData(
+                PointWallet(
+                  balance: 0,
+                  timeZone: 'Asia/Baghdad',
+                  updatedAt: DateTime.utc(2026, 8, 9),
+                ),
+              ),
+            ),
+            monetizationRepositoryProvider.overrideWithValue(null),
+          ],
+          child: MaterialApp(
+            locale: const Locale('en'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            theme: testLightTheme(),
+            home: Scaffold(
+              body: Consumer(
+                builder: (context, ref, _) => FilledButton(
+                  onPressed: () => showPointShortageDialog(
+                    context,
+                    ref,
+                    attemptedAction: 'task',
+                  ),
+                  child: const Text('Create task'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Create task'));
+      await tester.pumpAndSettle();
+      expect(find.text('You need 1 point'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('point-shortage-watch-ad')));
+      await tester.pump();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.text('Point rewards are temporarily unavailable.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('point-shortage-status')),
+        findsOneWidget,
+      );
+      expect(find.text('Keep editing'), findsOneWidget);
+    },
+  );
 }
 
 void _expectContainedHero(WidgetTester tester, ValueKey<String> key) {

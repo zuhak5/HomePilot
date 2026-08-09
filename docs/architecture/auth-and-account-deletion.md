@@ -52,7 +52,9 @@ Account deletion must remove the authenticated cloud account and associated priv
 ## In-app deletion sequence
 
 1. Explain consequences and obtain explicit confirmation.
-2. Require recent Google reauthentication.
+2. Require recent Google reauthentication. First attempt lightweight
+   verification of the already signed-in Google account; show Google's account
+   chooser only when lightweight verification is unavailable.
 3. Verify that the reauthenticated Google identity corresponds to the currently signed-in Supabase user.
 4. Suspend normal synchronization and new account-scoped writes.
 5. Generate a cryptographically secure 32-byte recovery key, encode it as 43-character unpadded base64url, and persist it with the expected Supabase user ID in secure platform storage before the destructive request.

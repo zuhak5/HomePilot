@@ -8,6 +8,86 @@ import 'package:homepilot/src/core/database/app_database.dart';
 import 'package:homepilot/src/core/domain/models.dart';
 
 void main() {
+  test(
+    'v25 retires task dependencies without removing tasks or metadata',
+    () async {
+      final file = File(
+        '${Directory.systemTemp.path}/homepilot_dependency_retirement_'
+        '${DateTime.now().microsecondsSinceEpoch}.sqlite',
+      );
+      var originalClosed = false;
+      final original = AppDatabase(executor: NativeDatabase(file));
+      AppDatabase? migrated;
+      try {
+        final assets = DriftAssetRepository(original);
+        final maintenance = DriftMaintenanceRepository(original);
+        await assets.saveArea(
+          id: 'dependency-retirement-area',
+          name: 'First Floor',
+          kind: AreaKind.indoor,
+          sortOrder: 0,
+        );
+        final roomId = await assets.saveRoom(
+          areaId: 'dependency-retirement-area',
+          name: 'Laundry',
+        );
+        final assetId = await assets.saveAsset(
+          name: 'Washer',
+          categoryId: 'category_general',
+          roomId: roomId,
+        );
+        final planId = await maintenance.savePlan(
+          assetId: assetId,
+          title: 'Clean filter',
+          recurrence: const RecurrenceRule(
+            interval: 1,
+            unit: RecurrenceUnit.months,
+          ),
+          priority: PriorityLevel.medium,
+          nextDueDate: DateTime.utc(2026, 9, 1),
+          healthGroup: HealthGroup.appliances,
+          metadata: const TaskMetadata(
+            taskType: 'cleaning',
+            requiredMaterials: ['Brush'],
+          ),
+        );
+
+        await original.customStatement(
+          "ALTER TABLE maintenance_plan_metadata ADD COLUMN "
+          "dependency_plan_ids_json TEXT NOT NULL DEFAULT '[]'",
+        );
+        await original.customStatement(
+          'UPDATE maintenance_plan_metadata '
+          "SET dependency_plan_ids_json = '[\"older-plan\"]' "
+          'WHERE plan_id = ?',
+          [planId],
+        );
+        await original.customStatement('PRAGMA user_version = 24');
+        await original.close();
+        originalClosed = true;
+
+        migrated = AppDatabase(executor: NativeDatabase(file));
+        await migrated.customSelect('SELECT 1').get();
+
+        final columns = await migrated
+            .customSelect('PRAGMA table_info(maintenance_plan_metadata)')
+            .get();
+        final task = await DriftMaintenanceRepository(migrated).getTask(planId);
+        expect(
+          columns.map((row) => row.read<String>('name')),
+          isNot(contains('dependency_plan_ids_json')),
+        );
+        expect(task?.plan.title, 'Clean filter');
+        expect(task?.plan.metadata?.taskType, 'cleaning');
+        expect(task?.plan.metadata?.requiredMaterials, ['Brush']);
+      } finally {
+        if (!originalClosed) await original.close();
+        await migrated?.close();
+        if (await file.exists()) await file.delete();
+      }
+    },
+  );
+
   test('v22 creates the device-local reminder schedule snapshot', () async {
     final file = File(
       '${Directory.systemTemp.path}/homepilot_reminder_schedule_migration_'

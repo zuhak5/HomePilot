@@ -2959,12 +2959,6 @@ abstract class AppLocalizations {
   /// **'Include photos'**
   String get includePhotos;
 
-  /// No description provided for @dependencyTasks.
-  ///
-  /// In en, this message translates to:
-  /// **'Dependency tasks'**
-  String get dependencyTasks;
-
   /// No description provided for @nicknameUpdated.
   ///
   /// In en, this message translates to:
@@ -3268,12 +3262,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Materials'**
   String get materials;
-
-  /// No description provided for @dependsOn.
-  ///
-  /// In en, this message translates to:
-  /// **'Depends on'**
-  String get dependsOn;
 
   /// No description provided for @moveOrCopy.
   ///
@@ -5368,18 +5356,6 @@ abstract class AppLocalizations {
   /// **'Set the cadence, priority, and next date for recurring work.'**
   String get planEditorIntro;
 
-  /// No description provided for @noDependenciesSelected.
-  ///
-  /// In en, this message translates to:
-  /// **'No dependencies selected'**
-  String get noDependenciesSelected;
-
-  /// No description provided for @selectedCount.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 selected} other{{count} selected}}'**
-  String selectedCount(int count);
-
   /// No description provided for @petTypeDog.
   ///
   /// In en, this message translates to:
@@ -5485,7 +5461,7 @@ abstract class AppLocalizations {
   /// No description provided for @deleteAccountBody.
   ///
   /// In en, this message translates to:
-  /// **'This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. You will be asked to authenticate with Google again.'**
+  /// **'This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. HomePilot will verify the signed-in Google account and only show Google\'\'s account chooser if silent verification is unavailable.'**
   String get deleteAccountBody;
 
   /// No description provided for @accountDeleted.
@@ -6081,6 +6057,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Using current location'**
   String get permissionUsingCurrentLocation;
+
+  /// No description provided for @weatherCurrentLocationShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Current'**
+  String get weatherCurrentLocationShort;
 
   /// No description provided for @permissionLocationAccessRequired.
   ///

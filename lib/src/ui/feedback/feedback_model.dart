@@ -34,9 +34,7 @@ class HkFeedbackItem {
     this.actionSuccessMessage,
     this.batchActionSuccessMessageBuilder,
     this.actionFailureMessage,
-    this.bottomOffset,
     this.margin,
-    this.reserveFloatingActionButton = false,
   });
 
   final String id;
@@ -57,9 +55,7 @@ class HkFeedbackItem {
   final Widget? actionSuccessMessage;
   final Widget Function(int count)? batchActionSuccessMessageBuilder;
   final Widget? actionFailureMessage;
-  final double? bottomOffset;
   final EdgeInsetsGeometry? margin;
-  final bool reserveFloatingActionButton;
 
   HkFeedbackItem copyWith({
     String? id,
@@ -80,9 +76,7 @@ class HkFeedbackItem {
     Widget? actionSuccessMessage,
     Widget Function(int count)? batchActionSuccessMessageBuilder,
     Widget? actionFailureMessage,
-    double? bottomOffset,
     EdgeInsetsGeometry? margin,
-    bool? reserveFloatingActionButton,
   }) {
     return HkFeedbackItem(
       id: id ?? this.id,
@@ -106,10 +100,7 @@ class HkFeedbackItem {
           batchActionSuccessMessageBuilder ??
           this.batchActionSuccessMessageBuilder,
       actionFailureMessage: actionFailureMessage ?? this.actionFailureMessage,
-      bottomOffset: bottomOffset ?? this.bottomOffset,
       margin: margin ?? this.margin,
-      reserveFloatingActionButton:
-          reserveFloatingActionButton ?? this.reserveFloatingActionButton,
     );
   }
 }

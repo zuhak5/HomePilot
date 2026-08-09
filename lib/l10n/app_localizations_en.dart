@@ -1535,9 +1535,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get includePhotos => 'Include photos';
 
   @override
-  String get dependencyTasks => 'Dependency tasks';
-
-  @override
   String get nicknameUpdated => 'Nickname updated.';
 
   @override
@@ -1742,9 +1739,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get materials => 'Materials';
-
-  @override
-  String get dependsOn => 'Depends on';
 
   @override
   String get moveOrCopy => 'Move or copy';
@@ -3164,20 +3158,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Set the cadence, priority, and next date for recurring work.';
 
   @override
-  String get noDependenciesSelected => 'No dependencies selected';
-
-  @override
-  String selectedCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count selected',
-      one: '1 selected',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get petTypeDog => 'Dog';
 
   @override
@@ -3231,7 +3211,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get deleteAccountBody =>
-      'This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. You will be asked to authenticate with Google again.';
+      'This permanently deletes your HomePilot account, cloud data, private media, local app data, and app-private backups. HomePilot will verify the signed-in Google account and only show Google\'s account chooser if silent verification is unavailable.';
 
   @override
   String get accountDeleted => 'Account deleted.';
@@ -3594,6 +3574,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get permissionUsingCurrentLocation => 'Using current location';
+
+  @override
+  String get weatherCurrentLocationShort => 'Current';
 
   @override
   String get permissionLocationAccessRequired =>

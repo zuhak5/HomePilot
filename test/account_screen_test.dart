@@ -189,7 +189,7 @@ void main() {
 
     expect(find.text('Delete HomePilot account?'), findsOneWidget);
     expect(
-      find.textContaining('authenticate with Google again'),
+      find.textContaining("only show Google's account chooser"),
       findsOneWidget,
     );
     expect(auth.deleteCalls, 0);

@@ -18,6 +18,11 @@ Ownership must remain tied to the authenticated account in cloud storage. Local 
 
 - Maintenance plans define title, recurrence, due state, and asset association.
 - Maintenance history records completion events.
+- Optional plan metadata includes task type, location label, estimated duration,
+  required materials, reminder guidance, and sort order. User-facing task-to-task
+  dependencies were retired in Drift schema 25 and the matching forward cloud
+  migration; this is distinct from causal predecessor metadata in the local
+  completion outbox.
 - Attachments and media can accompany relevant records.
 - Reminder snapshots represent the last scheduling decision used to reconcile local notifications.
 - Recommendation, timeline, health/readiness, warranty-alert, and streak models derive product insight from domain state.

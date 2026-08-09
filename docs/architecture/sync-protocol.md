@@ -55,7 +55,7 @@ The push worker:
 1. Selects eligible outbox work for the current account.
 2. Orders operations when dependencies require it.
 3. Sends an idempotent RPC or cloud mutation.
-4. Distinguishes success, duplicate success, conflict, retryable failure, authorization failure, and terminal validation failure. Zero-row mutation updates returning PostgREST `PGRST116` (HTTP 406) due to revision mismatch or missing remote records are classified as sync conflicts and trigger canonical remote fetching.
+4. Distinguishes success, duplicate success, conflict, retryable failure, authorization failure, and terminal validation failure. Optimistic updates and deletes request list responses, so a revision mismatch or missing row returns HTTP 200 with an empty list instead of a noisy PostgREST 406 object-response warning. The empty result is still a sync conflict and triggers canonical remote fetching; older `PGRST116` failures remain classified as conflicts.
 5. Updates local revisions/shadows and removes or resolves the outbox entry transactionally.
 6. Schedules targeted reconciliation when the cloud result differs from local assumptions.
 

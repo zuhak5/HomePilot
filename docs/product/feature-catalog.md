@@ -26,10 +26,12 @@ The current application exposes dashboard, assets, maintenance, calendar, search
 - Calendar integration and date-based filtering.
 - Recommendations, timelines, readiness or health summaries, streaks, and warranty alerts.
 - Local reminders that can be restored after reboot or application update.
+- Task metadata without task-to-task dependency links; that retired feature is
+  removed from editors, details, drafts, local/cloud schemas, and sync payloads.
 
 Maintenance completion is a synchronized, idempotent operation. UI changes must not bypass repository and synchronization semantics.
 
-Transient feedback has one protected queue. Passive messages and errors wait behind an active Undo opportunity, compatible operations batch only under an exact non-null key, Trash never batches with maintenance completion, and accessible-navigation mode keeps actionable Undo available until action or dismissal. See [`transient-feedback.md`](../development/transient-feedback.md).
+Transient feedback has one protected queue. Passive messages and errors wait behind an active Undo opportunity, compatible operations batch only under an exact non-null key, Trash never batches with maintenance completion, and accessible-navigation mode keeps actionable Undo available until action or dismissal. Floating feedback follows the active Scaffold's real navigation, footer, keyboard, and floating-action obstruction instead of route-specific offsets. See [`transient-feedback.md`](../development/transient-feedback.md).
 
 ## Search and insights
 
@@ -84,6 +86,8 @@ Backups exported outside the app are user-controlled sensitive files.
 - Point-gated creation through backend RPCs.
 - Server-side verification and replay-resistant reward claims.
 - Explicit unfinished drafts when charged creation cannot be completed offline.
+- A collapsible native-ad placement on every routed application content screen,
+  including task detail, Inbox, permission setup, and all Tools destinations.
 
 Ads and points must not become the authority for core domain data.
 

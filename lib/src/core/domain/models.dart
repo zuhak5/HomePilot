@@ -496,7 +496,6 @@ class TaskMetadata {
     this.locationLabel,
     this.estimatedDurationMinutes,
     this.requiredMaterials = const [],
-    this.dependencyPlanIds = const [],
     this.reminderRecommendation,
     this.sortOrder,
   });
@@ -505,7 +504,6 @@ class TaskMetadata {
   final String? locationLabel;
   final int? estimatedDurationMinutes;
   final List<String> requiredMaterials;
-  final List<String> dependencyPlanIds;
   final String? reminderRecommendation;
   final int? sortOrder;
 }

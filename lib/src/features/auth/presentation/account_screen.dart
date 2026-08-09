@@ -14,10 +14,16 @@ import '../domain/auth_repository.dart';
 import 'auth_providers.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
-  const AccountScreen({this.profile, this.onSaveNickname, super.key});
+  const AccountScreen({
+    this.profile,
+    this.onSaveNickname,
+    this.sponsoredContent,
+    super.key,
+  });
 
   final AppProfile? profile;
   final Future<void> Function(String? nickname)? onSaveNickname;
+  final Widget? sponsoredContent;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
@@ -55,7 +61,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         title: context.l10n.account,
                         onBack: () => context.pop(),
                       ),
-                      const SizedBox(height: HkSpacing.sm),
+                      if (widget.sponsoredContent case final content?) ...[
+                        const SizedBox(height: HkSpacing.sm),
+                        content,
+                      ] else
+                        const SizedBox(height: HkSpacing.sm),
                       _NicknameCard(
                         profile: widget.profile,
                         session: session,

@@ -97,7 +97,14 @@ Protected transient feedback, runtime ads, and native-ad schema:
 flutter test --no-pub test/feedback_coordinator_test.dart
 flutter test --no-pub test/monetization_test.dart
 flutter test --no-pub test/native_ad_factory_contract_test.dart
+flutter test --no-pub test/task_creation_insufficient_points_test.dart
+node --test tool/supabase-advisors.test.mjs
 ```
+
+The Supabase pgTAP monetization suite also proves that zero-balance task and
+asset creation return the structured shortage state and leave no target row
+behind. Widget coverage proves the shortage dialog remains visible with inline
+recovery status when rewarded ads are unavailable.
 
 Authentication/deletion client contracts:
 
@@ -157,7 +164,7 @@ Test the separation of user preference, OS/service/special-access state, schedul
 
 ### Startup and transient feedback
 
-Test the first Flutter owner, fixed splash lifetime across startup/failure branch changes, non-blank fallback, English and Arabic semantics, compact/large-text layout, interaction blocking, and no repeating animation under reduced motion. For feedback, test protected Undo ordering, exact-key batching, visible counts and deadline reset, LIFO Undo, FIFO finalization, exactly-once callbacks, accessible persistence, callback failure, directional layout, and all Trash restoration call sites.
+Test the first Flutter owner, fixed splash lifetime across startup/failure branch changes, non-blank fallback, English and Arabic semantics, compact/large-text layout, interaction blocking, and no repeating animation under reduced motion. For settings, exercise narrow English and Arabic layouts with scaled text, especially capability status and recovery actions. For feedback, test protected Undo ordering, exact-key batching, visible counts and deadline reset, LIFO Undo, FIFO finalization, exactly-once callbacks, accessible persistence, callback failure, directional layout, one visual gap above real Scaffold bottom navigation and floating actions, feedback above modal-sheet barriers, and all Trash restoration call sites. Schema migration coverage must preserve tasks and remaining metadata while removing retired dependency links. Native-ad contract coverage must enumerate every routed content placement and verify the shared light/dark surface palette. Sync gateway coverage guards the zero-row list-response path that avoids expected PostgREST 406 warnings without weakening revision checks.
 
 ## Test-writing rules
 

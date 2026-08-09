@@ -115,9 +115,29 @@ The Kotlin factory validates the version and all ten colors before mutating the 
 
 The factory registers headline, body, advertiser, icon, call-to-action, and AdChoices views before calling `setNativeAd`. Optional body, advertiser, call-to-action, and icon assets are cleared and hidden when absent. Provider-owned creative assets are not recolored. A Flutter theme identity change releases both displayed and in-flight native ads and requests one replacement; Android `values` and `values-night` colors are a safe fallback rather than the primary in-app theme authority.
 
+Every routed application content screen declares a native-ad placement,
+including task detail, Inbox, capability setup, and all Tools destinations. The
+shared slot collapses without a gap when platform, lifecycle, consent,
+configuration, initialization, route visibility, or presentation-suppression
+gates are not satisfied. Splash/bootstrap frames, Google authentication,
+system permission UI, dialogs, and modal sheets are not ad placements. Native
+card and loading surfaces use the same theme-derived lowest card surface as
+ordinary content cards in both light and dark themes.
+
 ## Point-debited creation and offline behavior
 
 A point-gated task or asset creation uses one authenticated, idempotent backend RPC. The transaction checks configuration and wallet state, debits the wallet, creates the target rows, records the operation and ledger entry, and returns the authoritative result—or commits none of those steps.
+
+A wallet below the required charge is an expected business outcome, not a
+transport failure. Both creation RPCs return HTTP success with
+`status: insufficient_points`, the authoritative balance, a zero charge, and no
+entity, operation, wallet, or ledger mutation. The Flutter repository maps that
+payload (and the immediately previous backend's legacy exception during rollout)
+to a typed shortage. Task creation persists the attempt as permanently rejected
+instead of outcome-unknown, and task/item editors keep a modal recovery surface
+visible until the user chooses to keep editing. Reward loading, no-fill,
+dismissal, rejection, and server-verification-pending states are shown inline so
+an unavailable ad never leaves the user waiting without an explanation.
 
 When the server cannot confirm a charged operation, the client must not present it as completed or enqueue a blind wallet mutation. User input may be preserved only as an explicitly unfinished draft in a workflow that supports it. A timeout after a possible commit must be reconciled through the operation's idempotency key.
 

@@ -4,11 +4,35 @@ create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set search_path = public, extensions, pg_catalog;
 
-select extensions.plan(68);
+select extensions.plan(73);
 
 select extensions.has_table('public', 'point_wallets', 'point wallet table exists');
 select extensions.has_table('public', 'point_transactions', 'point ledger table exists');
 select extensions.has_table('public', 'reward_claim_requests', 'reward claim table exists');
+select extensions.hasnt_column(
+  'public',
+  'maintenance_plan_metadata',
+  'dependency_plan_ids_json',
+  'task dependency metadata is retired from the cloud schema'
+);
+select extensions.ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'homepilot_monetization_private.create_task_with_point_debit_impl(jsonb)'::regprocedure
+    ),
+    'dependency_plan_ids'
+  ) = 0,
+  'task creation no longer reads or writes dependency metadata'
+);
+select extensions.ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'homepilot_monetization_private.create_asset_with_point_debit_impl(jsonb)'::regprocedure
+    ),
+    'dependency_plan_ids'
+  ) = 0,
+  'initial asset tasks no longer read or write dependency metadata'
+);
 select extensions.ok(
   (select bool_and(relrowsecurity)
    from pg_class
@@ -638,8 +662,9 @@ select set_config(
   true
 );
 select set_config('request.jwt.claim.role', 'authenticated', true);
-select extensions.throws_ok(
-  $$select public.create_task_with_point_debit(
+select extensions.is(
+  (
+    public.create_task_with_point_debit(
       jsonb_build_object(
         'operation_id', '44444444-0000-0000-0000-000000000005',
         'plan', jsonb_build_object(
@@ -653,16 +678,40 @@ select extensions.throws_ok(
           'health_group', 'other'
         )
       )
-    )$$,
-  'P0001',
-  'INSUFFICIENT_POINTS',
-  'insufficient points reject a charged task'
+    )->>'status'
+  ),
+  'insufficient_points',
+  'insufficient points are a structured task-creation business result'
 );
 select extensions.is(
   (select count(*) from public.maintenance_plans
    where id = 'points-insufficient-task')::integer,
   0,
   'a rejected debit leaves no task behind'
+);
+select extensions.is(
+  (
+    public.create_asset_with_point_debit(
+      jsonb_build_object(
+        'operation_id', '44444444-0000-0000-0000-000000000008',
+        'asset', jsonb_build_object(
+          'id', 'points-insufficient-asset',
+          'name', 'Must not be created',
+          'asset_type', 'general',
+          'category_id', 'category_general',
+          'room_id', 'points-room'
+        )
+      )
+    )->>'status'
+  ),
+  'insufficient_points',
+  'insufficient points are a structured asset-creation business result'
+);
+select extensions.is(
+  (select count(*) from public.assets
+   where id = 'points-insufficient-asset')::integer,
+  0,
+  'an insufficient-points result leaves no asset behind'
 );
 
 set local role postgres;

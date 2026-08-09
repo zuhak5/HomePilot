@@ -45,7 +45,11 @@ Use directional APIs:
 
 Do not mirror universal symbols such as media controls, checkmarks, or product logos unless their semantic direction requires it.
 
-Floating SnackBars and capability-setup cards must use directional layout. Transient feedback reserves safe area, keyboard, navigation, and optional floating-action-button clearance without hardcoding a left/right offset. Mixed Trash batches use localized counts and labels; Trash and maintenance completion remain separate semantic operations.
+Floating SnackBars and capability-setup cards must use directional layout. Transient feedback uses directional margins while Flutter's `Scaffold` resolves the actual safe area, keyboard-adjusted content, navigation, footer, and floating-action-button obstruction; feature routes must not duplicate that vertical clearance. Mixed Trash batches use localized counts and labels; Trash and maintenance completion remain separate semantic operations.
+Feedback raised from a modal sheet uses the root overlay but keeps the same
+directional sides and localized content. Account-deletion confirmation text
+must accurately explain silent same-account verification and the conditional
+Google chooser fallback in both languages.
 
 ## Reduced motion and accessibility
 

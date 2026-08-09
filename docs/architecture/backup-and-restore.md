@@ -18,6 +18,11 @@ The current design uses a versioned ZIP archive containing:
 
 The format version is independent from the Flutter package version and the Drift schema version. Compatibility must be decided explicitly rather than inferred from application version alone.
 
+Drift schema 25 removes the retired task-dependency metadata column. Opening a
+schema-24 database restored from an older valid backup runs the forward
+migration, discards only that retired link list, and preserves the task and its
+remaining metadata. The backup ZIP format itself is unchanged.
+
 ## Export sequence
 
 1. Resolve the destination selected by the user or application retention policy.
