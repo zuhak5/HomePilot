@@ -86,3 +86,30 @@ jobs:
       - name: Stop local Supabase stack
         if: always()
         run: npx supabase stop --no-backup
+
+  hosted-advisors:
+    name: Hosted Supabase Advisors
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Query hosted security and performance advisors
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ADVISOR_REPORT: artifacts/supabase-advisors.json
+        run: node tool/audit_supabase_advisors.mjs
+      - name: Upload sanitized advisor evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: supabase-advisors-${{ github.sha }}
+          path: artifacts/supabase-advisors.json
+          if-no-files-found: error
+          retention-days: 14

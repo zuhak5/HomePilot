@@ -141,6 +141,10 @@ allowed finding is the exact title `Leaked Password Protection Disabled`; every
 other error, warning, or information finding fails the workflow. The Management
 API advisor endpoints are experimental/deprecated, so an endpoint removal is an
 explicit operator-visible failure rather than a false clean result.
+The final-SHA manual dispatch of
+[`validate-google-backend.yml`](../../.github/workflows/validate-google-backend.yml)
+runs the same audit as a protected job, so Android release gates cannot reuse a
+backend run that omitted hosted Advisor evidence.
 
 For public browser deletion, apply [`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql), then deploy and verify compatible `delete-account` and `account-deletion-status` functions before publishing an enabled deletion page or compatible mobile client. `delete-account` requires `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; status recovery requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep all of them only in protected function configuration. Then verify both production Pages preflights, intentionally disallowed origins, native no-`Origin` requests in a controlled test, ambiguous-response recovery with one unchanged key, and one disposable-account deletion. Evidence must record project/function identity, deployment version, HTTP status and CORS headers, strict receipt validation, Auth removal, Postgres cleanup, and private `user-media` cleanup without recording tokens, recovery keys, or direct user identifiers.
 

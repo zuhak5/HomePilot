@@ -42,7 +42,7 @@ If source changes after any final-SHA evidence is collected, choose a new final 
 
 ## Strict final-SHA sequence
 
-1. **Backend database gate.** Obtain a successful `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` is the final SHA. Its jobs cover locked Deno formatting/type/tests for AdMob SSV, account deletion, and deletion-status recovery; deletion-site/release workflow static tests; Google/Android static contracts; and a local Supabase database start, lint, and test cycle. The workflow runs for every pull request to `main` and every push to `main`, without path filtering. Separately deploy and verify any hosted backend changes required by the release.
+1. **Backend database gate.** Manually dispatch `Validate Google Backend and Release Contracts` on `main` at the final SHA and require success. Its jobs cover locked Deno formatting/type/tests for AdMob SSV, account deletion, and deletion-status recovery; deletion-site/release workflow static tests; Google/Android static contracts; a local Supabase database start, lint, and test cycle; and the protected read-only `Hosted Supabase Advisors` audit. Pull-request and push runs still exercise the local/static jobs without exposing the production Advisors credential. Separately deploy and verify any hosted backend changes required by the release.
 2. **APK, Sentry, and GitHub Release.** Manually run `Build Production APK` at the same SHA with the required changelog. The APK evidence collector must pass before Sentry mutation. Then require successful Sentry publication, artifact upload, provenance attestation, and GitHub Release creation.
 3. **VersionDeck.** A successful manually dispatched `Build Production APK` run can start `Deploy VersionDeck` through `workflow_run`. VersionDeck checks out that run's SHA, requires it to equal current `main`, rediscovers the GitHub Release, and independently verifies the APK before Pages deployment. A manual recovery dispatch requires the successful current-SHA APK run ID.
 4. **Separate AAB evidence and attestation.** Manually run `Build Play Store AAB` at the same frozen SHA as an independent rail. Wait for the workflow, both retained artifacts, and build-provenance attestation to complete. Review the AAB checksum, upload-key signature evidence, merged manifest, output metadata when present, dependency report, and evidence summary. This workflow does not upload to Google Play.
@@ -54,6 +54,10 @@ The exact GitHub check-run names to require in `main` branch protection are:
 - `Deno SSV tests`
 - `Google contract/static checks`
 - `Supabase database tests`
+
+The manually dispatched final-SHA backend evidence additionally requires
+`Hosted Supabase Advisors`. It is intentionally not a pull-request branch
+protection context because it reads a protected production-environment token.
 
 Verify those three contexts in repository branch-protection settings after merge. Workflow source cannot prove that hosted branch protection requires them.
 

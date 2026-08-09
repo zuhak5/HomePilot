@@ -103,6 +103,7 @@ test('backend gate covers formatting, type safety, functions, and database', asy
   assert.match(workflow, /name: Deno SSV tests/);
   assert.match(workflow, /name: Google contract\/static checks/);
   assert.match(workflow, /name: Supabase database tests/);
+  assert.match(workflow, /name: Hosted Supabase Advisors/);
   assert.match(workflow, /deno fmt --check/);
   assert.match(workflow, /deno check --frozen/);
   assert.match(workflow, /deno test --frozen/);
@@ -112,6 +113,9 @@ test('backend gate covers formatting, type safety, functions, and database', asy
   assert.match(workflow, /npx supabase start/);
   assert.match(workflow, /npm run supabase:lint/);
   assert.match(workflow, /npm run supabase:test/);
+  assert.match(workflow, /node tool\/audit_supabase_advisors\.mjs/);
+  assert.match(workflow, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/);
+  assert.match(workflow, /if: github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /if: always\(\)/);
 });
 
