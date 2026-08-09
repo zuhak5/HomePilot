@@ -364,7 +364,7 @@ jobs:
         shell: pwsh
         run: |
           Push-Location "android"
-          try { .\gradlew.bat --stop }
+          try { if (Test-Path ".\gradlew.bat") { .\gradlew.bat --stop } }
           finally { Pop-Location }
 
       - name: Remove temporary credentials

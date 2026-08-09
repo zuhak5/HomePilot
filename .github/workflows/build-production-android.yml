@@ -639,9 +639,11 @@ jobs:
         run: |
           Push-Location "android"
           try {
-            & ".\gradlew.bat" --stop
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
+            if (Test-Path ".\gradlew.bat") {
+              & ".\gradlew.bat" --stop
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
+              }
             }
             Start-Sleep -Seconds 2
           }

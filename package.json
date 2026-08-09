@@ -10,7 +10,7 @@
     "supabase:test": "supabase test db --local supabase/tests/database"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "2.98.0",
+    "@supabase/supabase-js": "2.110.8",
     "esbuild": "0.25.12",
     "supabase": "^2.109.1"
   }
