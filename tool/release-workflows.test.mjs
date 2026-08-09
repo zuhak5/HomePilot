@@ -130,6 +130,19 @@ test('Supabase migration deployment requires exact main and explicit production 
   assert.match(workflow, /apply-pending-migrations/);
   assert.match(workflow, /test "\$INPUT_PROJECT_REF" = "\$expected_ref"/);
   assert.match(workflow, /environment: production/);
+  assert.match(workflow, /name: Confirm protected Supabase project/);
+  assert.match(workflow, /SUPABASE_URL: \$\{\{ vars\.SUPABASE_URL \}\}/);
+  const protectedEnvironment = workflow.indexOf('environment: production');
+  const projectConfirmation = workflow.indexOf(
+    'name: Confirm protected Supabase project',
+  );
+  const projectLink = workflow.indexOf('name: Link the confirmed hosted project');
+  assert.ok(
+    protectedEnvironment >= 0 &&
+      projectConfirmation > protectedEnvironment &&
+      projectLink > projectConfirmation,
+    'Project identity must be checked inside the protected job before linking.',
+  );
   assert.match(
     workflow,
     /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/,

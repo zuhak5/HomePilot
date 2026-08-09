@@ -134,8 +134,10 @@ The manual
 workflow is the production migration boundary. It requires the exact current
 `main` SHA, an exact project-ref confirmation matching `SUPABASE_URL`, and the
 literal confirmation `apply-pending-migrations`. The protected `production`
-environment supplies `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; neither
-belongs in repository files or logs. The workflow lists remote migration state,
+environment supplies `SUPABASE_URL`, `SUPABASE_ACCESS_TOKEN`, and
+`SUPABASE_DB_PASSWORD`; the project-ref match is checked inside that protected
+job before the CLI links to any project, and no credential belongs in repository
+files or logs. The workflow lists remote migration state,
 performs a dry run, applies only the ordinary pending migration set, and dry-runs
 again. It intentionally never uses `--include-all`, seeds, roles, or migration
 history repair. A migration-history mismatch is a hard stop for operator review.
