@@ -36,9 +36,7 @@ jobs:
       - name: Require exact current main source and explicit target
         env:
           INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
-          INPUT_PROJECT_REF: ${{ inputs.project_ref }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -47,10 +45,6 @@ jobs:
           test "$INPUT_SOURCE_SHA" = "$GITHUB_SHA"
           test "$INPUT_SOURCE_SHA" = "$remote_sha"
           test "$INPUT_CONFIRMATION" = "apply-pending-migrations"
-          expected_ref="${SUPABASE_URL#https://}"
-          expected_ref="${expected_ref%%.*}"
-          test -n "$expected_ref"
-          test "$INPUT_PROJECT_REF" = "$expected_ref"
 
   deploy:
     name: Apply pending production migrations
@@ -63,6 +57,16 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 0
+      - name: Confirm protected Supabase project
+        env:
+          INPUT_PROJECT_REF: ${{ inputs.project_ref }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+        run: |
+          set -euo pipefail
+          expected_ref="${SUPABASE_URL#https://}"
+          expected_ref="${expected_ref%%.*}"
+          test -n "$expected_ref"
+          test "$INPUT_PROJECT_REF" = "$expected_ref"
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
