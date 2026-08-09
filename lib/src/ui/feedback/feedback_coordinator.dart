@@ -28,34 +28,42 @@ class FeedbackCoordinator extends ChangeNotifier {
     BuildContext context,
     HkFeedbackItem item,
   ) {
+    final incoming = _withStandardActionDuration(item);
     final active = _activeItem;
     if (active != null) {
       if (active.mode == HkFeedbackMode.undoable &&
-          item.mode == HkFeedbackMode.undoable &&
-          _canBatchUndo(active, item)) {
-        _batchUndoItem(item);
+          incoming.mode == HkFeedbackMode.undoable &&
+          _canBatchUndo(active, incoming)) {
+        _batchUndoItem(incoming);
         notifyListeners();
         _refreshActivePresentation();
         return null;
       }
       if (_isProtected(active)) {
-        _enqueue(item);
+        _enqueue(incoming);
         return null;
       }
-      final replacesActive = item.id == active.id ||
-          _priority(item) > _priority(active);
+      final replacesActive = incoming.id == active.id ||
+          _priority(incoming) > _priority(active);
       if (!replacesActive) {
-        _enqueue(item);
+        _enqueue(incoming);
         return null;
       }
       _supersedeActiveNonProtected();
     }
-    return _showItem(context, item);
+    return _showItem(context, incoming);
+  }
+
+  HkFeedbackItem _withStandardActionDuration(HkFeedbackItem item) {
+    if (item.mode != HkFeedbackMode.undoable &&
+        item.mode != HkFeedbackMode.actionable) {
+      return item;
+    }
+    return item.copyWith(duration: const Duration(seconds: 5));
   }
 
   bool _isProtected(HkFeedbackItem item) =>
-      item.mode == HkFeedbackMode.undoable ||
-      item.mode == HkFeedbackMode.actionable;
+      item.mode == HkFeedbackMode.undoable;
 
   bool _canBatchUndo(HkFeedbackItem active, HkFeedbackItem incoming) =>
       active.batchItemType != null &&
@@ -128,7 +136,7 @@ class FeedbackCoordinator extends ChangeNotifier {
 
   int _priority(HkFeedbackItem item) {
     if (item.mode == HkFeedbackMode.undoable) return 100;
-    if (item.mode == HkFeedbackMode.actionable) return 90;
+    if (item.mode == HkFeedbackMode.actionable) return 50;
     return switch (item.tone) {
       HkFeedbackTone.error || HkFeedbackTone.destructive => 80,
       HkFeedbackTone.warning => 60,
@@ -181,7 +189,7 @@ class FeedbackCoordinator extends ChangeNotifier {
               onAction: rendered.actionLabel == null ? null : handleAction,
               onDismiss: dismissCurrent,
               showCountdown: !_accessibleNavigation &&
-                  rendered.mode != HkFeedbackMode.progress,
+                  rendered.mode == HkFeedbackMode.undoable,
             );
           },
         ),

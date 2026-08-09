@@ -92,7 +92,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.44.8"
+          flutter-version: "3.44.7"
           channel: stable
           cache: true
 
@@ -264,7 +264,7 @@ jobs:
           $RequiredVariables = @{
             SUPABASE_URL             = $env:SUPABASE_URL
             SUPABASE_PUBLISHABLE_KEY = $env:SUPABASE_PUBLISHABLE_KEY
-            GOOGLE_WEB_CLIENT_ID     = $env:GOOGLE_WEB_CLIENT_ID
+            GOOGLE_WEB_CLIENT_ID      = $env:GOOGLE_WEB_CLIENT_ID
             SENTRY_ORG               = $env:SENTRY_ORG
             SENTRY_PROJECT           = $env:SENTRY_PROJECT
             SENTRY_DSN               = $env:SENTRY_DSN

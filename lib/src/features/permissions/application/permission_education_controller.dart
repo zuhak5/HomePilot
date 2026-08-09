@@ -475,8 +475,11 @@ class PermissionEducationController
         isVisible: false,
         awaitingSettingsReturn: false,
         clearAwaitingSettingsCapability: true,
-        clearOperationFailure: state.awaitedCapability != null &&
-            _isResolvedForAdvancement(state.awaitedCapability!, state.snapshot),
+        clearOperationFailure: state.awaitingSettingsCapability != null &&
+            _isResolvedForAdvancement(
+              state.awaitingSettingsCapability!,
+              state.setupSnapshot,
+            ),
       );
     });
   }
@@ -758,10 +761,11 @@ class PermissionEducationController
   }
 
   Future<void> _openSettingsNow(PermissionCapability capability) async {
-    final nextAction = state.capabilityStatuses[capability]?.nextAction;
-    if (nextAction != PermissionNextAction.openAppSettings &&
-        nextAction != PermissionNextAction.openLocationSettings &&
-        nextAction != PermissionNextAction.openExactAlarmSettings) {
+    final permissionState =
+        state.capabilityStatuses[capability]?.permissionState;
+    if (permissionState == null ||
+        permissionState == AppPermissionState.restricted ||
+        permissionState == AppPermissionState.unavailable) {
       state = state.copyWith(
         operationFailure: PermissionOperationFailure(
           capability: capability,

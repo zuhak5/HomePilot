@@ -1,0 +1,45 @@
+name: Temporary Production APK Dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/temporary-dispatch-production-apk.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-production-apk:
+    if: "github.event.head_commit.message == 'ci: dispatch production APK once'"
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Wait for backend gate and dispatch production APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/validate-google-backend.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=20")"
+            conclusion="$(jq -r '.workflow_runs[0].conclusion // empty' <<<"$run_json")"
+            if [[ "$conclusion" == "success" ]]; then
+              gh api \
+                --method POST \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/build-production-android.yml/dispatches" \
+                -f ref=main \
+                -f 'inputs[changelog]=CI repair: fix permission settings flow, transient feedback, and restore Flutter 3.44.7 for production build.'
+              echo "Production APK workflow dispatched for $GITHUB_SHA."
+              exit 0
+            fi
+            if [[ -n "$conclusion" && "$conclusion" != "success" ]]; then
+              echo "Backend gate concluded with $conclusion for $GITHUB_SHA; refusing production dispatch." >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for the backend gate on $GITHUB_SHA." >&2
+          exit 1
