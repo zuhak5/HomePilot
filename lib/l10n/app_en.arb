@@ -1492,6 +1492,6 @@
   ,"permissionSettingsCouldNotOpen": "Android settings could not be opened. Try again from device settings."
   ,"homePilotAlerts": "HomePilot alerts"
   ,"homePilotAlertsDescription": "Controls every HomePilot alert channel. Device reminders still require Android access."
-  ,"weatherAlertsInboxDescription": "Weather warnings shown in HomePilot's inbox; device delivery follows the reminder setting."
+  ,"weatherAlertsInboxDescription": "Weather warnings shown in HomePilot''s inbox; device delivery follows the reminder setting."
   ,"fix": "Fix"
 }
