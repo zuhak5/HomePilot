@@ -79,6 +79,16 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
       workflow.indexOf('Publish and verify Sentry release'),
     'the remote tag must be rechecked immediately before Sentry mutation',
   );
+  const tagRecheck = workflow.slice(
+    workflow.indexOf('Recheck release tag before Sentry mutation'),
+    workflow.indexOf('Publish and verify Sentry release'),
+  );
+  assert.match(tagRecheck, /if \(\$TagExitCode -ne 2\)/);
+  assert.match(
+    tagRecheck,
+    /\n\s+exit 0\n/,
+    'an accepted no-tag result must not leak git exit code 2 to the step',
+  );
 });
 
 test('backend gate covers formatting, type safety, functions, and database', async () => {
