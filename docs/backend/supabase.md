@@ -129,6 +129,17 @@ These tests validate handler contracts with fakes. They do not deploy the functi
 
 Deploy migrations and functions through an explicit reviewed process with environment confirmation, dry-run or diff evidence where available, backward compatibility, and rollback/forward-fix planning. Mobile and backend release order must be documented when contracts change.
 
+The manual
+[`deploy-supabase-migrations.yml`](../../.github/workflows/deploy-supabase-migrations.yml)
+workflow is the production migration boundary. It requires the exact current
+`main` SHA, an exact project-ref confirmation matching `SUPABASE_URL`, and the
+literal confirmation `apply-pending-migrations`. The protected `production`
+environment supplies `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; neither
+belongs in repository files or logs. The workflow lists remote migration state,
+performs a dry run, applies only the ordinary pending migration set, and dry-runs
+again. It intentionally never uses `--include-all`, seeds, roles, or migration
+history repair. A migration-history mismatch is a hard stop for operator review.
+
 ## Hosted Advisors evidence
 
 The manual [`audit-supabase-advisors.yml`](../../.github/workflows/audit-supabase-advisors.yml)
