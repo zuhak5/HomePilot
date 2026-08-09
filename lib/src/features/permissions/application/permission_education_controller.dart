@@ -475,8 +475,11 @@ class PermissionEducationController
         isVisible: false,
         awaitingSettingsReturn: false,
         clearAwaitingSettingsCapability: true,
-        clearOperationFailure: state.awaitedCapability != null &&
-            _isResolvedForAdvancement(state.awaitedCapability!, state.snapshot),
+        clearOperationFailure: state.awaitingSettingsCapability != null &&
+            _isResolvedForAdvancement(
+              state.awaitingSettingsCapability!,
+              state.setupSnapshot,
+            ),
       );
     });
   }
