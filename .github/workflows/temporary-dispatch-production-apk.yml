@@ -31,7 +31,7 @@ jobs:
                 --method POST \
                 "repos/$GITHUB_REPOSITORY/actions/workflows/build-production-android.yml/dispatches" \
                 -f ref=main \
-                -f 'inputs[changelog]=CI repair: fix permission education state fields and rebuild production APK.'
+                -f 'inputs[changelog]=CI repair: fix permission settings flow, transient feedback, and restore Flutter 3.44.7 for production build.'
               echo "Production APK workflow dispatched for $GITHUB_SHA."
               exit 0
             fi
