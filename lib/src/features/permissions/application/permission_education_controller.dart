@@ -221,11 +221,10 @@ class PermissionEducationController
 
   Future<void> useCurrentLocation() {
     return _runUserAction(PermissionCapability.deviceLocation, () async {
-      final currentStatus = state
-          .capabilityStatuses[PermissionCapability.deviceLocation];
+      final currentStatus =
+          state.capabilityStatuses[PermissionCapability.deviceLocation];
       final currentPermission = currentStatus?.permissionState;
-      if (currentStatus?.nextAction ==
-              PermissionNextAction.openAppSettings ||
+      if (currentStatus?.nextAction == PermissionNextAction.openAppSettings ||
           currentStatus?.nextAction ==
               PermissionNextAction.openLocationSettings) {
         await _openSettingsNow(PermissionCapability.deviceLocation);
@@ -475,7 +474,8 @@ class PermissionEducationController
         isVisible: false,
         awaitingSettingsReturn: false,
         clearAwaitingSettingsCapability: true,
-        clearOperationFailure: state.awaitingSettingsCapability != null &&
+        clearOperationFailure:
+            state.awaitingSettingsCapability != null &&
             _isResolvedForAdvancement(
               state.awaitingSettingsCapability!,
               state.setupSnapshot,

@@ -64,7 +64,7 @@ Never upload or archive either private key as evidence. A certificate fingerprin
 After manual dispatch at the final SHA, require the run to complete all of the following:
 
 1. Explicit non-`main` rejection, exact-current-`origin/main` checks before and after the protected-environment wait, and workflow-pinned toolchain setup.
-2. `npm ci`, Google/Android static contract validation, and locked AdMob SSV/account-deletion Deno checks/tests.
+2. `npm ci`, Google/Android static contract validation, and locked AdMob SSV/account-deletion/deletion-status Deno checks/tests.
 3. Successful lookup of the exact `.github/workflows/validate-google-backend.yml` identity for the same `main` SHA, with the gate run ID/URL recorded in the workflow summary and safe evidence context.
 4. Production configuration creation and upload-keystore restoration.
 5. Flutter clean/dependency resolution, localization and Drift generation, analysis, tests, and production-configuration validation.

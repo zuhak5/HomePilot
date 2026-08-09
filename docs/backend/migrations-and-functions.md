@@ -55,7 +55,11 @@ Test:
 
 ### `delete-account`
 
-Requires a valid JWT and protects destructive account cleanup. It verifies confirmation and recent session state, removes private media with retry handling, signs out sessions, deletes the Auth user, and returns/records a result suitable for client recovery.
+Requires a valid JWT and protects destructive account cleanup. It verifies confirmation, recent session state, and a 32-byte recovery key; stores only SHA-256-derived recovery values; removes private media with retry handling; signs out sessions; deletes the Auth user; and records/returns a strict result suitable for client recovery.
+
+### `account-deletion-status`
+
+Recovers a deletion operation when the authenticated destructive response can no longer be trusted or retrieved. It validates the original recovery key and expected user ID, performs a hash- and subject-bound service-role lookup, can finalize an operation whose Auth user is already absent, and returns only strict completed, pending, temporary, or not-found states. It never treats a client user ID alone as authority.
 
 ### `admob-ssv-handler`
 
@@ -73,7 +77,11 @@ Receives Google Mobile Ads server-side verification callbacks. It validates prov
 
 ## Deno validation
 
-Canonical Deno commands should be established from the function import maps and lock files, then added to CI. Until those commands are verified, do not claim Edge Functions are fully validated solely because database tests pass.
+The backend and Android release workflows enforce locked `deno fmt --check`, `deno check --frozen`, and `deno test --frozen` commands for `admob-ssv-handler`, `delete-account`, and `account-deletion-status`. Passing them validates committed source contracts only; it does not prove which revision or secrets are deployed to a hosted project.
+
+## Account-deletion recovery operations
+
+[`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql) adds a private service-role-only operation table for ambiguous deletion recovery. It stores a unique request hash, a subject binding, the active user UUID only while needed, bounded stage/error metadata, timestamps, and a seven-day default expiry. Row Level Security is enabled without client policies. Completion clears the active user UUID, and a scheduled hourly prune at minute 17 removes expired rows. [`0014_account_deletion_recovery.test.sql`](../../supabase/tests/database/0014_account_deletion_recovery.test.sql) checks the schema, privileges, RLS, completion behavior, and pruning contract.
 
 ## Deployment evidence
 

@@ -43,8 +43,8 @@ class FeedbackCoordinator extends ChangeNotifier {
         _enqueue(incoming);
         return null;
       }
-      final replacesActive = incoming.id == active.id ||
-          _priority(incoming) > _priority(active);
+      final replacesActive =
+          incoming.id == active.id || _priority(incoming) > _priority(active);
       if (!replacesActive) {
         _enqueue(incoming);
         return null;
@@ -79,31 +79,29 @@ class FeedbackCoordinator extends ChangeNotifier {
     final incomingFinalize = incoming.onFinalize;
     final messageBuilder =
         incoming.batchMessageBuilder ?? active.batchMessageBuilder;
-    final semanticBuilder = incoming.batchSemanticLabelBuilder ??
-        active.batchSemanticLabelBuilder;
-    final successBuilder = incoming.batchActionSuccessMessageBuilder ??
+    final semanticBuilder =
+        incoming.batchSemanticLabelBuilder ?? active.batchSemanticLabelBuilder;
+    final successBuilder =
+        incoming.batchActionSuccessMessageBuilder ??
         active.batchActionSuccessMessageBuilder;
 
     _activeItem = active.copyWith(
       batchCount: newCount,
       message: messageBuilder?.call(newCount) ?? active.message,
       batchMessageBuilder: messageBuilder,
-      semanticLabel:
-          semanticBuilder?.call(newCount) ?? incoming.semanticLabel,
+      semanticLabel: semanticBuilder?.call(newCount) ?? incoming.semanticLabel,
       batchSemanticLabelBuilder: semanticBuilder,
       actionSuccessMessage:
           successBuilder?.call(newCount) ?? active.actionSuccessMessage,
       batchActionSuccessMessageBuilder: successBuilder,
       actionFailureMessage:
           incoming.actionFailureMessage ?? active.actionFailureMessage,
-      onUndo: () => _runCallbacks(
-        [incomingUndo, previousUndo],
-        event: 'feedback_undo',
-      ),
-      onFinalize: () => _runCallbacks(
-        [previousFinalize, incomingFinalize],
-        event: 'feedback_finalize',
-      ),
+      onUndo: () =>
+          _runCallbacks([incomingUndo, previousUndo], event: 'feedback_undo'),
+      onFinalize: () => _runCallbacks([
+        previousFinalize,
+        incomingFinalize,
+      ], event: 'feedback_finalize'),
     );
   }
 
@@ -113,8 +111,7 @@ class FeedbackCoordinator extends ChangeNotifier {
       _pendingQueue.removeAt(existing);
     } else if (_isCoalescible(item)) {
       _pendingQueue.removeWhere(
-        (queued) =>
-            _isCoalescible(queued) && queued.tone == item.tone,
+        (queued) => _isCoalescible(queued) && queued.tone == item.tone,
       );
     }
     final priority = _priority(item);
@@ -150,7 +147,8 @@ class FeedbackCoordinator extends ChangeNotifier {
     BuildContext context,
     HkFeedbackItem item,
   ) {
-    final messenger = ScaffoldMessenger.maybeOf(context) ??
+    final messenger =
+        ScaffoldMessenger.maybeOf(context) ??
         (hkRootScaffoldMessengerKey.currentState?.mounted == true
             ? hkRootScaffoldMessengerKey.currentState
             : null);
@@ -188,7 +186,8 @@ class FeedbackCoordinator extends ChangeNotifier {
               message: rendered.message,
               onAction: rendered.actionLabel == null ? null : handleAction,
               onDismiss: dismissCurrent,
-              showCountdown: !_accessibleNavigation &&
+              showCountdown:
+                  !_accessibleNavigation &&
                   rendered.mode == HkFeedbackMode.undoable,
             );
           },
@@ -222,8 +221,8 @@ class FeedbackCoordinator extends ChangeNotifier {
     final media = MediaQuery.maybeOf(context);
     final safeBottom = media?.viewPadding.bottom ?? 0;
     final keyboardBottom = media?.viewInsets.bottom ?? 0;
-    final reserveTrailing = item.reserveFloatingActionButton &&
-            (media?.size.width ?? 0) >= 560
+    final reserveTrailing =
+        item.reserveFloatingActionButton && (media?.size.width ?? 0) >= 560
         ? 152.0
         : 0.0;
     return EdgeInsetsDirectional.fromSTEB(
@@ -314,11 +313,7 @@ class FeedbackCoordinator extends ChangeNotifier {
       AppLogger.warning('feedback_finalize', error: error);
       if (item.actionFailureMessage != null) {
         _enqueue(
-          _outcomeItem(
-            item,
-            item.actionFailureMessage!,
-            HkFeedbackTone.error,
-          ),
+          _outcomeItem(item, item.actionFailureMessage!, HkFeedbackTone.error),
         );
       }
     } finally {

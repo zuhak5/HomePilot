@@ -31,16 +31,21 @@ jobs:
           supabase/functions/admob-ssv-handler/index_test.ts
           supabase/functions/delete-account/index.ts
           supabase/functions/delete-account/index_test.ts
+          supabase/functions/account-deletion-status/index.ts
+          supabase/functions/account-deletion-status/index_test.ts
       - name: Type-check locked Edge Functions
         run: |
           cd supabase/functions/admob-ssv-handler && deno install --frozen && cd ../../..
           cd supabase/functions/delete-account && deno install --frozen && cd ../../..
+          cd supabase/functions/account-deletion-status && deno install --frozen && cd ../../..
           cd supabase/functions/admob-ssv-handler && deno check --frozen index.ts && cd ../../..
           cd supabase/functions/delete-account && deno check --frozen index.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno check --frozen index.ts && cd ../../..
       - name: Test locked Edge Functions
         run: |
           cd supabase/functions/admob-ssv-handler && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
           cd supabase/functions/delete-account && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
 
   web-and-static-contracts:
     name: Google contract/static checks

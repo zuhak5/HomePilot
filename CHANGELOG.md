@@ -4,28 +4,30 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
-## 1.5.0 (Build 36) — 2026-08-09
+## 1.5.0 (Build 43) — 2026-08-09
 
 ### Fixed and Improved
 
 - **Truthful startup surface**: Made the process splash the earliest Flutter presentation, removed blank bootstrap/theme gates and duplicate ownership, preserved one application topology, and added reduced-motion, lifecycle, compact-layout, English, and Arabic coverage.
 - **Permission and capability orchestration**: Separated user preferences, Android permission/special-access state, service availability, manual weather configuration, and effective capability. Notification preferences no longer trigger unrelated prompts, and exact timing remains an optional contextual capability.
 - **Protected transient feedback**: Made active Undo feedback non-preemptible, limited batching to compatible operations, refreshed visible batch counts and deadlines, guaranteed exactly-once action/finalization handling, and added Undo restoration for task, asset, room, and area Trash actions.
-- **Ad runtime hardening**: Added one lifecycle/consent/config eligibility model, generation invalidation, bounded classified retry with jitter, dormant exhaustion, a 55-minute freshness ceiling, explicit leases/disposal, full-screen serialization, and stale-callback rejection without moving reward authority to the client.
+- **Ad runtime hardening**: Added one lifecycle/consent/config eligibility model, generation invalidation, bounded classified retry with jitter, dormant exhaustion, a 55-minute freshness ceiling, explicit leases/disposal, full-screen serialization, and stale-callback rejection without moving reward authority to the client. Network failures now use four automatic retries near 2, 8, 30, and 60 seconds (each with ±20% jitter); internal/unknown failures use two near 2 and 8 seconds; no-fill and invalid requests remain dormant without automatic retry.
 - **Native ad parity**: Transported one schema-versioned app palette to Android, applied the complete app-owned card/badge/CTA chrome atomically, registered AdChoices and creative assets, and safely hid absent optional assets.
-- **Google authentication and deletion**: Serialized native Google initialization with retry after failure, kept ordinary sign-out distinct from authorization disconnect, removed the obsolete Google Services example, and replaced the simulated public deletion page with authenticated Supabase Google OAuth PKCE and strict deletion-receipt verification.
-- **Backend and release evidence**: Added backend SSV/Edge Function/database/static-contract CI, corrected the Play AAB rail, and added merged-manifest, dependency, version, permission, AdMob-ID, upload-certificate, checksum, and provenance evidence gates.
+- **Google authentication and deletion**: Serialized native Google initialization with retry after failure, kept ordinary sign-out distinct from authorization disconnect, removed the obsolete Google Services example, and replaced the simulated public deletion page with authenticated Supabase Google OAuth PKCE and strict deletion-receipt verification. Flutter and the public page now create one cryptographically secure recovery key per logical deletion, reuse it for ambiguous-response/status recovery, retain it only in secure platform storage or browser `sessionStorage` while unresolved, and accept completion only from an authoritative same-user receipt.
+- **Backend and release evidence**: Added backend SSV/Edge Function/database/static-contract CI, deletion-status Deno and cross-client/server schema gates, corrected the Play AAB rail, and added merged-manifest, dependency, version, permission, AdMob-ID, upload-certificate, checksum, and provenance evidence gates. The standalone APK/VersionDeck and Play AAB paths remain separate and no Play publication is automated.
+- **Regression stabilization**: Corrected dashboard teardown so native-ad presentation depth is released only while Riverpod remains mounted, aligned capability/settings widget fixtures with the actual permission model, and replaced four stale notification/settings golden baselines with the intended English and Arabic screens.
 - **Documentation truthfulness**: Added capability, feedback, Google Play, Data Safety, account-deletion, and release guidance; marked historical plans and network measurements as historical; and corrected privacy and Build 35 completion claims.
 
 ### Compatibility and evidence boundaries
 
 - No Drift schema or backup-format migration is introduced by this release.
+- The forward Supabase migration `20260809120000_add_account_deletion_recovery.sql` must be applied before deploying the compatible `delete-account` and `account-deletion-status` functions or releasing clients that require the recovery protocol.
 - No fine-location or background-location permission is added.
 - Repository tests and CI evidence do not substitute for physical-device accessibility/permission/ad testing or Google Play, AdMob, OAuth, UMP, and Play App Signing console verification; those remain explicitly documented operator checks.
 
 ## 1.4.9 (Build 35) — 2026-08-08
 
-> **Correction (2026-08-09):** This historical entry overstated several incomplete implementations as a finished remediation program. Build 35 contained partial foundations, but it did not provide a functional external deletion flow, the complete ad runtime/capability/feedback contracts, backend CI, or exercised Play AAB evidence. The bullets below are retained as historical repository notes, not proof of current implementation or release validation. The completed code-side remediation is recorded under 1.5.0 (Build 36).
+> **Correction (2026-08-09):** This historical entry overstated several incomplete implementations as a finished remediation program. Build 35 contained partial foundations, but it did not provide a functional external deletion flow, the complete ad runtime/capability/feedback contracts, backend CI, or exercised Play AAB evidence. The bullets below are retained as historical repository notes, not proof of current implementation or release validation. The completed code-side remediation is recorded under 1.5.0 (Build 43).
 
 ### Fixed and Improved
 

@@ -6,11 +6,17 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  createAccountDeletionRecoveryKey,
   createGoogleAuthorizationUrl,
   createPkcePair,
+  deleteAccountWithRecovery,
   exchangeAuthorizationCode,
   fetchAuthenticatedUser,
+  loadAccountDeletionOperation,
+  reconcileAccountDeletion,
   requestAccountDeletion,
+  requestAccountDeletionStatus,
+  saveAccountDeletionOperation,
   signOutLocally,
   validatePublicConfig,
 } from "../download-site/account-deletion.js";
@@ -33,6 +39,7 @@ const productionConfig = Object.freeze({
   accountDeletionSiteUrl: ACCOUNT_DELETION_SITE_URL,
 });
 const browserConfig = validatePublicConfig(productionConfig);
+const recoveryKey = "A".repeat(43);
 
 test("production public configuration is exact and fails closed", () => {
   assert.throws(
@@ -98,6 +105,12 @@ test("PKCE authorization uses the fixed Google callback contract", async () => {
   assert.equal(authorization.searchParams.get("code_challenge_method"), "s256");
 });
 
+test("account-deletion recovery keys use 32 secure random bytes", () => {
+  const key = createAccountDeletionRecoveryKey(webcrypto);
+  assert.match(key, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(Buffer.from(key, "base64url").length, 32);
+});
+
 test("OAuth code exchange and identity lookup use public authenticated requests", async () => {
   const calls = [];
   const fetchApi = async (url, options) => {
@@ -137,6 +150,7 @@ test("deletion requires an exact receipt for the authenticated user", async () =
     browserConfig,
     "access-token",
     "verified-user",
+    recoveryKey,
     async (url, options) => {
       calls.push({ url, options });
       return jsonResponse(200, {
@@ -158,6 +172,7 @@ test("deletion requires an exact receipt for the authenticated user", async () =
   );
   assert.deepEqual(JSON.parse(calls[0].options.body), {
     confirmation: "delete-my-account",
+    recovery_key: recoveryKey,
   });
   assert.equal(calls[0].options.headers.Authorization, "Bearer access-token");
 
@@ -172,11 +187,176 @@ test("deletion requires an exact receipt for the authenticated user", async () =
         browserConfig,
         "access-token",
         "verified-user",
+        recoveryKey,
         async () => jsonResponse(200, invalidReceipt),
       ),
-      /account_deletion_failed/,
+      /account_deletion_ambiguous/,
     );
   }
+});
+
+test("deletion rejects missing and malformed recovery keys before transport", async () => {
+  for (const invalidKey of [undefined, "", "A".repeat(42), "!".repeat(43)]) {
+    await assert.rejects(
+      requestAccountDeletion(
+        browserConfig,
+        "access-token",
+        "verified-user",
+        invalidKey,
+        async () => assert.fail("transport must not run"),
+      ),
+      /recovery_key_required/,
+    );
+  }
+});
+
+test("status recovery sends the same key and original user identity", async () => {
+  const calls = [];
+  const pending = await requestAccountDeletionStatus(
+    browserConfig,
+    recoveryKey,
+    "verified-user",
+    async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse(202, { deleted: false, status: "pending" });
+    },
+  );
+  assert.deepEqual(pending, { deleted: false, status: "pending" });
+  assert.equal(
+    calls[0].url,
+    `${ACCOUNT_DELETION_SUPABASE_URL}/functions/v1/account-deletion-status`,
+  );
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    recovery_key: recoveryKey,
+    expected_user_id: "verified-user",
+  });
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+
+  const deleted = await requestAccountDeletionStatus(
+    browserConfig,
+    recoveryKey,
+    "verified-user",
+    async () => jsonResponse(200, {
+      deleted: true,
+      status: "deleted",
+      user_id: "verified-user",
+    }),
+  );
+  assert.equal(deleted.deleted, true);
+
+  const missing = await requestAccountDeletionStatus(
+    browserConfig,
+    recoveryKey,
+    "verified-user",
+    async () => jsonResponse(404, { error: "recovery_not_found" }),
+  );
+  assert.equal(missing.status, "recovery_not_found");
+
+  const unavailable = await requestAccountDeletionStatus(
+    browserConfig,
+    recoveryKey,
+    "verified-user",
+    async () => jsonResponse(503, {
+      error: "recovery_temporarily_unavailable",
+    }),
+  );
+  assert.equal(unavailable.status, "recovery_temporarily_unavailable");
+});
+
+test("transport loss reconciles deletion and clears recovery only after proof", async () => {
+  const storage = memoryStorage();
+  const calls = [];
+  const receipt = await deleteAccountWithRecovery(
+    browserConfig,
+    "access-token",
+    "verified-user",
+    {
+      storage,
+      cryptoApi: deterministicCrypto(),
+      fetchApi: async (url, options) => {
+        calls.push({ url, options });
+        if (String(url).endsWith("/delete-account")) {
+          throw new TypeError("connection lost");
+        }
+        return jsonResponse(200, {
+          deleted: true,
+          status: "deleted",
+          user_id: "verified-user",
+        });
+      },
+    },
+  );
+  assert.equal(receipt.deleted, true);
+  const deletionPayload = JSON.parse(calls[0].options.body);
+  const statusPayload = JSON.parse(calls[1].options.body);
+  assert.match(deletionPayload.recovery_key, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(statusPayload.recovery_key, deletionPayload.recovery_key);
+  assert.equal(statusPayload.expected_user_id, "verified-user");
+  assert.equal(loadAccountDeletionOperation(storage), null);
+});
+
+test("pending recovery survives retry and reuses one logical operation key", async () => {
+  const storage = memoryStorage();
+  saveAccountDeletionOperation({
+    recovery_key: recoveryKey,
+    expected_user_id: "verified-user",
+  }, storage);
+
+  await assert.rejects(
+    reconcileAccountDeletion(
+      browserConfig,
+      loadAccountDeletionOperation(storage),
+      {
+        storage,
+        fetchApi: async () => jsonResponse(202, {
+          deleted: false,
+          status: "pending",
+        }),
+      },
+    ),
+    /account_deletion_pending/,
+  );
+  assert.equal(loadAccountDeletionOperation(storage).recovery_key, recoveryKey);
+
+  const calls = [];
+  await deleteAccountWithRecovery(
+    browserConfig,
+    "new-access-token",
+    "verified-user",
+    {
+      storage,
+      fetchApi: async (url, options) => {
+        calls.push({ url, options });
+        return jsonResponse(200, {
+          deleted: true,
+          status: "deleted",
+          user_id: "verified-user",
+        });
+      },
+    },
+  );
+  assert.equal(JSON.parse(calls[0].options.body).recovery_key, recoveryKey);
+  assert.equal(loadAccountDeletionOperation(storage), null);
+});
+
+test("safe pre-destructive rejection clears a new recovery operation", async () => {
+  const storage = memoryStorage();
+  await assert.rejects(
+    deleteAccountWithRecovery(
+      browserConfig,
+      "access-token",
+      "verified-user",
+      {
+        storage,
+        cryptoApi: deterministicCrypto(),
+        fetchApi: async () => jsonResponse(401, {
+          error: "recent_reauthentication_required",
+        }),
+      },
+    ),
+    /recent_reauthentication_required/,
+  );
+  assert.equal(loadAccountDeletionOperation(storage), null);
 });
 
 test("local sign-out is best effort and does not surface a revoked-session failure", async () => {
@@ -261,4 +441,22 @@ function jsonResponse(status, body) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+  };
+}
+
+function deterministicCrypto() {
+  return {
+    getRandomValues: (bytes) => {
+      bytes.fill(0x41);
+      return bytes;
+    },
+  };
 }

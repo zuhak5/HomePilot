@@ -165,9 +165,14 @@ for (const marker of [
   "/auth/v1/token?grant_type=pkce",
   "/auth/v1/user",
   "/functions/v1/delete-account",
-  'receipt.deleted !== true',
-  'receipt.status !== "deleted"',
-  "receipt.user_id !== expectedUserId",
+  "/functions/v1/account-deletion-status",
+  "recovery_key: recoveryKey",
+  "expected_user_id: expectedUserId",
+  "isDeletionReceipt(receipt, expectedUserId)",
+  "isDeletionReceipt(payload, expectedUserId)",
+  "value?.deleted === true",
+  'value?.status === "deleted"',
+  "value?.user_id === expectedUserId",
 ]) {
   if (!accountDeletionScript.includes(marker)) {
     throw new Error(`account-deletion.js is missing ${marker}`);

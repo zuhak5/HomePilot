@@ -74,12 +74,12 @@ Load errors are classified from the SDK error code and domain. Retry delays use 
 
 | Failure class | Total attempts in one automatic cycle | Automatic delays after failures | Dormancy behavior |
 | --- | ---: | --- | --- |
-| Network | 4 | 2, 4, and 8 seconds, each with ±20% jitter | Dormant after the fourth failed attempt. |
-| Internal or unknown | 2 | 2 seconds with ±20% jitter | Dormant after the second failed attempt. |
+| Network | 5 (initial load plus 4 automatic retries) | 2, 8, 30, and 60 seconds after failed attempts 1 through 4, each with ±20% jitter | Dormant after the fifth failed attempt. |
+| Internal or unknown | 3 (initial load plus 2 automatic retries) | 2 and 8 seconds after failed attempts 1 and 2, each with ±20% jitter | Dormant after the third failed attempt. |
 | No fill | 1 | None | Dormant immediately; rapid no-fill polling is avoided. |
 | Invalid request | 1 | None | Dormant immediately; retry cannot repair the request. |
 
-Dormancy means that no automatic retry timer remains for that cycle. It is not a permanent process-wide ban: a later eligible runtime transition, explicit preload/show attempt, or native component resynchronization can begin a new bounded cycle. Generation checks prevent an old retry timer or callback from reviving a newly blocked format.
+Dormancy means that no automatic retry timer remains for that cycle. The attempt count includes the initial load; only the later attempts are automatic retries. Dormancy is not a permanent process-wide ban: a later eligible runtime transition, explicit preload/show attempt, or native component resynchronization can begin a new bounded cycle. Generation checks prevent an old retry timer or callback from reviving a newly blocked format.
 
 ## Fullscreen presentation and reward preflight
 

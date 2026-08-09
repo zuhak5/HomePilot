@@ -180,10 +180,7 @@ void main() {
       dashboard,
       contains('next.isVisible && next.activeCapability != null'),
     );
-    expect(
-      dashboard,
-      contains('_setPermissionOverlayNativeAdSuspension(false);'),
-    );
+    expect(dashboard, contains('deferProviderUpdate: true'));
     expect(
       dashboard,
       contains('onChooseLocationManually: () => runWithNativeAdsSuspended('),

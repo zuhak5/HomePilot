@@ -5983,13 +5983,13 @@ abstract class AppLocalizations {
   /// No description provided for @permissionSetup.
   ///
   /// In en, this message translates to:
-  /// **'Location, notifications, and reminders setup'**
+  /// **'Permissions & setup'**
   String get permissionSetup;
 
   /// No description provided for @permissionSetupSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Review how HomePilot uses location and reminders.'**
+  /// **'Choose a weather area, then control device reminders and optional precise timing.'**
   String get permissionSetupSubtitle;
 
   /// No description provided for @permissionsAlreadyEnabled.
@@ -6063,6 +6063,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Manage in settings'**
   String get permissionSetupManageInSettings;
+
+  /// No description provided for @permissionSetupChangeLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Change location'**
+  String get permissionSetupChangeLocation;
+
+  /// No description provided for @permissionSelectedArea.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected area: {area}'**
+  String permissionSelectedArea(String area);
+
+  /// No description provided for @permissionUsingCurrentLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Using current location'**
+  String get permissionUsingCurrentLocation;
+
+  /// No description provided for @permissionLocationAccessRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Location access is required to use the current location.'**
+  String get permissionLocationAccessRequired;
+
+  /// No description provided for @permissionNotificationAccessRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Android notification access is required for device reminders.'**
+  String get permissionNotificationAccessRequired;
+
+  /// No description provided for @permissionDeviceRemindersOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Device reminders are off in HomePilot.'**
+  String get permissionDeviceRemindersOff;
+
+  /// No description provided for @permissionExactRequiresDeviceReminders.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on device reminders before enabling precise timing.'**
+  String get permissionExactRequiresDeviceReminders;
+
+  /// No description provided for @permissionActionCouldNotComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'That action could not be completed. Try again.'**
+  String get permissionActionCouldNotComplete;
+
+  /// No description provided for @permissionSettingsCouldNotOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Android settings could not be opened. Try again from device settings.'**
+  String get permissionSettingsCouldNotOpen;
+
+  /// No description provided for @homePilotAlerts.
+  ///
+  /// In en, this message translates to:
+  /// **'HomePilot alerts'**
+  String get homePilotAlerts;
+
+  /// No description provided for @homePilotAlertsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls every HomePilot alert channel. Device reminders still require Android access.'**
+  String get homePilotAlertsDescription;
+
+  /// No description provided for @weatherAlertsInboxDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Weather warnings shown in HomePilot\'\'s inbox; device delivery follows the reminder setting.'**
+  String get weatherAlertsInboxDescription;
+
+  /// No description provided for @fix.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix'**
+  String get fix;
 }
 
 class _AppLocalizationsDelegate

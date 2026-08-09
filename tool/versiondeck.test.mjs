@@ -234,15 +234,23 @@ test("service worker never caches releases.json", async () => {
   assert.match(serviceWorker, /fetch\(request, \{ cache: "no-store" \}\)/);
 });
 
-test("deployment workflow always checks out main and handles withdrawal", async () => {
-  const workflow = await fs.readFile(
-    path.join(root, ".github", "workflows", "deploy-download-site.yml"),
-    "utf8",
+test("deployment workflow pins the production SHA and gates deployment", async () => {
+  const workflow = (
+    await fs.readFile(
+      path.join(root, ".github", "workflows", "deploy-download-site.yml"),
+      "utf8",
+    )
+  ).replaceAll("\r\n", "\n");
+  assert.match(
+    workflow,
+    /ref:\s*\$\{\{ github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_sha \|\| github\.sha \}\}/,
   );
-  assert.match(workflow, /ref:\s*refs\/heads\/main/);
-  assert.match(workflow, /- unpublished/);
+  assert.match(workflow, /test "\$source_sha" = "\$remote_sha"/);
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /jobs:\s*\n\s*verify-pr:/);
-  assert.match(workflow, /\n  build:[\s\S]*?if: github\.event_name != 'pull_request'/);
+  assert.match(
+    workflow,
+    /\n  build:[\s\S]*?github\.event\.workflow_run\.conclusion == 'success'/,
+  );
   assert.match(workflow, /\n  deploy:[\s\S]*?\n    needs:\s*build/);
 });

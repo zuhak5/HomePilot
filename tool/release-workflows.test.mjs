@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const read = (path) => fs.readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+const read = async (path) =>
+  (await fs.readFile(new URL(`../${path}`, import.meta.url), 'utf8')).replaceAll(
+    '\r\n',
+    '\n',
+  );
 
 test('Play AAB rail uses protected production names and verifiable evidence', async () => {
   const workflow = await read('.github/workflows/build-play-android.yml');
@@ -94,6 +98,7 @@ test('backend gate covers formatting, type safety, functions, and database', asy
   assert.match(workflow, /deno test --frozen/);
   assert.match(workflow, /admob-ssv-handler\/index_test\.ts/);
   assert.match(workflow, /delete-account\/index_test\.ts/);
+  assert.match(workflow, /account-deletion-status\/index_test\.ts/);
   assert.match(workflow, /npx supabase start/);
   assert.match(workflow, /npm run supabase:lint/);
   assert.match(workflow, /npm run supabase:test/);

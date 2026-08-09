@@ -71,10 +71,7 @@ class HkFeedbackBar extends StatelessWidget {
                     key: const ValueKey('feedback-dismiss'),
                     tooltip: MaterialLocalizations.of(context).closeButtonLabel,
                     onPressed: onDismiss,
-                    icon: Icon(
-                      Symbols.close_rounded,
-                      color: colors.foreground,
-                    ),
+                    icon: Icon(Symbols.close_rounded, color: colors.foreground),
                   ),
                 ),
               ],
@@ -102,15 +99,16 @@ class HkFeedbackBar extends StatelessWidget {
       container: true,
       liveRegion: true,
       label: item.semanticLabel,
-      child: item.semanticLabel == null ? content : ExcludeSemantics(child: content),
+      child: item.semanticLabel == null
+          ? content
+          : ExcludeSemantics(child: content),
     );
   }
 
   IconData _toneIcon(HkFeedbackTone tone) => switch (tone) {
     HkFeedbackTone.success => Symbols.check_circle_rounded,
     HkFeedbackTone.warning => Symbols.warning_rounded,
-    HkFeedbackTone.error || HkFeedbackTone.destructive =>
-      Symbols.error_rounded,
+    HkFeedbackTone.error || HkFeedbackTone.destructive => Symbols.error_rounded,
     HkFeedbackTone.info => Symbols.info_rounded,
     HkFeedbackTone.neutral => Symbols.notifications_rounded,
   };
@@ -118,21 +116,25 @@ class HkFeedbackBar extends StatelessWidget {
   _FeedbackToneColors _toneColors(ColorScheme scheme, HkFeedbackTone tone) {
     return switch (tone) {
       HkFeedbackTone.success => _FeedbackToneColors(
-          scheme.primaryContainer,
-          scheme.onPrimaryContainer,
-        ),
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+      ),
       HkFeedbackTone.warning => _FeedbackToneColors(
-          scheme.tertiaryContainer,
-          scheme.onTertiaryContainer,
-        ),
-      HkFeedbackTone.error || HkFeedbackTone.destructive =>
-        _FeedbackToneColors(scheme.errorContainer, scheme.onErrorContainer),
+        scheme.tertiaryContainer,
+        scheme.onTertiaryContainer,
+      ),
+      HkFeedbackTone.error || HkFeedbackTone.destructive => _FeedbackToneColors(
+        scheme.errorContainer,
+        scheme.onErrorContainer,
+      ),
       HkFeedbackTone.info => _FeedbackToneColors(
-          scheme.secondaryContainer,
-          scheme.onSecondaryContainer,
-        ),
-      HkFeedbackTone.neutral =>
-        _FeedbackToneColors(scheme.inverseSurface, scheme.onInverseSurface),
+        scheme.secondaryContainer,
+        scheme.onSecondaryContainer,
+      ),
+      HkFeedbackTone.neutral => _FeedbackToneColors(
+        scheme.inverseSurface,
+        scheme.onInverseSurface,
+      ),
     };
   }
 }

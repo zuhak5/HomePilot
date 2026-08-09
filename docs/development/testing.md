@@ -28,11 +28,11 @@ Use for cross-layer application journeys that cannot be proven by isolated tests
 
 ### Edge Function tests
 
-Functions require formatting, locked type-checking, unit/request-validation tests, and explicit negative-security cases. [`validate-google-backend.yml`](../../.github/workflows/validate-google-backend.yml) enforces the canonical Deno checks for AdMob SSV and account deletion. These isolated tests do not prove that the reviewed function revision or secrets are deployed to a hosted project.
+Functions require formatting, locked type-checking, unit/request-validation tests, and explicit negative-security cases. [`validate-google-backend.yml`](../../.github/workflows/validate-google-backend.yml) enforces the canonical Deno checks for AdMob SSV, account deletion, and deletion-status recovery. These isolated tests do not prove that the reviewed function revision or secrets are deployed to a hosted project.
 
 ### Browser deletion and Google/Android contract tests
 
-Node tests cover the public account-deletion PKCE flow, token-storage boundary, explicit confirmation, protected function call, strict receipt, exact CORS origins, service-worker navigation policy, and release-workflow source contracts. The static validator also cross-checks Android, ads, reward, auth, and deletion invariants. These checks inspect source/build output; they are not a hosted OAuth, Pages, Supabase, AdMob, or Play Console test.
+Node tests cover the public account-deletion PKCE flow, token-storage boundary, Web Crypto recovery key, explicit confirmation, protected function call, same-key status recovery across reload or ambiguous responses, strict receipt, exact CORS origins, service-worker navigation policy, and release-workflow source contracts. The static validator also cross-checks Android, ads, reward, auth, and deletion invariants. These checks inspect source/build output; they are not a hosted OAuth, Pages, Supabase, AdMob, or Play Console test.
 
 ### VersionDeck tests
 
@@ -114,13 +114,17 @@ deno fmt --check `
   supabase/functions/admob-ssv-handler/index.ts `
   supabase/functions/admob-ssv-handler/index_test.ts `
   supabase/functions/delete-account/index.ts `
-  supabase/functions/delete-account/index_test.ts
+  supabase/functions/delete-account/index_test.ts `
+  supabase/functions/account-deletion-status/index.ts `
+  supabase/functions/account-deletion-status/index_test.ts
 
 deno check --frozen supabase/functions/admob-ssv-handler/index.ts
 deno check --frozen supabase/functions/delete-account/index.ts
+deno check --frozen supabase/functions/account-deletion-status/index.ts
 deno test --frozen --allow-env --allow-net `
   supabase/functions/admob-ssv-handler/index_test.ts `
-  supabase/functions/delete-account/index_test.ts
+  supabase/functions/delete-account/index_test.ts `
+  supabase/functions/account-deletion-status/index_test.ts
 
 npm run test:account-deletion
 npm run test:release-workflows
@@ -137,7 +141,7 @@ Test offline mutation, restart, timeout after possible commit, duplicate retry, 
 
 ### Account deletion
 
-Test confirmation, cancellation, wrong Google account, stale session, offline state, duplicate request, Storage/database/Auth ordering, failed cleanup finalization, strict same-user receipt, cloud success/local failure, restart recovery, web PKCE/state handling, exact CORS origins, and exported backups remaining outside app control.
+Test confirmation, cancellation, wrong Google account, stale session, offline state, 32-byte/43-character recovery-key validation, secure operation persistence, duplicate requests with the same key, pending/temporary/not-found status recovery, Storage/database/Auth ordering, failed cleanup finalization, strict same-user receipt, cloud success/local failure, restart recovery, web PKCE/state and `sessionStorage` handling without token persistence, exact CORS origins, and exported backups remaining outside app control.
 
 ### Monetization
 

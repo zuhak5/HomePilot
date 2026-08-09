@@ -8,6 +8,7 @@ import '../../../core/observability/sentry_tracing.dart';
 import '../../../core/supabase/supabase_failure.dart';
 import '../../../core/utils/redacting_logger.dart';
 import '../domain/auth_repository.dart';
+import 'account_deletion_recovery_store.dart';
 import 'native_google_sign_in.dart';
 
 class SupabaseAuthRepository implements AuthRepository {
@@ -17,13 +18,21 @@ class SupabaseAuthRepository implements AuthRepository {
     required this.onAccountDeletionPrepared,
     required this.onAccountDeletionCancelled,
     required this.onAccountDeleted,
-  });
+    AccountDeletionRecoveryStore? accountDeletionRecoveryStore,
+    AccountDeletionRecoveryKeyFactory? accountDeletionRecoveryKeyFactory,
+  }) : _accountDeletionRecoveryStore =
+           accountDeletionRecoveryStore ?? SecureAccountDeletionRecoveryStore(),
+       _accountDeletionRecoveryKeyFactory =
+           accountDeletionRecoveryKeyFactory ??
+           createAccountDeletionRecoveryKey;
 
   final SupabaseClient _client;
   final GoogleSignInGateway _googleSignIn;
   final Future<void> Function(String userId) onAccountDeletionPrepared;
   final Future<void> Function(String userId) onAccountDeletionCancelled;
   final Future<void> Function(String userId) onAccountDeleted;
+  final AccountDeletionRecoveryStore _accountDeletionRecoveryStore;
+  final AccountDeletionRecoveryKeyFactory _accountDeletionRecoveryKeyFactory;
 
   @override
   AuthSession? get currentSession =>
@@ -31,6 +40,11 @@ class SupabaseAuthRepository implements AuthRepository {
 
   @override
   Stream<AuthStateChange> watchAuthState() async* {
+    try {
+      await resumePendingAccountDeletion();
+    } on Object {
+      AppLogger.warning('auth_account_delete_recovery_deferred');
+    }
     var previous = AuthStateChange(
       event: AuthEventType.initialSession,
       session: currentSession,
@@ -47,6 +61,26 @@ class SupabaseAuthRepository implements AuthRepository {
         yield next;
       }
       previous = next;
+    }
+  }
+
+  Future<void> resumePendingAccountDeletion() async {
+    final operation = await _accountDeletionRecoveryStore.read();
+    if (operation == null) return;
+
+    await onAccountDeletionPrepared(operation.expectedUserId);
+    final status = await _accountDeletionStatus(operation);
+    switch (status) {
+      case _AccountDeletionStatus.deleted:
+        await _completeAccountDeletion(operation);
+        return;
+      case _AccountDeletionStatus.notFound:
+        await _accountDeletionRecoveryStore.clear();
+        await _cancelPreparedDeletion(operation.expectedUserId);
+        return;
+      case _AccountDeletionStatus.pending ||
+          _AccountDeletionStatus.temporarilyUnavailable:
+        return;
     }
   }
 
@@ -131,9 +165,11 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   Future<void> _deleteAccount() async {
-    var cloudDeleted = false;
     var deletionPrepared = false;
+    var requestStarted = false;
+    var createdOperation = false;
     String? originalUserId;
+    AccountDeletionRecoveryOperation? operation;
     try {
       originalUserId = _client.auth.currentSession?.user.id;
       if (originalUserId == null) {
@@ -158,46 +194,60 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
 
+      operation = await _accountDeletionRecoveryStore.read();
+      if (operation != null && operation.expectedUserId != originalUserId) {
+        throw const SupabaseFailure(
+          kind: SupabaseFailureKind.permissionDenied,
+          message:
+              'A pending account-deletion operation belongs to a different '
+              'cloud identity.',
+        );
+      }
+      if (operation == null) {
+        operation = AccountDeletionRecoveryOperation(
+          expectedUserId: originalUserId,
+          recoveryKey: _accountDeletionRecoveryKeyFactory(),
+        );
+        if (!operation.isValid) {
+          throw StateError('The account-deletion recovery key was invalid.');
+        }
+        await _accountDeletionRecoveryStore.write(operation);
+        createdOperation = true;
+      }
+
       deletionPrepared = true;
       await onAccountDeletionPrepared(originalUserId);
-      final response = await _client.functions.invoke(
-        'delete-account',
-        body: const {'confirmation': 'delete-my-account'},
-      );
-      final data = response.data;
-      if (data is! Map ||
-          data['deleted'] != true ||
-          data['status'] != 'deleted' ||
-          data['user_id'] != originalUserId) {
-        throw const SupabaseFailure(
-          kind: SupabaseFailureKind.unknown,
-          message: 'The cloud account deletion receipt was invalid.',
-        );
-      }
-      cloudDeleted = true;
+      FunctionResponse response;
+      requestStarted = true;
       try {
-        await traceHomePilotOperation<void>(
-          'auth.account_delete.local_cleanup',
-          () async => onAccountDeleted(originalUserId!),
-          attributes: const {'execution': 'main'},
+        response = await _client.functions.invoke(
+          'delete-account',
+          body: {
+            'confirmation': 'delete-my-account',
+            'recovery_key': operation.recoveryKey,
+          },
         );
-      } on Object {
-        throw const SupabaseFailure(
-          kind: SupabaseFailureKind.unknown,
-          message:
-              'The account was deleted, but local cleanup is still pending. '
-              'Restart HomePilot to finish cleanup.',
-          retryable: true,
-        );
-      } finally {
-        await _clearLocalAuthentication(isAccountDeletion: true);
+      } on Object catch (error) {
+        if (createdOperation && _isSafePreDestructiveFailure(error)) {
+          rethrow;
+        }
+        await _resolveAmbiguousDeletion(operation, sourceError: error);
+        return;
       }
+      if (!_isDeletionReceipt(response.data, originalUserId)) {
+        await _resolveAmbiguousDeletion(operation);
+        return;
+      }
+      await _completeAccountDeletion(operation);
     } on Object catch (error) {
-      if (cloudDeleted) {
-        throw SupabaseFailure.from(error);
-      }
       final functionErrorCode = _functionErrorCode(error);
-      if (deletionPrepared && originalUserId != null) {
+      final safeCancellation =
+          !requestStarted ||
+          (createdOperation && _isSafePreDestructiveFailure(error));
+      if (safeCancellation && operation != null) {
+        await _accountDeletionRecoveryStore.clear();
+      }
+      if (safeCancellation && deletionPrepared && originalUserId != null) {
         await _cancelPreparedDeletion(originalUserId);
       }
       if (functionErrorCode == 'recent_reauthentication_required') {
@@ -216,6 +266,109 @@ class SupabaseAuthRepository implements AuthRepository {
         );
       }
       await _throwAuthFailure(error);
+    }
+  }
+
+  Future<void> _resolveAmbiguousDeletion(
+    AccountDeletionRecoveryOperation operation, {
+    Object? sourceError,
+  }) async {
+    final status = await _accountDeletionStatus(operation);
+    switch (status) {
+      case _AccountDeletionStatus.deleted:
+        await _completeAccountDeletion(operation);
+        return;
+      case _AccountDeletionStatus.notFound:
+        await _accountDeletionRecoveryStore.clear();
+        await _cancelPreparedDeletion(operation.expectedUserId);
+        if (sourceError != null) throw sourceError;
+        throw const SupabaseFailure(
+          kind: SupabaseFailureKind.unknown,
+          message: 'The cloud account deletion receipt was invalid.',
+        );
+      case _AccountDeletionStatus.pending:
+        if (_functionErrorCode(sourceError) == 'storage_cleanup_failed') {
+          throw const SupabaseFailure(
+            kind: SupabaseFailureKind.storage,
+            message:
+                'Private media cleanup did not finish. Sign in and retry '
+                'account deletion.',
+            retryable: true,
+          );
+        }
+        throw const SupabaseFailure(
+          kind: SupabaseFailureKind.unknown,
+          message:
+              'Account deletion is still pending. Retry to check the same '
+              'deletion operation.',
+          retryable: true,
+        );
+      case _AccountDeletionStatus.temporarilyUnavailable:
+        throw const SupabaseFailure(
+          kind: SupabaseFailureKind.offline,
+          message:
+              'Account deletion could not be confirmed yet. Retry to check '
+              'the same deletion operation.',
+          retryable: true,
+        );
+    }
+  }
+
+  Future<_AccountDeletionStatus> _accountDeletionStatus(
+    AccountDeletionRecoveryOperation operation,
+  ) async {
+    try {
+      final response = await _client.functions.invoke(
+        'account-deletion-status',
+        body: {
+          'recovery_key': operation.recoveryKey,
+          'expected_user_id': operation.expectedUserId,
+        },
+      );
+      if (_isDeletionReceipt(response.data, operation.expectedUserId)) {
+        return _AccountDeletionStatus.deleted;
+      }
+      final data = response.data;
+      if (data is Map &&
+          data['deleted'] == false &&
+          data['status'] == 'pending') {
+        return _AccountDeletionStatus.pending;
+      }
+      return _AccountDeletionStatus.temporarilyUnavailable;
+    } on Object catch (error) {
+      return switch (_functionErrorCode(error)) {
+        'recovery_not_found' => _AccountDeletionStatus.notFound,
+        'recovery_temporarily_unavailable' =>
+          _AccountDeletionStatus.temporarilyUnavailable,
+        _ => _AccountDeletionStatus.temporarilyUnavailable,
+      };
+    }
+  }
+
+  Future<void> _completeAccountDeletion(
+    AccountDeletionRecoveryOperation operation,
+  ) async {
+    try {
+      await _accountDeletionRecoveryStore.clear();
+    } on Object {
+      AppLogger.warning('auth_account_delete_recovery_clear_failed');
+    }
+    try {
+      await traceHomePilotOperation<void>(
+        'auth.account_delete.local_cleanup',
+        () async => onAccountDeleted(operation.expectedUserId),
+        attributes: const {'execution': 'main'},
+      );
+    } on Object {
+      throw const SupabaseFailure(
+        kind: SupabaseFailureKind.unknown,
+        message:
+            'The account was deleted, but local cleanup is still pending. '
+            'Restart HomePilot to finish cleanup.',
+        retryable: true,
+      );
+    } finally {
+      await _clearLocalAuthentication(isAccountDeletion: true);
     }
   }
 
@@ -364,11 +517,40 @@ bool _isRevokedSessionError(Object error) {
       normalized.contains('session id claim in jwt does not exist');
 }
 
-String? _functionErrorCode(Object error) {
+bool _isDeletionReceipt(Object? data, String expectedUserId) {
+  return data is Map &&
+      data['deleted'] == true &&
+      data['status'] == 'deleted' &&
+      data['user_id'] == expectedUserId;
+}
+
+bool _isSafePreDestructiveFailure(Object error) {
+  return const {
+    'deletion_origin_forbidden',
+    'invalid_session',
+    'deletion_confirmation_required',
+    'recovery_key_required',
+    'deletion_server_misconfigured',
+    'deletion_reauthentication_claims_required',
+    'recent_reauthentication_required',
+    'reauthentication_required',
+    'reauthentication_user_mismatch',
+    'account_lookup_failed',
+  }.contains(_functionErrorCode(error));
+}
+
+String? _functionErrorCode(Object? error) {
   if (error is! FunctionException) return null;
   final details = error.details;
   if (details is Map && details['error'] is String) {
     return details['error'] as String;
   }
   return null;
+}
+
+enum _AccountDeletionStatus {
+  deleted,
+  pending,
+  notFound,
+  temporarilyUnavailable,
 }

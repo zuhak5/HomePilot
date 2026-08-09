@@ -26,16 +26,16 @@ class AdRetryPolicy {
     required int failedAttempt,
     double jitterUnit = 0.5,
   }) {
-    final maxAttempts = switch (failure) {
+    final maxAutomaticRetries = switch (failure) {
       AdLoadFailureKind.network => 4,
       AdLoadFailureKind.internal || AdLoadFailureKind.unknown => 2,
       AdLoadFailureKind.noFill || AdLoadFailureKind.invalidRequest => 0,
     };
-    if (failedAttempt <= 0 || failedAttempt >= maxAttempts) {
+    if (failedAttempt <= 0 || failedAttempt > maxAutomaticRetries) {
       return const AdRetryDecision.dormant();
     }
-    const baseSeconds = [2, 4, 8];
-    final base = baseSeconds[(failedAttempt - 1).clamp(0, 2)];
+    const baseSeconds = [2, 8, 30, 60];
+    final base = baseSeconds[(failedAttempt - 1).clamp(0, 3)];
     final normalized = jitterUnit.clamp(0.0, 1.0);
     final factor = 1 - jitterFraction + (2 * jitterFraction * normalized);
     final milliseconds = math.max(1, (base * 1000 * factor).round());

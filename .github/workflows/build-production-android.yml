@@ -124,10 +124,13 @@ jobs:
           node tool/validate_google_release_contracts.mjs
           cd supabase/functions/admob-ssv-handler && deno install --frozen && cd ../../..
           cd supabase/functions/delete-account && deno install --frozen && cd ../../..
+          cd supabase/functions/account-deletion-status && deno install --frozen && cd ../../..
           cd supabase/functions/admob-ssv-handler && deno check --frozen index.ts && cd ../../..
           cd supabase/functions/delete-account && deno check --frozen index.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno check --frozen index.ts && cd ../../..
           cd supabase/functions/admob-ssv-handler && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
           cd supabase/functions/delete-account && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
+          cd supabase/functions/account-deletion-status && deno test --frozen --allow-env --allow-net index_test.ts && cd ../../..
 
       - name: Require backend database gate for this SHA
         id: backend_gate

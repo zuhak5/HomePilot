@@ -8,10 +8,14 @@ import 'package:homepilot/src/core/domain/models.dart';
 import 'package:homepilot/src/features/auth/presentation/account_screen.dart';
 import 'package:homepilot/src/features/auth/presentation/auth_providers.dart';
 import 'package:homepilot/src/features/auth/domain/auth_repository.dart';
+import 'package:homepilot/src/ui/feedback/feedback_coordinator.dart';
 
 import 'test_theme.dart';
 
 void main() {
+  setUp(FeedbackCoordinator.instance.resetForTesting);
+  tearDown(FeedbackCoordinator.instance.resetForTesting);
+
   testWidgets('test build keeps the signed-out account screen usable', (
     tester,
   ) async {
@@ -206,7 +210,8 @@ void main() {
     );
 
     auth.deleteCompleter.complete();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
     expect(find.text('Account deleted.'), findsOneWidget);
   });
 }

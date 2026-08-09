@@ -10,7 +10,7 @@ Supabase provides HomePilot's authenticated cloud layer:
 - RPCs for atomic or protected operations.
 - Realtime invalidation.
 - Private `user-media` Storage.
-- Edge Functions for account deletion and AdMob server-side verification.
+- Edge Functions for account deletion, deletion-status recovery, and AdMob server-side verification.
 
 The committed local configuration is `supabase/config.toml`. SQL migrations are append-only history under `supabase/migrations/`; database tests are under `supabase/tests/database/`.
 
@@ -81,14 +81,15 @@ Realtime is an invalidation mechanism, not a replacement for authenticated pull 
 
 ## Edge Functions
 
-Functions run in the Deno-based Supabase runtime and must validate all untrusted requests. Secrets belong in function environment configuration, not source or Flutter. Establish canonical formatting, type-checking, unit-test, and local-invocation commands and keep them aligned with CI.
+Functions run in the Deno-based Supabase runtime and must validate all untrusted requests. Secrets belong in function environment configuration, not source or Flutter. Canonical locked formatting, type-checking, and unit-test commands are enforced by the backend and Android release workflows.
 
 ### `delete-account` HTTP contract
 
 [`supabase/functions/delete-account/index.ts`](../../supabase/functions/delete-account/index.ts) is the shared remote-deletion authority for the installed application and the public browser page.
 
-- `POST` is the only deletion method. The body must contain `{ "confirmation": "delete-my-account" }` and the `Authorization` header must contain the user's bearer token.
+- `POST` is the only deletion method. The body must contain `{ "confirmation": "delete-my-account", "recovery_key": "<43-character base64url value>" }` and the `Authorization` header must contain the user's bearer token. The unpadded base64url value must decode to exactly 32 bytes.
 - The function extracts the session ID from the JWT, verifies the user through Supabase Auth, and checks recent-session state. It never accepts a client-supplied user ID as ownership authority.
+- It hashes the recovery key and a key/user binding before persistence. Raw keys, tokens, and direct identifiers are not logged.
 - A successful response is HTTP `200` with `deleted: true`, `status: "deleted"`, and `user_id` set to the verified authenticated user. Browser code must match all three fields, including the verified user ID, before reporting success.
 - Responses use `Cache-Control: no-store`. Failure responses expose stable technical error codes rather than raw requests, tokens, provider payloads, or user content.
 
@@ -102,12 +103,24 @@ An allowed `OPTIONS` preflight returns `204`, echoes that exact origin in `Acces
 
 Native Flutter HTTP requests normally have no `Origin` header. They continue through the full JWT, confirmation, recent-session, cleanup, and receipt checks, but receive no `Access-Control-Allow-Origin` header. Absence of `Origin` is compatibility behavior, not an authorization bypass.
 
+### `account-deletion-status` HTTP contract
+
+[`supabase/functions/account-deletion-status/index.ts`](../../supabase/functions/account-deletion-status/index.ts) recovers an operation after the destructive response or client process is lost.
+
+- `POST` is the only status method. The body requires the original `recovery_key` and an `expected_user_id` UUID.
+- The endpoint does not accept a bearer token as its authority because the Auth user may already be deleted. Possession of the high-entropy key is necessary but not sufficient: lookup and completion are also bound to the expected subject using SHA-256-derived values stored by the backend.
+- It returns HTTP `200` only with the same strict deletion receipt, HTTP `202` for a pending stage, HTTP `503` for a temporary recovery failure, or HTTP `404` with `recovery_not_found` when no matching recoverable operation exists.
+- If the recorded operation reached Auth deletion and the Auth user is already absent, status recovery can finalize the operation before returning the strict receipt.
+- Responses are `no-store`; raw keys, bearer tokens, and user identifiers are never logged.
+
+The status endpoint uses the same exact origin allowlist. Its allowed preflight headers are `apikey`, `content-type`, and `x-client-info`; it does not advertise `authorization` because status recovery is capability- and subject-bound rather than session-authorized. Native requests without `Origin` receive no CORS response header and still pass every request validation and binding check.
+
 Focused local validation is:
 
 ```powershell
-deno fmt --check supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
-deno check --frozen supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts
-deno test --frozen supabase/functions/delete-account/index_test.ts
+deno fmt --check supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts supabase/functions/account-deletion-status/index.ts supabase/functions/account-deletion-status/index_test.ts
+deno check --frozen supabase/functions/delete-account/index.ts supabase/functions/delete-account/index_test.ts supabase/functions/account-deletion-status/index.ts supabase/functions/account-deletion-status/index_test.ts
+deno test --frozen supabase/functions/delete-account/index_test.ts supabase/functions/account-deletion-status/index_test.ts
 ```
 
 These tests validate handler contracts with fakes. They do not deploy the function or prove hosted Auth, database, or Storage cleanup.
@@ -116,7 +129,7 @@ These tests validate handler contracts with fakes. They do not deploy the functi
 
 Deploy migrations and functions through an explicit reviewed process with environment confirmation, dry-run or diff evidence where available, backward compatibility, and rollback/forward-fix planning. Mobile and backend release order must be documented when contracts change.
 
-For public browser deletion, deploy and verify the updated `delete-account` function before publishing an enabled deletion page. Confirm the hosted function retains `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` only in protected function configuration. Then verify the production Pages origin preflight, an intentionally disallowed origin, a native no-`Origin` request in a controlled test, and one disposable-account deletion. Evidence must record function/project identity, deployment version, HTTP status and CORS headers, receipt field validation, Auth removal, Postgres cleanup, and private `user-media` cleanup without recording tokens or direct user identifiers.
+For public browser deletion, apply [`20260809120000_add_account_deletion_recovery.sql`](../../supabase/migrations/20260809120000_add_account_deletion_recovery.sql), then deploy and verify compatible `delete-account` and `account-deletion-status` functions before publishing an enabled deletion page or compatible mobile client. `delete-account` requires `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; status recovery requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep all of them only in protected function configuration. Then verify both production Pages preflights, intentionally disallowed origins, native no-`Origin` requests in a controlled test, ambiguous-response recovery with one unchanged key, and one disposable-account deletion. Evidence must record project/function identity, deployment version, HTTP status and CORS headers, strict receipt validation, Auth removal, Postgres cleanup, and private `user-media` cleanup without recording tokens, recovery keys, or direct user identifiers.
 
 ## Review checklist
 

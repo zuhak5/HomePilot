@@ -35,8 +35,8 @@ enum RewardShowResult {
 
 @visibleForTesting
 Duration adRetryDelayForFailure(int failureCount) {
-  if (failureCount <= 0 || failureCount >= 4) return Duration.zero;
-  const seconds = [2, 4, 8];
+  if (failureCount <= 0 || failureCount > 4) return Duration.zero;
+  const seconds = [2, 8, 30, 60];
   return Duration(seconds: seconds[failureCount - 1]);
 }
 
@@ -98,6 +98,12 @@ class NativeAdPresentationDepth extends Notifier<int> {
   void push() => state++;
 
   void pop() => state = (state - 1).clamp(0, 1 << 20);
+
+  void popAfterWidgetTeardown() {
+    scheduleMicrotask(() {
+      if (ref.mounted) pop();
+    });
+  }
 }
 
 Future<T> runWithNativeAdsSuspended<T>(

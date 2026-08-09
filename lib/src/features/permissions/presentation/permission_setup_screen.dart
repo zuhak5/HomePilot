@@ -198,8 +198,7 @@ class _CapabilityStatusCard extends StatelessWidget {
     final title = switch (capability) {
       PermissionCapability.deviceLocation =>
         context.l10n.permissionSetupWeatherTitle,
-      PermissionCapability.notifications =>
-        context.l10n.notifications,
+      PermissionCapability.notifications => context.l10n.notifications,
       PermissionCapability.exactReminderTiming =>
         context.l10n.permissionSetupExactOptionalTitle,
     };
@@ -348,17 +347,14 @@ class _CapabilityStatusCard extends StatelessWidget {
                   if (showsPrimaryAction)
                     FilledButton.icon(
                       onPressed: isBusy ? null : onAction,
-                      icon: Icon(
-                        switch (capability) {
-                          PermissionCapability.deviceLocation =>
-                            Symbols.my_location_rounded,
-                          PermissionCapability.notifications =>
-                            Symbols.notifications_active_rounded,
-                          PermissionCapability.exactReminderTiming =>
-                            Symbols.alarm_on_rounded,
-                        },
-                        size: 18,
-                      ),
+                      icon: Icon(switch (capability) {
+                        PermissionCapability.deviceLocation =>
+                          Symbols.my_location_rounded,
+                        PermissionCapability.notifications =>
+                          Symbols.notifications_active_rounded,
+                        PermissionCapability.exactReminderTiming =>
+                          Symbols.alarm_on_rounded,
+                      }, size: 18),
                       label: Text(switch (capability) {
                         PermissionCapability.deviceLocation =>
                           context.l10n.permissionSetupUseCurrentLocation,
@@ -415,9 +411,7 @@ class _CapabilityStatusCard extends StatelessWidget {
         if (value == null) return null;
         if (value.mode == WeatherAreaMode.manual &&
             value.selectedArea != null) {
-          return context.l10n.permissionSelectedArea(
-            value.selectedArea!.label,
-          );
+          return context.l10n.permissionSelectedArea(value.selectedArea!.label);
         }
         if (value.mode == WeatherAreaMode.device &&
             value.effectiveState == EffectiveCapabilityState.active) {
