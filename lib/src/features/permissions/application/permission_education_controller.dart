@@ -761,10 +761,11 @@ class PermissionEducationController
   }
 
   Future<void> _openSettingsNow(PermissionCapability capability) async {
-    final nextAction = state.capabilityStatuses[capability]?.nextAction;
-    if (nextAction != PermissionNextAction.openAppSettings &&
-        nextAction != PermissionNextAction.openLocationSettings &&
-        nextAction != PermissionNextAction.openExactAlarmSettings) {
+    final permissionState =
+        state.capabilityStatuses[capability]?.permissionState;
+    if (permissionState == null ||
+        permissionState == AppPermissionState.restricted ||
+        permissionState == AppPermissionState.unavailable) {
       state = state.copyWith(
         operationFailure: PermissionOperationFailure(
           capability: capability,
