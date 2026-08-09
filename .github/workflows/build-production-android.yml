@@ -122,6 +122,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           npm ci
           node tool/validate_google_release_contracts.mjs
+          cd supabase/functions/admob-ssv-handler && deno install --frozen && cd ../../..
+          cd supabase/functions/delete-account && deno install --frozen && cd ../../..
           deno check --frozen supabase/functions/admob-ssv-handler/index.ts
           deno check --frozen supabase/functions/delete-account/index.ts
           deno test --frozen --allow-env --allow-net `

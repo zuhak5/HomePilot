@@ -33,6 +33,8 @@ jobs:
           supabase/functions/delete-account/index_test.ts
       - name: Type-check locked Edge Functions
         run: |
+          cd supabase/functions/admob-ssv-handler && deno install --frozen && cd ../../..
+          cd supabase/functions/delete-account && deno install --frozen && cd ../../..
           deno check --frozen supabase/functions/admob-ssv-handler/index.ts
           deno check --frozen supabase/functions/delete-account/index.ts
       - name: Test locked Edge Functions
