@@ -1,5 +1,49 @@
 # Security Policy
 
+## Active production containment
+
+Production release, signing, Sentry, Supabase mutation/advisor, Play AAB, and
+VersionDeck publication rails were paused on 2026-08-11, and GitHub Pages was
+unpublished without deleting historical Build 44 evidence. The redacted
+evidence, action ledger, limits, and re-enable owners are recorded in
+[`docs/operations/production-containment.md`](docs/operations/production-containment.md).
+Do not treat workflow source or historical release evidence as authorization to
+lift containment.
+
+## Protected source status
+
+GitHub now reports active rules for reviewed, current-check pull requests into
+`main`, automation-only production-tag creation, and no-bypass
+production-tag update/deletion denial. Repository owner `zuhak5` is the
+ruleset owner and `movinesta` and `sijelna` are the independent source
+reviewers. Dedicated GitHub App `homepilot-release-authority-zuhak5` is the
+only production-tag creation bypass and is installed only on this repository
+with Metadata read-only and Contents read/write. There is no standing human or
+administrator bypass; an emergency ruleset edit requires a recorded reason,
+before/after ruleset evidence, restoration, and post-event review.
+
+TASK-002 is complete, but production containment remains active and the app has
+no retained private credential. Later tasks own protected credential
+provisioning, workflow integration, and release authorization. See the
+[`TASK-002 source and tag protection record`](docs/operations/github-source-and-tag-protection.md)
+for exact hosted state, positive/negative probes, and evidence limits.
+
+## GitHub Actions supply chain
+
+Every current external Action reference is pinned to an allowlisted full commit
+SHA with its reviewed upstream release retained as a comment. The deterministic
+contract scans workflows and local composite actions and rejects movable,
+shortened, aliased, unknown, or unreviewed references. See the
+[GitHub Actions supply-chain policy](docs/development/github-actions-supply-chain.md)
+for the owner/release/commit ledger, upstream review notes, Dependabot limits,
+and independent-review procedure.
+
+Action update pull requests never auto-merge. A proposed digest must be checked
+against the official upstream release and security information, the policy and
+ledger must change together, and required CI must pass for the exact HomePilot
+commit. Repository source does not prove that GitHub's hosted owner allowlist or
+require-full-SHA option is enabled; task 05 owns that protected-setting evidence.
+
 ## Reporting a vulnerability
 
 Do not report security vulnerabilities in public issues, pull requests, discussions, screenshots, or release notes.

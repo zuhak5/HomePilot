@@ -1,5 +1,17 @@
 # Android Production Release Rails
 
+> **Production containment is active.** Since 2026-08-11, the Android signing,
+> Sentry publication, GitHub Release, Supabase migration/advisor, Play AAB, and
+> VersionDeck workflow objects are disabled and GitHub Pages is unpublished.
+> Do not dispatch or re-enable a rail from this runbook. Follow the evidence and
+> rail-specific prerequisites in the
+> [TASK-001 containment record](production-containment.md).
+> TASK-002 source/tag protection is complete: reviewed/current-check `main`
+> entry and automation-only immutable production tags are enforced. See the
+> [TASK-002 protection record](github-source-and-tag-protection.md). Production
+> authorization remains blocked by containment and the later environment,
+> credential, workflow, and release-evidence tasks.
+
 ## Scope
 
 This runbook coordinates HomePilot's production Android evidence rails. It does not authorize local signing, backend deployment, Google Play upload, rollout, Sentry mutation, GitHub Release publication, or Pages deployment.
@@ -42,6 +54,9 @@ If source changes after any final-SHA evidence is collected, choose a new final 
 
 ## Strict final-SHA sequence
 
+The sequence below describes the intended protected release contract after
+containment is lifted. It is not currently executable authorization.
+
 1. **Backend database gate.** If the release contains pending database migrations, manually run `Deploy Supabase Migrations` on `main` with the exact current SHA, exact project ref, and `apply-pending-migrations`; inspect the remote list and dry-run evidence and require the post-apply dry run to succeed. Then manually dispatch `Validate Google Backend and Release Contracts` on the same `main` SHA and require success. Its jobs cover locked Deno formatting/type/tests for AdMob SSV, account deletion, and deletion-status recovery; deletion-site/release workflow static tests; Google/Android static contracts; a local Supabase database start, lint, and test cycle; and the protected read-only `Hosted Supabase Advisors` audit. Pull-request and push runs still exercise the local/static jobs without exposing production credentials.
 2. **APK, Sentry, and GitHub Release.** Manually run `Build Production APK` at the same SHA with the required changelog. The APK evidence collector must pass before Sentry mutation. Then require successful Sentry publication, artifact upload, provenance attestation, and GitHub Release creation.
 3. **VersionDeck.** A successful manually dispatched `Build Production APK` run can start `Deploy VersionDeck` through `workflow_run`. VersionDeck checks out that run's SHA, requires it to equal current `main`, rediscovers the GitHub Release, and independently verifies the APK before Pages deployment. A manual recovery dispatch requires the successful current-SHA APK run ID.
@@ -49,7 +64,16 @@ If source changes after any final-SHA evidence is collected, choose a new final 
 
 The workflows intentionally do not encode AAB success as a prerequisite of the APK/VersionDeck rail, and their concurrency groups are distinct. Do not run the protected Android builds concurrently. Keep `main` unchanged until every intended exact-SHA rail and the VersionDeck handoff are complete; VersionDeck fails closed when the APK SHA is not the current `main` SHA. Google Play upload or rollout remains a separate explicitly authorized operator process.
 
-The exact GitHub check-run names to require in `main` branch protection are:
+During containment, the active `main` ruleset requires only the current
+`Format, analyze, and test` context from the sole active workflow object,
+`Validate Flutter`. It is strict and bound to the GitHub Actions integration.
+Requiring checks from a disabled workflow would make the reviewed merge path
+impossible and would not create valid evidence.
+
+Before the backend and release rails can be re-enabled by their owning tasks,
+the following exact pull-request check-run names from
+`Validate Google Backend and Release Contracts` must also be active,
+executable, and added to protected `main`:
 
 - `Deno SSV tests`
 - `Google contract/static checks`
@@ -59,7 +83,30 @@ The manually dispatched final-SHA backend evidence additionally requires
 `Hosted Supabase Advisors`. It is intentionally not a pull-request branch
 protection context because it reads a protected production-environment token.
 
-Verify those three contexts in repository branch-protection settings after merge. Workflow source cannot prove that hosted branch protection requires them.
+Verify all then-current contexts in hosted ruleset settings after their owning
+workflow task merges. Workflow source cannot prove that hosted protection
+requires them.
+
+## Immutable GitHub Actions inputs
+
+All current external `uses:` entries are pinned to reviewed 40-character
+commits without changing their existing major versions. Production workflow
+triggers, permissions, environments, gates, and commands remain unchanged; the
+active read-only validation job adds the required pin-policy contract. The
+authoritative allowlist and source validator are in
+[`tool/github-actions-policy.mjs`](../../tool/github-actions-policy.mjs), and
+the official owner/release/commit ledger plus review procedure is in the
+[GitHub Actions supply-chain policy](../development/github-actions-supply-chain.md).
+Run `npm run test:release-workflows` for the current inventory and negative
+fixtures.
+
+Dependabot is discovery automation only. Action-digest updates require release
+and security-note review, synchronized workflow comments/allowlist/ledger,
+independent approval, and exact-commit CI; they never auto-merge. The pins are
+source evidence, not proof that a production workflow executed successfully or
+that hosted Actions owner/require-SHA policy is enabled. Task 05 owns that
+hosted policy. Production containment still prohibits dispatching a rail merely
+to obtain execution evidence.
 
 ## Required GitHub configuration names
 

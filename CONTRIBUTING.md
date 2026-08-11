@@ -30,6 +30,47 @@ npm run supabase:test
 
 Use the local ports in `supabase/config.toml`. Real configuration files and Supabase environment files are intentionally ignored.
 
+## Hosted contribution policy
+
+The active GitHub ruleset for `main` accepts changes only through a pull
+request with one current independent approval, approval of the latest push by
+someone other than its author, resolved review threads, and the strict
+`Format, analyze, and test` GitHub Actions context. Stale approvals are
+dismissed. Administrators have no standing bypass, so direct and force pushes
+are expected to fail.
+
+The current independent reviewers are `movinesta` and `sijelna`;
+repository/ruleset ownership remains with `zuhak5`. Record any emergency
+ruleset change before acting, preserve hosted before/after evidence, restore
+the rules, and obtain post-event review. Production-pattern tags can be
+created only by the repository-scoped
+`homepilot-release-authority-zuhak5` GitHub App and cannot be moved or deleted
+by that app or by humans. The exact hosted configuration is recorded in the
+[`TASK-002 protection record`](docs/operations/github-source-and-tag-protection.md).
+Do not treat completed source/tag protection as permission to re-enable
+contained workflows or publish a release.
+
+## GitHub Actions updates
+
+Every external Action reference must use a reviewed 40-character commit SHA
+and retain its upstream point release as a comment. The authoritative allowlist
+and negative-fixture contract are in
+[`tool/github-actions-policy.mjs`](tool/github-actions-policy.mjs); the reviewed
+owner, release, digest, and update record is in the
+[GitHub Actions supply-chain policy](docs/development/github-actions-supply-chain.md).
+Run the contract with:
+
+```powershell
+npm run test:release-workflows
+```
+
+Dependabot may open weekly GitHub Actions update pull requests and request the
+named independent reviewers. It must not auto-merge them. Confirm official
+repository ownership, inspect release/security and runner notes, peel annotated
+tags to their commit, update the workflow comment/allowlist/ledger together,
+and obtain current independent review plus exact-commit CI. Do not replace a
+pin with a tag or approve a digest solely because automation proposed it.
+
 ## Change requirements
 
 ### Flutter and Dart

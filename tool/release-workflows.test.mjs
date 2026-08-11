@@ -2,11 +2,120 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
+import {
+  validateActionSource,
+  validateRepositoryActionReferences,
+} from './github-actions-policy.mjs';
+
 const read = async (path) =>
   (await fs.readFile(new URL(`../${path}`, import.meta.url), 'utf8')).replaceAll(
     '\r\n',
     '\n',
   );
+
+test('GitHub Actions use only reviewed immutable references', async () => {
+  const result = await validateRepositoryActionReferences();
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.externalReferences, 45);
+  assert.equal(result.localReferences, 0);
+  assert.equal(result.files.length, 7);
+});
+
+test('GitHub Actions policy rejects mutable, shortened, and unowned references', () => {
+  const fullSha = 'd23441a48e516b6c34aea4fa41551a30e30af803';
+  const fixtures = [
+    ['major tag', 'uses: actions/checkout@v6', /full 40-character/],
+    ['branch', 'uses: actions/checkout@main', /full 40-character/],
+    ['short SHA', 'uses: actions/checkout@d23441a', /full 40-character/],
+    [
+      'unknown owner',
+      `uses: example/checkout@${fullSha} # v6.1.0`,
+      /not an owned, reviewed action/,
+    ],
+    [
+      'unowned action',
+      `uses: actions/cache@${fullSha} # v6.1.0`,
+      /not an owned, reviewed action/,
+    ],
+    [
+      'YAML anchor',
+      `uses: &checkout actions/checkout@${fullSha} # v6.1.0`,
+      /YAML anchors/,
+    ],
+    [
+      'YAML alias key',
+      `*uses: actions/checkout@${fullSha} # v6.1.0`,
+      /invalid YAML|YAML aliases/,
+    ],
+    [
+      'escaped uses key',
+      '"u\\u0073es": actions/checkout@main',
+      /full 40-character/,
+    ],
+    [
+      'unreviewed digest',
+      'uses: actions/checkout@0000000000000000000000000000000000000000 # v6.1.0',
+      /not a reviewed release/,
+    ],
+    [
+      'missing release comment',
+      `uses: actions/checkout@${fullSha}`,
+      /exact comment # v6.1.0/,
+    ],
+    [
+      'local path escape',
+      'uses: ./tool/unowned-action',
+      /owned under \.\/\.github\/actions/,
+    ],
+  ];
+
+  for (const [name, source, expected] of fixtures) {
+    const result = validateActionSource(`steps:\n  - ${source}\n`, `${name}.yml`);
+    assert.match(result.errors.join('\n'), expected, name);
+  }
+
+  const explicitKey = validateActionSource(
+    'steps:\n  - ? uses\n    : actions/checkout@main\n',
+    'explicit-key.yml',
+  );
+  assert.match(explicitKey.errors.join('\n'), /full 40-character/);
+
+  const aliasedKey = validateActionSource(
+    `usesKey: &usesKey uses\nsteps:\n  - ? *usesKey\n    : actions/checkout@${fullSha}\n`,
+    'aliased-key.yml',
+  );
+  assert.match(aliasedKey.errors.join('\n'), /YAML anchors|YAML aliases/);
+
+  const multilineEscapedKey = validateActionSource(
+    'steps:\n  - ? "u' +
+      '\\' +
+      '\n      ses"\n    : actions/checkout@main\n',
+    'multiline-escaped-key.yml',
+  );
+  assert.match(multilineEscapedKey.errors.join('\n'), /full 40-character/);
+
+  const taggedKey = validateActionSource(
+    `steps:\n  - !homepilot/key uses: actions/checkout@${fullSha} # v6.1.0\n`,
+    'tagged-key.yml',
+  );
+  assert.match(taggedKey.errors.join('\n'), /invalid YAML|YAML tags/);
+
+  const punctuatedAlias = validateActionSource(
+    `key: &homepilot.key uses\nsteps:\n  - ? *homepilot.key\n    : actions/checkout@${fullSha}\n`,
+    'punctuated-alias.yml',
+  );
+  assert.match(
+    punctuatedAlias.errors.join('\n'),
+    /invalid YAML|YAML anchors|YAML aliases/,
+  );
+
+  const unusualButOwned = validateActionSource(
+    `steps:\n  - { uses: actions/checkout@${fullSha} } # v6.1.0\n  - run: |\n      echo "uses: actions/checkout@v6"\n`,
+    'flow-and-block.yml',
+  );
+  assert.deepEqual(unusualButOwned.errors, []);
+  assert.equal(unusualButOwned.externalReferences, 1);
+});
 
 test('Play AAB rail uses protected production names and verifiable evidence', async () => {
   const workflow = await read('.github/workflows/build-play-android.yml');
@@ -26,7 +135,10 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
   assert.match(workflow, /jarsigner -verify/);
   assert.match(workflow, /keytool -printcert -jarfile/);
   assert.match(workflow, /collect_android_release_evidence\.ps1/);
-  assert.match(workflow, /attest-build-provenance@v3/);
+  assert.match(
+    workflow,
+    /attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3\.0\.0/,
+  );
   assert.match(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
   assert.match(workflow, /\.path -eq "\.github\/workflows\/validate-google-backend\.yml"/);
   assert.match(workflow, /\.head_branch -eq "main"/);

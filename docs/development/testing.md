@@ -42,6 +42,47 @@ Use Node's test runner for manifest schema, build status, cache policy, relative
 
 The AAB and APK rails are separate. Both require a successful `Validate Google Backend and Release Contracts` run for their exact commit SHA. The AAB rail verifies one signed bundle and emits manifest, dependency, signing, checksum, and provenance evidence; it does not upload to Google Play. The APK rail additionally verifies the standalone signer/package/version, mutates Sentry release state, and creates a GitHub Release. Play Console acceptance, Play App Signing, rollout, public Pages behavior, hosted backend deployment, and physical-device behavior remain operator/hosted evidence. Local tests and workflow-source tests cannot substitute for them.
 
+### Hosted source-protection tests
+
+The current `main` ruleset strictly requires the real `Format, analyze, and
+test` context from the active `Validate Flutter` workflow plus one independent
+review and resolved conversations. The backend workflow object remains
+disabled under production containment, so its three pull-request job contexts
+must not be required until the owning tasks make them active and executable.
+
+TASK-002 probes have demonstrated rejection of administrator direct and force
+pushes, an unreviewed merge, human production-pattern tag creation, and app
+tag movement/deletion. A reviewer-approved empty pull request with the real
+required check merged successfully. The narrowly installed release app created
+one disposable production-pattern tag, after which its short-lived token and
+private-key material were destroyed and the test ref was removed under an
+exact temporary exclusion. See the
+[`TASK-002 protection record`](../operations/github-source-and-tag-protection.md).
+Do not replace missing hosted evidence with local source inspection.
+
+### GitHub Actions source contract
+
+`tool/github-actions-policy.mjs` scans every workflow and any local composite
+action. It allows only the reviewed owner/action/commit pairs in its ledger,
+requires full 40-character SHAs and exact release comments, and rejects tags,
+branches, shortened or unknown references, YAML aliases, and local-action path
+escapes. The locked YAML parser evaluates escaped and explicit mapping keys
+semantically, while custom tags, anchors, and aliases fail closed.
+`tool/release-workflows.test.mjs` validates the current 45-reference inventory
+and negative fixtures:
+
+```powershell
+npm run test:release-workflows
+```
+
+The active `Validate Flutter` job installs the locked tooling dependencies and
+runs this contract before Flutter setup, so the existing required
+`Format, analyze, and test` context fails on a pin-policy regression. The disabled backend workflow also includes the test in source.
+Local execution remains `R-EXECUTED` evidence; completion additionally requires
+an observed successful `CI-RUN` for the exact HomePilot commit. See the
+[reviewed ledger and update procedure](github-actions-supply-chain.md). Task 05
+separately owns hosted require-SHA/owner policy evidence.
+
 ## Standard Flutter commands
 
 ```powershell

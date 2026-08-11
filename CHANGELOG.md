@@ -4,6 +4,40 @@ HomePilot uses Git history, pull requests, and GitHub Releases as the authoritat
 
 The current application version is defined only in `pubspec.yaml`. Released versions may be recorded below after their version and build numbers have been finalized.
 
+## Unreleased
+
+### Security and operations
+
+- Activated immediate production containment: cancelled the stale queued Pages
+  run, disabled every hosted workflow object that could expose pooled production
+  secrets, sign artifacts, mutate backend/release state, write repository
+  content, or publish VersionDeck, and unpublished GitHub Pages.
+- VersionDeck downloads and the public browser account-deletion page are
+  intentionally unavailable during containment. The in-app deletion flow is
+  unchanged.
+- Preserved the Build 44 tag, GitHub Release, APK/checksum assets, digests,
+  attestation, APK/AAB Actions evidence, Sentry release identity, signing keys,
+  and historical Pages deployment records without rotation or replacement.
+- Recorded redacted evidence, operator ownership, re-enable prerequisites, and
+  remaining hosted/device/console limitations in the TASK-001 containment
+  record.
+- Activated no-bypass reviewed-PR/current-check protection for `main` and
+  no-bypass update/deletion protection for production release tags. Direct and
+  force pushes plus disposable tag movement/deletion were rejected by hosted
+  rules.
+- Completed TASK-002 with a dedicated GitHub App installed only on HomePilot
+  (Metadata read-only, Contents read/write) as the sole production-tag
+  creation bypass. Hosted probes rejected human creation and app
+  movement/deletion while permitting one disposable app-created tag; its token
+  and private-key material were destroyed after the proof. Production
+  containment and later release-rail prerequisites remain in force.
+- Pinned all 45 external GitHub Actions references to reviewed full commit SHAs,
+  retained exact upstream release labels, and added the fail-closed owner/digest
+  contract to the active required validation job with mutable, shortened,
+  obfuscated, aliased, and unknown-reference fixtures. Weekly Dependabot
+  discovery cannot auto-merge; hosted require-SHA policy and exact-commit CI
+  evidence remain separately required before task closure.
+
 ## 1.5.0 (Build 44) — 2026-08-09
 
 ### Fixed and Improved

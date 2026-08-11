@@ -67,6 +67,12 @@ Documentation is part of the implementation contract. Humans, AI agents, bots, a
 
 ## Production releases
 
+Production publication is currently contained. The signing, backend mutation,
+Sentry, release, Play AAB, and VersionDeck workflow objects are disabled, and
+the public GitHub Pages site is intentionally unavailable. Historical releases
+remain preserved. See the
+[`TASK-001 containment record`](docs/operations/production-containment.md).
+
 Production Android builds are created only through the protected GitHub Actions workflow. The workflow validates production configuration, signing identity, package metadata, APK debuggability, checksum, tests, Sentry release publication, provenance, and GitHub Release publication. Do not use the production build or release commands as ordinary local development commands.
 
 See [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md).

@@ -1,5 +1,12 @@
 # Backend Migrations and Edge Functions
 
+> **Hosted mutation containment is active.** The Supabase migration workflow,
+> the secret-bearing Advisor paths, and retained legacy repository-write
+> workflow objects have been disabled since 2026-08-11. Local validation is
+> still allowed, but no hosted migration or function deployment is authorized.
+> See the [TASK-001 containment record](../operations/production-containment.md)
+> before any rail is re-enabled.
+
 ## Migration policy
 
 Supabase SQL migrations are ordered, append-only production history. Once a migration may have been applied outside a disposable local environment, do not edit it to change behavior. Add a new forward migration.
@@ -25,6 +32,9 @@ Each migration should be:
 8. Inspect the generated database diff where available.
 9. Document deployment order and recovery.
 10. Apply to hosted environments only through an explicitly authorized process.
+
+Active TASK-001 containment is not such authorization. The owning later task
+must identify the exact target, change, operator, and protection prerequisites.
 
 ## Destructive changes
 

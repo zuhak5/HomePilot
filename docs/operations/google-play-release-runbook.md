@@ -1,5 +1,13 @@
 # Google Play AAB Release Runbook
 
+> **Play release containment is active.** The signed AAB workflow object has
+> been disabled since 2026-08-11, the observed Google account was not enrolled
+> in Play Console, and the repository has no automated Play upload. Do not
+> build, upload, or roll out from this runbook until the signing/Play owner and
+> prerequisites in the
+> [TASK-001 containment record](production-containment.md) authorize the exact
+> rail.
+
 ## Purpose and authority
 
 This runbook governs the handoff from HomePilot's verified AAB build artifact to a manually controlled Google Play release. It does not authorize a Play upload or rollout by itself.

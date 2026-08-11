@@ -1,6 +1,6 @@
 # HomePilot Privacy and Data Use
 
-_Last reviewed: August 9, 2026_
+_Last reviewed: August 11, 2026_
 
 This document describes the data-handling design represented by the current HomePilot source code. It is technical project documentation, not a substitute for jurisdiction-specific legal review or store disclosures.
 
@@ -70,6 +70,10 @@ Local data remains until it is deleted through application behavior, cleared by 
 For in-app account deletion, HomePilot requires recent same-identity Google reauthentication, first attempting lightweight verification of the already signed-in account and showing Google's chooser only when that is unavailable. It then suspends synchronization, creates a secure recovery operation, invokes the protected `delete-account` Edge Function, and verifies the deletion result. If the destructive response is ambiguous or the app restarts, it queries `account-deletion-status` with the same key and expected account before completing device-local database, media, session, notification, cache, and recovery-record cleanup. Pending or temporary status preserves the synchronization barrier and record; a definitive not-found result clears the stale record without claiming deletion.
 
 The external web resource performs real Google OAuth through Supabase with PKCE, verifies the authenticated user, requires explicit confirmation, and calls the same protected Edge Function. It generates a 32-byte recovery key with Web Crypto, keeps the unresolved key and expected user ID in `sessionStorage`, and can query the status function after a reload or ambiguous response without persisting a bearer token. It accepts success only from a completed receipt for that same user. The backend removes the account's synchronized Postgres data, private Supabase Storage objects, cleanup job, and Auth user.
+
+The external web resource is intentionally unavailable while TASK-001
+production containment is active because GitHub Pages is unpublished. The
+in-app deletion flow and its data handling remain available and unchanged.
 
 The private deletion-recovery table stores a SHA-256 request hash, a SHA-256 subject binding, bounded stage/error metadata, and the active user UUID only until completion; it does not store the raw recovery key. Completion clears the active UUID. Operations expire after seven days by default and an hourly scheduled job prunes expired rows. Hosted database backup, replica, log, or legal-hold retention remains an operator/service-policy concern rather than repository proof.
 
