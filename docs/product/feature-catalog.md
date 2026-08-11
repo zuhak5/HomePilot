@@ -49,6 +49,11 @@ Transient feedback has one protected queue. Passive messages and errors wait beh
 - Account deletion with recent reauthentication and coordinated local/remote cleanup.
 - A public VersionDeck deletion page that authenticates with Google OAuth PKCE through Supabase, requires explicit confirmation, and invokes the protected deletion function with the signed-in bearer token.
 
+The VersionDeck page is intentionally unpublished during active TASK-001
+production containment, so the public browser deletion route is currently
+unavailable. The in-app authenticated deletion flow is unchanged. See the
+[`TASK-001 containment record`](../operations/production-containment.md).
+
 Signed-out or offline operation must remain explicit; the application should not imply cloud protection when synchronization is unavailable.
 
 The public page is not an anonymous deletion endpoint. It accepts success only when the protected function returns a deletion receipt for the authenticated user. Repository coverage does not prove the page, OAuth redirect configuration, or Edge Function is deployed to production.
@@ -105,6 +110,11 @@ Repository tests cover the application eligibility, ownership, native schema, an
 Sentry provides technical error and performance diagnostics when enabled. The intended policy excludes user content and direct identifiers and disables screenshots, session replay, view hierarchy, and raw HTTP payload capture.
 
 ## Distribution
+
+Production distribution is currently paused under TASK-001 containment. The
+workflow objects that could sign, mutate, publish, or read pooled production
+secrets are disabled and GitHub Pages is unpublished; historical Build 44
+evidence remains retained.
 
 Release validation begins with an exact-SHA backend workflow covering Edge Functions, browser deletion/static contracts, and local-stack database security. Separate protected rails then produce a Play AAB and a standalone APK. The AAB rail creates evidence and provenance but does not upload to Google Play; Console upload and rollout require explicit operator authorization and evidence. The APK rail can publish Sentry state and a GitHub Release, after which VersionDeck independently verifies release identity before exposing a download. Workflow source is not evidence that any hosted run, upload, release, or deployment succeeded.
 

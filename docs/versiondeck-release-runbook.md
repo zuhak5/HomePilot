@@ -1,5 +1,13 @@
 # VersionDeck Release Runbook
 
+> **Containment status:** GitHub Pages and all public VersionDeck paths were
+> unpublished on 2026-08-11. The root, release manifest, and public browser
+> account-deletion page are intentionally unavailable, and the deployment
+> workflow object is disabled. Cached release records containing the last live
+> manifest are beyond the executable 24-hour cache limit and disable downloads.
+> Do not republish or manually re-enable the workflow; see the
+> [TASK-001 containment record](operations/production-containment.md).
+
 ## Purpose
 
 VersionDeck is the public static site for verified HomePilot APK releases and HomePilot's external account-deletion page. The release area is not the build system and does not trust release notes alone; it independently verifies release artifacts before enabling downloads. The account-deletion area is a separate authenticated client of the protected Supabase deletion backend and must not affect release trust.
@@ -78,6 +86,9 @@ Pull-request builds must pass `--allow-inert-account-deletion-config true` expli
 The workflow currently enumerates test files explicitly. When a new focused test file is added, update the canonical test command and workflow together so it cannot be skipped.
 
 ## Main/release deployment
+
+This section is the post-containment deployment contract. Its steps must not be
+run until the containment record's VersionDeck/Pages prerequisites are met.
 
 The deployment workflow:
 

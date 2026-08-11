@@ -1,5 +1,11 @@
 # Sentry Operations
 
+> **Production release publication is contained.** The Sentry-bearing Android
+> release workflow has been disabled since 2026-08-11. Historical Build 44
+> release/deploy evidence is retained, but no new Sentry release mutation is
+> authorized. Re-enable only under the owner and prerequisite matrix in the
+> [TASK-001 containment record](operations/production-containment.md).
+
 ## Purpose
 
 Sentry provides technical crash and performance diagnostics for HomePilot when enabled. It must not become a store of user content, direct identifiers, location, credentials, media, or raw application payloads.
@@ -73,6 +79,8 @@ Production release publication is handled by the protected Android build workflo
 The release identifier must correspond to the built application release and source commit. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
 
 Do not run production Sentry release mutation as an ordinary local command.
+During active containment, do not run it through GitHub or the Sentry console
+either.
 
 ## Operational triage
 

@@ -69,6 +69,11 @@ Account deletion must remove the authenticated cloud account and associated priv
 
 ## Browser deletion sequence
 
+> **Current availability:** the public page is intentionally unavailable while
+> TASK-001 production containment is active because GitHub Pages is unpublished.
+> This does not change the in-app deletion sequence or backend contract. See the
+> [containment record](../operations/production-containment.md).
+
 The public account-deletion page is a separate, remote-only client of the same protected backend. Its executable contract is [`download-site/account-deletion.js`](../../download-site/account-deletion.js); it does not reuse a session from an installed HomePilot application.
 
 1. The production static-site build injects the public Supabase URL, public publishable/anonymous key, and canonical callback URL. If that public configuration is missing, disabled, malformed, or points elsewhere, the page keeps sign-in disabled and reports that deletion is unavailable.

@@ -20,11 +20,14 @@ This directory is the canonical entry point for product, architecture, developme
 
 - [`development/getting-started.md`](development/getting-started.md): workstation setup and local execution.
 - [`development/testing.md`](development/testing.md): test strategy and commands.
+- [`development/github-actions-supply-chain.md`](development/github-actions-supply-chain.md): immutable Action ledger, source contract, and reviewed update ownership.
 - [`development/localization-and-rtl.md`](development/localization-and-rtl.md): English/Arabic localization and RTL requirements.
 - [`development/transient-feedback.md`](development/transient-feedback.md): protected Undo, batching, ordering, accessibility, and layout contracts for transient feedback.
 
 ## Operations
 
+- [`operations/production-containment.md`](operations/production-containment.md): active TASK-001 production pause, redacted evidence, and rail-specific re-enable ownership.
+- [`operations/github-source-and-tag-protection.md`](operations/github-source-and-tag-protection.md): active partial TASK-002 `main`/tag rules, executed denial evidence, authority policy, and unresolved tag-creation blocker.
 - [`operations/release-runbook.md`](operations/release-runbook.md): protected standalone APK, GitHub Release, and VersionDeck release process.
 - [`operations/google-play-release-runbook.md`](operations/google-play-release-runbook.md): verified AAB evidence and the separately authorized Google Play handoff.
 - [`operations/google-play-data-safety-evidence.md`](operations/google-play-data-safety-evidence.md): release-scoped Data safety evidence worksheet and operator-owned gaps.
