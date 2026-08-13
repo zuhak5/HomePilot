@@ -1,9 +1,9 @@
 # GitHub Environment Credential Ownership
 
-> **TASK-004 status:** Source and hosted secret-name placement now use split
-> trust domains, but task closure still requires negative workflow evidence and
-> owner-scoped credential review. Do not dispatch protected rails during active
-> containment.
+> **TASK-004 status:** Complete as of 2026-08-13. Split trust domains,
+> owner-scoped credential placement, negative branch-dispatch rejection, and
+> approved exact-main hosted Advisor runs were verified without recording
+> secret values.
 
 ## Purpose
 
@@ -48,21 +48,33 @@ environment secrets were re-entered and verified on 2026-08-13.
 
 ## Required hosted evidence
 
-Before task 04 can close, capture without secret values:
+Task 04 closure evidence was captured on 2026-08-13 without secret values:
 
-1. Environment API or screenshots showing required reviewers, disabled admin
-   bypass, and `main` branch policy for every environment in the map.
-2. Secret-name inventory showing each required secret exists only in its
-   intended environment and the legacy pooled `production` environment no
-   longer holds active pooled secrets.
-3. Credential owner confirmation that Advisor uses a read-only token and
-   migration/admin credentials are separate.
-4. Negative dispatch evidence that arbitrary branch/ref Advisor runs fail
-   before secret injection.
-5. Cross-domain workflow contract evidence showing no rail references another
-   rail's secret names.
-6. Deployment history or workflow-run evidence for approved exact-current-main
-   protected jobs after the split, while containment remains respected.
+1. Environment API evidence showed required reviewers `movinesta` and
+   `sijelna`, disabled admin bypass, and a custom `main` branch policy for
+   `production-supabase-advisors`, `production-supabase-migrations`,
+   `production-play-signing`, `production-android-signing`,
+   `production-sentry`, `production-github-release`, and `github-pages`.
+2. Secret-name inventory showed each required secret only in its intended
+   split environment. The legacy pooled `production` environment had no active
+   secret names.
+3. Credential placement confirmed Advisor uses
+   `SUPABASE_ADVISOR_ACCESS_TOKEN`, while migration/admin access uses only
+   `SUPABASE_MIGRATION_ACCESS_TOKEN` and `SUPABASE_MIGRATION_DB_PASSWORD`.
+4. Negative branch dispatches failed before secret injection:
+   `Audit Supabase Advisors` run `31701249975` failed in no-secret
+   `Require current main Advisor source` / `Reject a non-main dispatch`, and
+   `Validate Google Backend and Release Contracts` run `31701252869` failed in
+   the same preflight while `Hosted Supabase Advisors` remained skipped.
+5. Cross-domain workflow contract evidence passed through
+   `npm run test:release-workflows`, which enumerates environment and secret
+   ownership and rejects cross-domain secret references.
+6. Approved exact-current-main hosted Advisor runs succeeded on merged SHA
+   `197fd7cd4653caa366a87b94f52fc3dbe027a28a`: standalone Advisor run
+   `31701549478` and backend validation run `31701552364`. In both runs the
+   no-secret preflight passed, the protected job waited for
+   `production-supabase-advisors`, and the secret-bearing job revalidated
+   current `origin/main` after approval before querying Advisors.
 
 Do not record secret values, token bodies, keystore material, private keys,
 database passwords, Sentry tokens, or private user data in evidence.

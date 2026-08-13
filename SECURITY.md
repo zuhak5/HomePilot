@@ -23,10 +23,11 @@ administrator bypass; an emergency ruleset edit requires a recorded reason,
 before/after ruleset evidence, restoration, and post-event review.
 
 TASK-002 is complete, but production containment remains active and the app has
-no retained private credential. Later tasks own protected credential
-provisioning, workflow integration, and release authorization. TASK-004 source
-and hosted secret-name placement now define split GitHub credential
-environments, but closure still requires negative run evidence. See the
+no retained private credential. Later tasks own release authorization and any
+credential rotation decision. TASK-004 split GitHub credential environments are
+complete: hosted inventory, branch policies, reviewer gates, negative
+branch-dispatch rejection, and approved exact-main Advisor runs were recorded.
+See the
 [`TASK-002 source and tag protection record`](docs/operations/github-source-and-tag-protection.md)
 for exact hosted source/tag state, positive/negative probes, and evidence
 limits, and the
