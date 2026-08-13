@@ -19,7 +19,7 @@ proof that hosted secrets or reviewers are correct.
 | `production-supabase-migrations` | Supabase migration/admin deployment | `main` | Required, prevent self-review | `SUPABASE_URL` | `SUPABASE_MIGRATION_ACCESS_TOKEN`, `SUPABASE_MIGRATION_DB_PASSWORD` | `Apply pending production migrations` |
 | `production-play-signing` | Google Play upload-key AAB build evidence | `main` | Required, prevent self-review | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_DSN` | `PLAY_UPLOAD_KEYSTORE_BASE64`, `PLAY_UPLOAD_KEY_ALIAS`, `PLAY_UPLOAD_KEY_PASSWORD`, `PLAY_UPLOAD_STORE_PASSWORD` | `Build and verify signed production AAB` |
 | `production-android-signing` | Standalone APK signing and artifact evidence | `main` | Required, prevent self-review | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_DSN` | `ANDROID_APK_KEYSTORE_BASE64`, `ANDROID_APK_KEY_ALIAS`, `ANDROID_APK_KEY_PASSWORD`, `ANDROID_APK_STORE_PASSWORD` | `Build signed production APK` |
-| `production-sentry` | Sentry release/deploy mutation | `main` | Required, prevent self-review | `SENTRY_ORG`, `SENTRY_PROJECT` | `SENTRY_AUTH_TOKEN` | `Publish Sentry release` |
+| `production-sentry` | Sentry release/deploy mutation | `main` | Required, prevent self-review | `SENTRY_ORG`, `SENTRY_PROJECT` | `SENTRY_AUTH_TOKEN` | `Publish Sentry release`, `Create Sentry deploy marker` |
 | `production-github-release` | GitHub Release and provenance mutation | `main` | Required, prevent self-review | None | None | `Publish GitHub Release` |
 | `github-pages` | VersionDeck Pages publication | `main` | Required, prevent self-review | None in deploy job | None | `Publish VersionDeck` |
 
@@ -38,10 +38,10 @@ environment secrets were re-entered and verified on 2026-08-13.
 - Advisor jobs check out only the validated SHA with persisted credentials
   disabled and use `SUPABASE_ADVISOR_ACCESS_TOKEN`, not migration/admin
   authority.
-- APK signing, Sentry publication, and GitHub Release publication use separate
-  jobs and environments. The signing job uploads an immutable APK/checksum/
-  evidence handoff; later jobs re-download and verify that handoff before their
-  own mutations.
+- APK signing, Sentry publication, GitHub Release publication, and Sentry
+  deploy-marker creation use separate jobs. The signing job uploads an
+  immutable APK/checksum/evidence handoff; later jobs re-download and verify
+  that handoff or the published ledger state before their own mutations.
 - Artifact handoffs may contain built artifacts, checksums, safe evidence, and
   symbol material required by Sentry, but never secret values or temporary
   signing/configuration files.

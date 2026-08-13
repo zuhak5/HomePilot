@@ -60,6 +60,12 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   manually dispatched backend aggregate, and includes a no-mutation protected
   dry-run workflow to prove stale, skipped, renamed, or mismatched backend
   evidence cannot authorize later rails.
+- Tightened release and migration mutation ordering so downstream rails restore
+  the protected dry-run attempt ledger by run ID, revalidate it immediately
+  before irreversible API calls, bind APK/AAB digests before publication or
+  attestation, defer Sentry deploy markers until after verified GitHub Release
+  publication, and retain migration/apply/no-pending ledger evidence for
+  idempotent reconciliation.
 
 ## 1.5.0 (Build 44) — 2026-08-09
 

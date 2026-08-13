@@ -7,6 +7,14 @@ on:
         description: "Google Play internal-track release notes"
         required: false
         type: string
+      release_attempt_id:
+        description: "Release attempt ID from a successful Release Attempt Dry Run"
+        required: true
+        type: string
+      release_attempt_run_id:
+        description: "Successful Release Attempt Dry Run run ID for this source SHA"
+        required: true
+        type: string
 
 concurrency:
   group: homepilot-play-release
@@ -19,6 +27,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
       attempt_id: ${{ steps.attempt.outputs.attempt_id }}
@@ -69,33 +78,42 @@ jobs:
           echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
 
-      - name: Create release attempt ledger
+      - name: Restore canonical release attempt ledger
         id: attempt
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE_ATTEMPT_ID: ${{ inputs.release_attempt_id }}
+          INPUT_RELEASE_ATTEMPT_RUN_ID: ${{ inputs.release_attempt_run_id }}
         run: |
           set -euo pipefail
+          if [[ ! "$INPUT_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID." >&2
+            exit 1
+          fi
           mkdir -p release-attempt
-          node tool/release_attempt_ledger.mjs create \
+          gh run download "$INPUT_RELEASE_ATTEMPT_RUN_ID" \
+            --name "HomePilot-release-attempt-dry-run-$INPUT_RELEASE_ATTEMPT_ID" \
+            --dir release-attempt-source
+          cp release-attempt-source/release-attempt.prerequisites-verified.json \
+            release-attempt/release-attempt.prerequisites-verified.json
+          node tool/release_attempt_ledger.mjs verify-attempt \
+            --attempt-file release-attempt/release-attempt.prerequisites-verified.json \
+            --attempt-id "$INPUT_RELEASE_ATTEMPT_ID" \
             --repository "$GITHUB_REPOSITORY" \
             --source-sha "${{ steps.source.outputs.sha }}" \
-            --source-ref "$GITHUB_REF" \
-            --event "$GITHUB_EVENT_NAME" \
-            --workflow-path ".github/workflows/build-play-android.yml" \
-            --target-kind "aab" \
-            --target-environment "production-play-signing" \
-            --version-name "${{ steps.metadata.outputs.version_name }}" \
-            --version-code "${{ steps.metadata.outputs.build_number }}" \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --output release-attempt/release-attempt.json
-          attempt_id="$(node -p "JSON.parse(require('node:fs').readFileSync('release-attempt/release-attempt.json', 'utf8')).attempt_id")"
+            --state prerequisites_verified \
+            --required-evidence-keys backend_validation \
+            --output release-attempt/release-attempt.validation.json
+          attempt_id="$(node -p "JSON.parse(require('node:fs').readFileSync('release-attempt/release-attempt.prerequisites-verified.json', 'utf8')).attempt_id")"
+          echo "attempt_id=$attempt_id" >> "$GITHUB_OUTPUT"
           echo "- Release attempt: \`$attempt_id\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release attempt ledger
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: HomePilot-release-attempt-${{ steps.attempt.outputs.attempt_id }}
-          path: release-attempt/release-attempt.json
+          path: release-attempt/release-attempt.prerequisites-verified.json
           if-no-files-found: error
           retention-days: 30
 
@@ -148,6 +166,30 @@ jobs:
           }
           "attempt_id=$env:EXPECTED_RELEASE_ATTEMPT_ID" >> $env:GITHUB_OUTPUT
           "- Release attempt: ``$env:EXPECTED_RELEASE_ATTEMPT_ID``" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Restore canonical release attempt ledger
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ steps.attempt_guard.outputs.attempt_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path "release-attempt" -Force | Out-Null
+          gh run download $env:GITHUB_RUN_ID `
+            --name "HomePilot-release-attempt-$env:EXPECTED_RELEASE_ATTEMPT_ID" `
+            --dir "release-attempt-source"
+          Copy-Item `
+            -LiteralPath "release-attempt-source\release-attempt.prerequisites-verified.json" `
+            -Destination "release-attempt\release-attempt.prerequisites-verified.json" `
+            -Force
+          node tool/release_attempt_ledger.mjs verify-attempt `
+            --attempt-file "release-attempt\release-attempt.prerequisites-verified.json" `
+            --attempt-id "$env:EXPECTED_RELEASE_ATTEMPT_ID" `
+            --repository "$env:GITHUB_REPOSITORY" `
+            --source-sha "$env:GITHUB_SHA" `
+            --state prerequisites_verified `
+            --required-evidence-keys backend_validation `
+            --output "release-attempt\build-attempt-validation.json"
 
       - name: Set up Java 17
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -399,6 +441,67 @@ jobs:
           "evidence_path=$EvidencePath" >> $env:GITHUB_OUTPUT
           "sha256=$Hash" >> $env:GITHUB_OUTPUT
 
+      - name: Bind AAB artifact digest to release attempt
+        shell: pwsh
+        env:
+          RELEASE_ATTEMPT_ID: ${{ steps.attempt_guard.outputs.attempt_id }}
+          AAB_NAME: ${{ steps.metadata.outputs.aab_name }}
+          AAB_SHA256: ${{ steps.release.outputs.sha256 }}
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $SignatureText = Get-Content -LiteralPath "release\aab-evidence\aab-signature-verification.txt" -Raw
+          if ($SignatureText -notmatch 'AAB upload certificate SHA-256:\s*([0-9a-f]+)') {
+            throw "Could not extract AAB upload certificate evidence."
+          }
+          $Evidence = [ordered]@{
+            type = "aab-artifact"
+            attempt_id = $env:RELEASE_ATTEMPT_ID
+            repository = $env:GITHUB_REPOSITORY
+            source_sha = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            artifact_name = $env:AAB_NAME
+            artifact_sha256 = $env:AAB_SHA256
+            version_name = $env:VERSION_NAME
+            version_code = $env:BUILD_NUMBER
+            upload_certificate_sha256 = $Matches[1]
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "release-attempt\aab-artifact.json"),
+            $Evidence,
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+          node tool/release_attempt_ledger.mjs advance `
+            --attempt-file "release-attempt\release-attempt.prerequisites-verified.json" `
+            --state artifact_verified `
+            --reason aab-artifact-verified `
+            --evidence-key aab_artifact `
+            --evidence-file "release-attempt\aab-artifact.json" `
+            --output "release-attempt\release-attempt.artifact-verified.json"
+
+      - name: Revalidate attempt before AAB artifact upload and attestation
+        shell: pwsh
+        env:
+          RELEASE_ATTEMPT_ID: ${{ steps.attempt_guard.outputs.attempt_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          git fetch origin main --no-tags
+          if ($LASTEXITCODE -ne 0) { throw "Could not refresh origin/main before AAB upload." }
+          $SourceSha = (git rev-parse HEAD).Trim()
+          $MainSha = (git rev-parse origin/main).Trim()
+          if ($SourceSha -ne $env:GITHUB_SHA -or $SourceSha -ne $MainSha) {
+            throw "AAB artifact upload requires exact current main. HEAD=$SourceSha main=$MainSha GITHUB_SHA=$env:GITHUB_SHA"
+          }
+          node tool/release_attempt_ledger.mjs verify-attempt `
+            --attempt-file "release-attempt\release-attempt.artifact-verified.json" `
+            --attempt-id "$env:RELEASE_ATTEMPT_ID" `
+            --repository "$env:GITHUB_REPOSITORY" `
+            --source-sha "$env:GITHUB_SHA" `
+            --state artifact_verified `
+            --required-evidence-keys backend_validation,aab_artifact
+
       - name: Upload verified production AAB
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -414,7 +517,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: HomePilot-production-aab-evidence-${{ github.run_number }}
-          path: release/aab-evidence
+          path: |
+            release/aab-evidence
+            release-attempt
           if-no-files-found: warn
           retention-days: 30
 

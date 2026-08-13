@@ -7,6 +7,7 @@ import {
   requiredBackendJobs,
   transitionReleaseAttempt,
   validateBackendAggregate,
+  validateAttemptLedger,
 } from './release_attempt_ledger.mjs';
 
 const sourceSha = '1d7e59c18d3ca69f91cc1cd7a17ad03801f22e41';
@@ -97,6 +98,81 @@ test('backend aggregate accepts only exact successful named job set', () => {
   assert.deepEqual(
     aggregate.required_jobs.map((job) => job.name),
     requiredBackendJobs,
+  );
+});
+
+test('attempt ledger validation requires exact state and evidence keys', async () => {
+  const attempt = await createReleaseAttempt({
+    repository: 'zuhak5/HomePilot',
+    runId: '456',
+    sourceSha,
+    sourceRef: 'refs/heads/main',
+    event: 'workflow_dispatch',
+    workflowPath: '.github/workflows/release-attempt-dry-run.yml',
+    targetKind: 'dry-run',
+    targetEnvironment: 'production-github-release',
+  });
+  const verified = transitionReleaseAttempt(attempt, 'prerequisites_verified', {
+    evidenceKey: 'backend_validation',
+    evidence: validateBackendAggregate({
+      run: backendRun(),
+      jobs: backendJobs(),
+      repository: 'zuhak5/HomePilot',
+      sourceSha,
+    }),
+  });
+
+  assert.deepEqual(
+    validateAttemptLedger({
+      attempt: verified,
+      attemptId: verified.attempt_id,
+      repository: 'zuhak5/HomePilot',
+      sourceSha,
+      allowedStates: ['prerequisites_verified'],
+      requiredEvidenceKeys: ['backend_validation'],
+    }),
+    {
+      schema_version: 1,
+      type: 'release-attempt-validation',
+      attempt_id: verified.attempt_id,
+      state: 'prerequisites_verified',
+      repository: 'zuhak5/HomePilot',
+      source_sha: sourceSha,
+      required_evidence_keys: ['backend_validation'],
+    },
+  );
+
+  assert.throws(
+    () =>
+      validateAttemptLedger({
+        attempt: verified,
+        attemptId: 'hpra_00000000000000000000000000000000',
+        repository: 'zuhak5/HomePilot',
+        sourceSha,
+      }),
+    /attempt ID mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateAttemptLedger({
+        attempt: verified,
+        attemptId: verified.attempt_id,
+        repository: 'zuhak5/HomePilot',
+        sourceSha,
+        allowedStates: ['published'],
+      }),
+    /expected one of published/,
+  );
+  assert.throws(
+    () =>
+      validateAttemptLedger({
+        attempt: verified,
+        attemptId: verified.attempt_id,
+        repository: 'zuhak5/HomePilot',
+        sourceSha,
+        requiredEvidenceKeys: ['apk_artifact'],
+      }),
+    /missing required evidence: apk_artifact/,
   );
 });
 

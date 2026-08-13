@@ -219,6 +219,51 @@ export const attachEvidence = (attempt, evidenceKey, evidence) => {
   };
 };
 
+export const validateAttemptLedger = ({
+  attempt,
+  attemptId,
+  repository,
+  sourceSha,
+  allowedStates = [],
+  requiredEvidenceKeys = [],
+}) => {
+  assertFullSha(sourceSha, 'sourceSha');
+  if (!isReleaseAttemptId(attempt?.attempt_id)) {
+    throw new Error('Attempt has an invalid attempt_id.');
+  }
+  requireEqual(attempt.schema_version, releaseAttemptSchemaVersion, 'attempt schema version');
+  requireEqual(attempt.attempt_id, attemptId, 'attempt ID');
+  requireEqual(attempt.identity?.repository, repository, 'attempt repository');
+  requireEqual(attempt.identity?.source_sha, sourceSha, 'attempt source SHA');
+  if (!releaseAttemptStates.includes(attempt.state)) {
+    throw new Error(`Unsupported attempt state: ${attempt.state}`);
+  }
+  if (allowedStates.length > 0 && !allowedStates.includes(attempt.state)) {
+    throw new Error(
+      `Attempt ${attempt.attempt_id} is ${attempt.state}; expected one of ${allowedStates.join(', ')}.`,
+    );
+  }
+  for (const key of requiredEvidenceKeys) {
+    if (attempt.evidence?.[key] === undefined) {
+      throw new Error(`Attempt ${attempt.attempt_id} is missing required evidence: ${key}`);
+    }
+  }
+  return {
+    schema_version: releaseAttemptSchemaVersion,
+    type: 'release-attempt-validation',
+    attempt_id: attempt.attempt_id,
+    state: attempt.state,
+    repository: attempt.identity.repository,
+    source_sha: attempt.identity.source_sha,
+    required_evidence_keys: requiredEvidenceKeys,
+  };
+};
+
+const splitCsv = (value) =>
+  value === undefined || value === ''
+    ? []
+    : value.split(',').map((item) => item.trim()).filter((item) => item.length > 0);
+
 const requireEqual = (actual, expected, label) => {
   if (actual !== expected) {
     throw new Error(`${label} mismatch. Expected ${expected}, got ${actual}.`);
@@ -397,6 +442,25 @@ if (command === 'create') {
     state: advanced.state,
   });
   console.log(`${advanced.attempt_id} ${advanced.state}`);
+} else if (command === 'verify-attempt') {
+  const args = parseArgs(process.argv.slice(3));
+  const attempt = JSON.parse(await fs.readFile(args.attempt_file, 'utf8'));
+  const validation = validateAttemptLedger({
+    attempt,
+    attemptId: args.attempt_id,
+    repository: args.repository,
+    sourceSha: args.source_sha,
+    allowedStates: splitCsv(args.allowed_states ?? args.state),
+    requiredEvidenceKeys: splitCsv(args.required_evidence_keys),
+  });
+  if (args.output) {
+    await writeJson(args.output, validation);
+  }
+  await appendGithubOutputs({
+    attempt_id: validation.attempt_id,
+    state: validation.state,
+  });
+  console.log(`${validation.attempt_id} ${validation.state}`);
 } else if (command === 'find-backend') {
   const args = parseArgs(process.argv.slice(3));
   const runs = await fetchCompletedBackendRuns(args.repository, args.source_sha);

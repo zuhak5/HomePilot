@@ -243,6 +243,31 @@ jobs:
       - name: Validate generated site
         run: node tool/validate_versiondeck.mjs .versiondeck-site
 
+      - name: Revalidate source and attempt before Pages artifact upload
+        shell: bash
+        env:
+          RELEASE_ATTEMPT_ID: ${{ steps.source.outputs.release_attempt_id }}
+          EXPECTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "${{ steps.source.outputs.sha }}"
+          test "$source_sha" = "$remote_sha"
+          if [[ ! "$RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID before Pages artifact upload." >&2
+            exit 1
+          fi
+          test -f .versiondeck-site/releases.json
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync(".versiondeck-site/releases.json", "utf8"));
+          if (manifest.generatorCommit !== process.env.EXPECTED_SOURCE_SHA) {
+            throw new Error(`VersionDeck generator commit ${manifest.generatorCommit} does not match ${process.env.EXPECTED_SOURCE_SHA}.`);
+          }
+          NODE
+
       - name: Summarize generated manifest
         shell: bash
         run: |
@@ -284,6 +309,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -291,12 +317,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - name: Check out deployment source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Require release attempt before Pages mutation
         env:
           EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.build.outputs.release_attempt_id }}
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main --tags --force
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "${{ needs.build.outputs.source_sha }}"
+          test "$source_sha" = "$remote_sha"
           if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
             echo "Missing or invalid release attempt ID before Pages deployment." >&2
             exit 1

@@ -46,19 +46,22 @@ Push and pull-request backend runs are still useful validation, but they cannot 
 
 ## Workflow Binding
 
-`Build Production APK`, `Build Play Store AAB`, and `Release Attempt Dry Run` create a ledger artifact named `HomePilot-release-attempt-<attempt_id>` before protected work. The Android rails then bind that same ID into their protected jobs and safe evidence context. The APK rail also requires the ID before Sentry and GitHub Release mutation.
+`Release Attempt Dry Run` creates the canonical ledger and uploads `HomePilot-release-attempt-dry-run-<attempt_id>` after protected approval and backend aggregate validation. `Build Production APK`, `Build Play Store AAB`, and hosted migration workflows require both the attempt ID and the dry-run workflow run ID, restore that retained ledger, and verify it is still `prerequisites_verified` for the exact repository and source SHA before any protected work can continue.
 
 Downstream mutation workflows must receive or derive the same release attempt ID:
 
-- `Deploy Supabase Migrations` requires `release_attempt_id` in addition to `source_sha`, `project_ref`, and explicit confirmation.
+- `Build Production APK` requires `release_attempt_id` and `release_attempt_run_id`, advances the restored ledger to `artifact_verified` only after the APK digest and signer evidence are bound, and advances it to `published` only after the GitHub Release target and assets are verified.
+- `Build Play Store AAB` requires `release_attempt_id` and `release_attempt_run_id`, advances the restored ledger to `artifact_verified` only after the AAB digest and upload-certificate evidence are bound, and retains the exact AAB attempt/digest/upload-signer handoff for manual Play Console work.
+- `Deploy Supabase Migrations` requires `release_attempt_id` and `release_attempt_run_id` in addition to `source_sha`, `project_ref`, and explicit confirmation. It revalidates the restored dry-run ledger before the dry run, again immediately before `supabase db push --linked`, then records `mutation_started`, `published`, and `externally_verified` evidence as the hosted state changes and no-pending verification complete.
 - `Deploy VersionDeck` requires `release_attempt_id` on manual recovery dispatch and derives it from the upstream APK run's retained release-attempt artifact on `workflow_run`.
-- The Pages deployment job refuses to deploy without a valid attempt ID.
+- The Pages build job revalidates the attempt, source, and generated manifest immediately before Pages artifact upload. The Pages deployment job checks out the exact source again and refuses to deploy without the same valid attempt ID and current-`main` SHA.
+- The APK Sentry release job verifies the `artifact_verified` ledger before release mutation. A later Sentry deploy marker is created only after the GitHub Release job verifies the published release and advances the ledger to `published`.
 
 These checks bind the rails to a single attempt identity. They do not prove that a hosted environment reviewer approved a job, that a protected secret exists, that an artifact was signed, that Sentry or Pages mutated successfully, or that a public endpoint reflects the new state.
 
 ## Protected Dry Run
 
-`Release Attempt Dry Run` is the Task 06 evidence workflow. It accepts the backend validation run ID, recreates the attempt identity after `production-github-release` approval, validates the exact named backend aggregate, advances the attempt to `prerequisites_verified`, and uploads `HomePilot-release-attempt-dry-run-<attempt_id>`.
+`Release Attempt Dry Run` is the Task 06/07 evidence workflow. It accepts the backend validation run ID, recreates the attempt identity after `production-github-release` approval, validates the exact named backend aggregate, advances the attempt to `prerequisites_verified`, proves negative mutation-boundary fixtures for mismatched, incomplete, missing-evidence, and invalid-transition ledgers, and uploads `HomePilot-release-attempt-dry-run-<attempt_id>`.
 
 The dry run performs no production signing, Sentry release mutation, GitHub Release publication, Supabase deployment, Pages deployment, Play upload, or artifact build. A successful dry run proves only the attempt identity, protected approval boundary, exact-source recheck, and named backend aggregate behavior for that commit.
 
@@ -68,6 +71,10 @@ The dry run performs no production signing, Sentry release mutation, GitHub Rele
 - If source changes after the attempt is created, create a new attempt at the new current `main` SHA and restart evidence collection.
 - If a mutation starts and later fails, record the attempt state and partial external state instead of retrying under a different identity.
 - If a downstream workflow lacks a valid attempt ID, treat it as unauthorized even when the upstream workflow conclusion is `success`.
+- If a retry is needed after `artifact_verified`, restore the same attempt ledger and require the bound artifact digest to match the retained artifact before repeating Sentry, attestation, GitHub Release, Pages, Play handoff, or migration recovery work.
+- If GitHub Release publication succeeds, create at most one Sentry deploy marker for the same release/attempt/environment. The deploy step lists existing deploys by deterministic name and environment before creating one, so retries reconcile instead of duplicating deploy evidence.
+- If Supabase migration apply starts but no-pending verification does not finish, treat the hosted project as partially mutated. Resume with the same attempt and record whether the already-applied migration state is reconciled to `externally_verified`, superseded by a later attempt, or failed with explicit operator evidence.
+- If an attempt is superseded, preserve the old ledger and create a new attempt at the new current `main` SHA. Do not reuse a superseded attempt for a different artifact, migration target, or public deployment.
 
 Never edit retained ledger JSON, fabricate an attempt ID, or merge evidence from multiple attempts into one release record.
 

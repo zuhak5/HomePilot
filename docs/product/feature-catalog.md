@@ -116,7 +116,7 @@ workflow objects that could sign, mutate, publish, or read pooled production
 secrets are disabled and GitHub Pages is unpublished; historical Build 44
 evidence remains retained.
 
-Release validation begins with an exact-SHA backend workflow covering Edge Functions, browser deletion/static contracts, and local-stack database security. Separate protected rails then produce a Play AAB and a standalone APK. The AAB rail creates evidence and provenance but does not upload to Google Play; Console upload and rollout require explicit operator authorization and evidence. The APK rail can publish Sentry state and a GitHub Release, after which VersionDeck independently verifies release identity before exposing a download. Workflow source is not evidence that any hosted run, upload, release, or deployment succeeded.
+Release validation begins with an exact-SHA backend workflow covering Edge Functions, browser deletion/static contracts, and local-stack database security, followed by a protected no-mutation release-attempt dry run. Separate protected rails then produce a Play AAB and a standalone APK only when they can restore that exact attempt ledger. The AAB rail creates digest/upload-signer evidence and provenance but does not upload to Google Play; Console upload and rollout require explicit operator authorization and evidence. The APK rail binds the APK digest before Sentry release publication, publishes and verifies the GitHub Release before creating one Sentry deploy marker, and then VersionDeck independently verifies release identity and rechecks the attempt/source before exposing a download. Workflow source is not evidence that any hosted run, upload, release, or deployment succeeded.
 
 ## Product change checklist
 

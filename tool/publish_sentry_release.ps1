@@ -5,7 +5,14 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Dist,
 
-    [string]$Environment = 'prod'
+    [string]$Environment = 'prod',
+
+    [ValidateSet('publish', 'deploy')]
+    [string]$Mode = 'publish',
+
+    [string]$DeployName,
+
+    [string]$DeployUrl
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +47,12 @@ if ([string]::IsNullOrWhiteSpace($Dist) -or $Dist -notmatch '^\d+$') {
 
 $env:SENTRY_RELEASE = $Release
 $env:SENTRY_DIST = $Dist
+$sentryBaseUrl = if ([string]::IsNullOrWhiteSpace($env:SENTRY_BASE_URL)) {
+    'https://sentry.io'
+}
+else {
+    $env:SENTRY_BASE_URL.TrimEnd('/')
+}
 
 function Invoke-NativeCommand {
     param(
@@ -102,6 +115,88 @@ $sentryCli = @('--yes', '@sentry/cli@2.58.6')
 # Authenticate before mutating release state so invalid credentials fail clearly.
 Invoke-NativeCommand -FilePath 'npx' -Arguments ($sentryCli + @('info'))
 
+function Invoke-SentryApi {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Get', 'Post')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [object]$Body = $null
+    )
+
+    $uri = "$sentryBaseUrl$Path"
+    $headers = @{
+        Authorization = "Bearer $env:SENTRY_AUTH_TOKEN"
+    }
+    if ($Method -eq 'Get') {
+        return Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+    }
+
+    $jsonBody = if ($null -eq $Body) { '{}' } else { $Body | ConvertTo-Json -Depth 8 }
+    return Invoke-RestMethod `
+        -Method Post `
+        -Uri $uri `
+        -Headers $headers `
+        -ContentType 'application/json' `
+        -Body $jsonBody
+}
+
+function Get-DeterministicDeployName {
+    if (-not [string]::IsNullOrWhiteSpace($DeployName)) {
+        return $DeployName
+    }
+    if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ID)) {
+        throw 'Deploy mode requires DeployName when GITHUB_RUN_ID is unavailable.'
+    }
+    $attemptId = if ([string]::IsNullOrWhiteSpace($env:RELEASE_ATTEMPT_ID)) {
+        'no-attempt'
+    }
+    else {
+        $env:RELEASE_ATTEMPT_ID
+    }
+    return "github-actions-$env:GITHUB_RUN_ID-$attemptId"
+}
+
+if ($Mode -eq 'deploy') {
+    Invoke-NativeCommand -FilePath 'npx' -Arguments (
+        $sentryCli + @('releases', 'info', $Release)
+    )
+    $encodedRelease = [System.Uri]::EscapeDataString($Release)
+    $deployPath = "/api/0/organizations/$env:SENTRY_ORG/releases/$encodedRelease/deploys/"
+    $resolvedDeployName = Get-DeterministicDeployName
+    $existingDeploys = @(Invoke-SentryApi -Method Get -Path $deployPath)
+    $matchingDeploys = @($existingDeploys | Where-Object {
+        $_.name -eq $resolvedDeployName -and $_.environment -eq $Environment
+    })
+    if ($matchingDeploys.Count -gt 1) {
+        throw "Multiple Sentry deploy markers already exist for $Release $Environment $resolvedDeployName."
+    }
+    if ($matchingDeploys.Count -eq 0) {
+        $body = @{
+            environment = $Environment
+            name = $resolvedDeployName
+            projects = @($env:SENTRY_PROJECT)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($DeployUrl)) {
+            $body.url = $DeployUrl
+        }
+        Invoke-WithRetry -Label 'Sentry deploy marker' -Operation {
+            Invoke-SentryApi -Method Post -Path $deployPath -Body $body | Out-Null
+        }
+    }
+    $verifiedDeploys = @(Invoke-SentryApi -Method Get -Path $deployPath | Where-Object {
+        $_.name -eq $resolvedDeployName -and $_.environment -eq $Environment
+    })
+    if ($verifiedDeploys.Count -ne 1) {
+        throw "Expected exactly one Sentry deploy marker for $Release $Environment $resolvedDeployName, found $($verifiedDeploys.Count)."
+    }
+    Write-Host "Verified Sentry deploy marker $resolvedDeployName for $Release in $Environment."
+    exit 0
+}
+
 # A previous failed workflow attempt may already have created the release.
 & npx @sentryCli releases info $Release *> $null
 if ($LASTEXITCODE -ne 0) {
@@ -137,34 +232,7 @@ Invoke-WithRetry -Label 'Sentry release finalization' -Operation {
     )
 }
 
-$deployName = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ID)) {
-    "manual-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-}
-else {
-    $runAttempt = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ATTEMPT)) {
-        '1'
-    }
-    else {
-        $env:GITHUB_RUN_ATTEMPT
-    }
-    "github-actions-$env:GITHUB_RUN_ID-attempt-$runAttempt"
-}
-Invoke-WithRetry -Label 'Sentry deploy marker' -Operation {
-    Invoke-NativeCommand -FilePath 'npx' -Arguments (
-        $sentryCli + @(
-            'releases',
-            'deploys',
-            $Release,
-            'new',
-            '-e',
-            $Environment,
-            '-n',
-            $deployName
-        )
-    )
-}
-
 Invoke-NativeCommand -FilePath 'npx' -Arguments (
     $sentryCli + @('releases', 'info', $Release)
 )
-Write-Host "Verified Sentry release $Release with dist $Dist in $Environment."
+Write-Host "Verified Sentry release $Release with dist $Dist in $Environment without a deploy marker."
