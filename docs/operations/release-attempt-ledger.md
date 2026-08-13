@@ -70,3 +70,39 @@ The dry run performs no production signing, Sentry release mutation, GitHub Rele
 - If a downstream workflow lacks a valid attempt ID, treat it as unauthorized even when the upstream workflow conclusion is `success`.
 
 Never edit retained ledger JSON, fabricate an attempt ID, or merge evidence from multiple attempts into one release record.
+
+## Task 06 Hosted Evidence
+
+TASK-006 source changes merged to `main` in commit `7b7ae23640b3f5ad5e35e5a2e4d2a2e2fe517c42` through PR #42 on 2026-08-13. The required protected dry-run evidence was then collected on that exact SHA without production signing, Sentry mutation, GitHub Release publication, Supabase deployment, Pages deployment, or Play upload.
+
+Backend aggregate:
+
+- Workflow: `Validate Google Backend and Release Contracts`
+- Run: `31710431362`
+- URL: `https://github.com/zuhak5/HomePilot/actions/runs/31710431362`
+- Event: `workflow_dispatch`
+- Branch: `main`
+- Source SHA: `7b7ae23640b3f5ad5e35e5a2e4d2a2e2fe517c42`
+- Conclusion: `success`
+- Required jobs: `Deno SSV tests`, `Google contract/static checks`, `Supabase database tests`, `Require current main Advisor source`, `Hosted Supabase Advisors`
+- Advisor evidence artifact: `supabase-advisors-7b7ae23640b3f5ad5e35e5a2e4d2a2e2fe517c42`, artifact ID `9185411857`, expires `2026-08-27T14:41:28Z`
+
+Protected release-attempt dry run:
+
+- Workflow: `Release Attempt Dry Run`
+- Run: `31711402040`
+- URL: `https://github.com/zuhak5/HomePilot/actions/runs/31711402040`
+- Event: `workflow_dispatch`
+- Branch: `main`
+- Source SHA: `7b7ae23640b3f5ad5e35e5a2e4d2a2e2fe517c42`
+- Conclusion: `success`
+- Attempt ID: `hpra_7db313dec918ab64a9c2d77daed89b88`
+- Final dry-run state: `prerequisites_verified`
+- Created-attempt artifact: `HomePilot-release-attempt-hpra_7db313dec918ab64a9c2d77daed89b88`, artifact ID `9185440417`, expires `2026-09-12T14:42:23Z`
+- Protected dry-run evidence artifact: `HomePilot-release-attempt-dry-run-hpra_7db313dec918ab64a9c2d77daed89b88`, artifact ID `9185467678`, expires `2026-09-12T14:43:17Z`
+
+The downloaded protected dry-run artifact was locally inspected. `release-attempt.prerequisites-verified.json` contained attempt ID `hpra_7db313dec918ab64a9c2d77daed89b88`, state `prerequisites_verified`, source SHA `7b7ae23640b3f5ad5e35e5a2e4d2a2e2fe517c42`, backend run `31710431362`, and the five required backend job names listed above.
+
+After evidence collection, `Validate Google Backend and Release Contracts` and `Release Attempt Dry Run` were disabled again. As of the post-evidence workflow inventory, only `Validate Flutter` and Dependabot remained active; the Android signing, Sentry/GitHub Release, Supabase migration/advisor, VersionDeck, Play AAB, and release-attempt dry-run workflow objects were disabled.
+
+This evidence proves the Task 06 source contract, exact-source backend aggregate, protected dry-run approval boundary, and rejection surface for incomplete or mismatched backend evidence. It does not prove production signing, release publication, hosted migration application, Pages publication, Play upload, public endpoint behavior, or device behavior.
