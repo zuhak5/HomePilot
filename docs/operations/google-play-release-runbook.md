@@ -17,6 +17,8 @@ The executable AAB sources are:
 - [`.github/workflows/build-play-android.yml`](../../.github/workflows/build-play-android.yml)
 - [`tool/build_play_prod.ps1`](../../tool/build_play_prod.ps1)
 - [`tool/collect_android_release_evidence.ps1`](../../tool/collect_android_release_evidence.ps1)
+- [`tool/provenance_policy.mjs`](../../tool/provenance_policy.mjs)
+- [`tool/release_attempt_ledger.mjs`](../../tool/release_attempt_ledger.mjs)
 - [`tool/validate_google_release_contracts.mjs`](../../tool/validate_google_release_contracts.mjs)
 - [`tool/release-workflows.test.mjs`](../../tool/release-workflows.test.mjs)
 - [`pubspec.yaml`](../../pubspec.yaml)
@@ -37,7 +39,7 @@ Before dispatching the AAB workflow:
 
 1. Select the full commit SHA that exactly equals the current `origin/main` tip and freeze it for all release rails. A historical ancestor is not eligible.
 2. Confirm `pubspec.yaml` uses `x.y.z+N` and that `N` is greater than every version code ever accepted by Google Play for `com.homepilot.app`.
-3. Obtain a successful `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` equals the final SHA. Require its exact check names—`Deno SSV tests`, `Google contract/static checks`, and `Supabase database tests`—in branch protection and verify that hosted setting separately. The validation run uses a local stack and is not hosted deployment evidence.
+3. Obtain a successful manually dispatched `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` equals the final SHA, then run `Release Attempt Dry Run` for that backend run and record both the `hpra_...` attempt ID and the dry-run workflow run ID. The AAB workflow restores that dry-run ledger and requires the exact release-attempt backend aggregate, including `Deno SSV tests`, `Google contract/static checks`, `Supabase database tests`, `Require current main Advisor source`, and `Hosted Supabase Advisors`. Branch protection still owns pull-request contexts separately; the validation run uses a local stack plus a protected read-only Advisor audit and is not hosted deployment evidence.
 4. Review user-visible release notes, privacy impact, permissions, ads, account deletion, data retention, and store declarations.
 5. Verify the declared GitHub `production-play-signing` environment configuration and approvals externally. Workflow source alone does not prove required reviewers or correct values.
 6. Confirm the expected Play application/package is `com.homepilot.app`, the intended initial target is identified, and no conflicting Play edit or rollout is active.
@@ -74,28 +76,31 @@ After manual dispatch at the final SHA, require the run to complete all of the f
 
 1. Explicit non-`main` rejection, exact-current-`origin/main` checks before and after the protected-environment wait, and workflow-pinned toolchain setup.
 2. `npm ci`, Google/Android static contract validation, and locked AdMob SSV/account-deletion/deletion-status Deno checks/tests.
-3. Successful lookup of the exact `.github/workflows/validate-google-backend.yml` identity for the same `main` SHA, with the gate run ID/URL recorded in the workflow summary and safe evidence context.
+3. Restoration of `HomePilot-release-attempt-dry-run-<attempt_id>` from the supplied dry-run workflow run ID and successful lookup of the exact `.github/workflows/validate-google-backend.yml` `workflow_dispatch` aggregate for the same `main` SHA, with the gate run ID/URL and attempt ID recorded in the workflow summary and safe evidence context.
 4. Production configuration creation and upload-keystore restoration.
 5. Flutter clean/dependency resolution, localization and Drift generation, analysis, tests, and production-configuration validation.
 6. Release registrant checks and `flutter build appbundle --flavor prod --release` through `tool/build_play_prod.ps1`.
 7. Exactly one bundle, SHA-256/checksum creation, JAR signature verification, and AAB-to-upload-keystore certificate comparison.
 8. Manifest/dependency evidence collection.
-9. Upload of the AAB/checksum artifact and evidence artifact, each with 30-day retention. The fixed-path evidence upload runs even after failure so safe partial diagnostics are retained, but a partial artifact never qualifies as release evidence.
-10. `actions/attest-build-provenance` for the exact AAB path.
-11. Always-run cleanup of Gradle daemons and temporary signing/configuration files.
+9. Binding of the AAB filename, SHA-256, and upload-certificate fingerprint to a release-attempt `artifact_verified` ledger entry.
+10. Revalidation of that `artifact_verified` ledger before AAB/checksum artifact upload and attestation.
+11. Upload of the AAB/checksum artifact and evidence artifact, each with 30-day retention. The fixed-path evidence upload runs even after failure so safe partial diagnostics are retained, but a partial artifact never qualifies as release evidence.
+12. `actions/attest-build-provenance` for the exact AAB path.
+13. Exact `gh attestation verify --format json` capture plus normalized provenance-tuple verification for the expected repository, source digest/ref, signer workflow identity/digest, workflow trigger, runner environment, and workflow run URI.
+14. Always-run cleanup of Gradle daemons and temporary signing/configuration files.
 
 No step in that list is Play Console acceptance evidence.
 
 ## Exact AAB evidence package
 
-Retain the workflow URL, run ID/attempt, final SHA, and both Actions artifacts:
+Retain the workflow URL, run ID/attempt, final SHA, release attempt ID, and both Actions artifacts:
 
 ### `HomePilot-production-aab-<run_number>`
 
 - `HomePilot-x.y.z-build-N.aab`
 - `HomePilot-x.y.z-build-N.aab.sha256`
 
-Recompute SHA-256 after downloading and require it to equal both the checksum file and `artifact_sha256` in the evidence summary. Verify GitHub attestation against the downloaded AAB and the exact expected tuple; a workflow success badge alone is insufficient provenance evidence.
+Recompute SHA-256 after downloading and require it to equal both the checksum file and `artifact_sha256` in the evidence summary. Verify GitHub attestation against the downloaded AAB and the expected repository; a workflow success badge alone is insufficient provenance evidence.
 
 ### `HomePilot-production-aab-evidence-<run_number>`
 
@@ -104,23 +109,14 @@ Recompute SHA-256 after downloading and require it to equal both the checksum fi
 - `AndroidManifest-prodRelease.xml`
 - `output-metadata-aab.json`, when Android generated matching output metadata
 - `aab-signature-verification.txt`
-- `workflow-context.json`, containing repository, run, source, backend-gate, event, runner, visibility, and release identity (never credentials)
-- `provenance-attestation.json`, the successful `gh attestation verify --format json` output for the exact tuple
-- `provenance-verification.json`, the normalized tuple report derived from trusted workflow context and the verified attestation JSON
+- `release-attempt` containing the restored prerequisites ledger and the `artifact_verified` AAB digest/upload-signer binding
+- `workflow-context.json`, containing only workflow/run/source/release-attempt/backend-gate and release identity (never credentials)
+- `provenance-attestation.json`, the exact successful `gh attestation verify --format json` output for the expected AAB tuple
+- `provenance-verification.json`, the normalized tuple report generated from trusted workflow context plus the verified attestation JSON
 
 The summary must agree with the AAB on artifact filename/hash, parsed `com.homepilot.app` package, version name/code, parsed target SDK 36, parsed `allowBackup: false`, the exactly-one parsed production AdMob application ID, and `prodReleaseRuntimeClasspath`. The dependency report must be retained in full and contain no direct Firebase Analytics dependency. The merged manifest must contain the required coarse-location, notification, and exact-alarm declarations; it must not contain fine/background location, a Google demo AdMob identifier, or a debuggable production flag.
 
-`aab-signature-verification.txt` must show successful JAR verification and the upload-certificate SHA-256 emitted by the workflow. Compare that fingerprint with Play Console rather than assuming the protected secret is current.
-
-`provenance-verification.json` must report the exact release tuple:
-
-- repository `zuhak5/HomePilot`
-- source digest equal to the retained source SHA
-- source ref `refs/heads/main`
-- signer workflow `https://github.com/zuhak5/HomePilot/.github/workflows/build-play-android.yml@refs/heads/main`
-- workflow trigger `workflow_dispatch`
-- runner environment `github-hosted`
-- run invocation URI equal to the run ID/attempt in `workflow-context.json`
+`aab-signature-verification.txt` must show successful JAR verification and the upload-certificate SHA-256 emitted by the workflow. Compare that fingerprint with Play Console rather than assuming the protected secret is current. `provenance-verification.json` must agree with the final SHA, repository, workflow path, run URI, and attested AAB digest.
 
 Safe independent inspection after downloading includes:
 
@@ -128,18 +124,10 @@ Safe independent inspection after downloading includes:
 Get-FileHash -LiteralPath .\HomePilot-x.y.z-build-N.aab -Algorithm SHA256
 jarsigner -verify -verbose -certs .\HomePilot-x.y.z-build-N.aab
 keytool -printcert -jarfile .\HomePilot-x.y.z-build-N.aab
-gh attestation verify .\HomePilot-x.y.z-build-N.aab `
-  --repo zuhak5/HomePilot `
-  --predicate-type https://slsa.dev/provenance/v1 `
-  --source-digest <source-sha> `
-  --source-ref refs/heads/main `
-  --cert-identity https://github.com/zuhak5/HomePilot/.github/workflows/build-play-android.yml@refs/heads/main `
-  --signer-digest <source-sha> `
-  --deny-self-hosted-runners `
-  --format json
+gh attestation verify .\HomePilot-x.y.z-build-N.aab --repo zuhak5/HomePilot
 ```
 
-Replace the illustrative version/build filename and `<source-sha>` placeholder with the exact retained values from the workflow evidence. These commands do not upload or publish the bundle.
+Replace the illustrative version/build filename with the exact artifact name. These commands do not upload or publish the bundle.
 
 ## Manual Play Console handoff
 
@@ -214,8 +202,8 @@ Never delete or overwrite evidence to make a later run appear continuous with an
 
 Record:
 
-- Final SHA, `pubspec.yaml` version/build, exact-SHA backend gate, and hosted backend deployment dependency.
-- AAB workflow URL/run attempt, artifact names, recomputed/checksum/summary hashes, attestation verification, upload certificate, manifest/dependency review, and exceptions.
+- Final SHA, release attempt ID, `pubspec.yaml` version/build, exact-SHA backend aggregate, and hosted backend deployment dependency.
+- AAB workflow URL/run attempt, artifact names, recomputed/checksum/summary hashes, attestation verification, normalized provenance tuple, upload certificate, manifest/dependency review, and exceptions.
 - Play application, App integrity fingerprints, uploaded bundle version, Bundle Explorer result, automated checks/warnings, track, testers/countries, rollout/managed-publishing settings, approvals, and timestamps.
 - Data-safety/app-content evidence at the reserved canonical path.
 - Physical-device install/update results, Play-delivered signer, functional/privacy checks, and deferred cases.
