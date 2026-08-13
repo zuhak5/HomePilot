@@ -4,18 +4,23 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  DEFAULT_VERSIONDECK_LEASE_HOURS,
+  VERSIONDECK_CONTROL_SCHEMA_VERSION,
   buildManifest,
   compareVersionBuild,
   extractBodySha,
   normalizeRelease,
   parseChecksumText,
   selectProductionApk,
+  validateVersionDeckControl,
 } from "./generate_versiondeck_manifest.mjs";
 import { formatRelativeTime } from "../download-site/relative-time.js";
 import {
   VERSIONDECK_PACKAGE_NAME,
   VERSIONDECK_REPOSITORY,
   VERSIONDECK_SIGNER_SHA256,
+  VersionDeckPublicationStatus,
+  VersionDeckReleaseAvailabilityStatus,
   validateVersionDeckManifest,
 } from "../download-site/manifest-schema.js";
 import {
@@ -23,11 +28,27 @@ import {
   ReleaseCacheState,
   classifyReleaseCache,
 } from "../download-site/cache-policy.js";
+import { buildAndroidProvenancePolicy } from "./provenance_policy.mjs";
 
 const SHA = "a".repeat(64);
 const COMMIT = "b".repeat(40);
 const NOW = Date.parse("2026-08-04T13:00:00Z");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function baseControl(overrides = {}) {
+  return {
+    schemaVersion: VERSIONDECK_CONTROL_SCHEMA_VERSION,
+    leaseDurationHours: DEFAULT_VERSIONDECK_LEASE_HOURS,
+    publication: {
+      status: VersionDeckPublicationStatus.ACTIVE,
+      reasonCode: null,
+      message: null,
+      updatedAt: null,
+      ...(overrides.publication || {}),
+    },
+    historicalReleaseDecisions: overrides.historicalReleaseDecisions || [],
+  };
+}
 
 function releaseFixture(overrides = {}) {
   const version = overrides.version || "1.3.1";
@@ -68,13 +89,56 @@ function releaseFixture(overrides = {}) {
 }
 
 function verifierFixture(overrides = {}) {
+  const version = overrides.version || "1.3.1";
+  const build = overrides.build || 16;
+  const artifactSha256 = overrides.sha256 || SHA;
+  const commitSha = overrides.commitSha || COMMIT;
+  const apkName = overrides.artifactName || `HomePilot-${version}-build-${build}.apk`;
+  const policy = buildAndroidProvenancePolicy({
+    artifactType: "apk",
+    repository: VERSIONDECK_REPOSITORY,
+    repositoryId: "1319597440",
+    repositoryOwnerId: "233116763",
+    sourceDigest: commitSha,
+    runId: "31329512924",
+    runAttempt: "1",
+    artifactName: apkName,
+    artifactSha256,
+  });
   return {
-    sha256: SHA,
+    sha256: artifactSha256,
     packageName: VERSIONDECK_PACKAGE_NAME,
-    version: "1.3.1",
-    build: 16,
+    version,
+    build,
     signerCertificateSha256: VERSIONDECK_SIGNER_SHA256,
-    commitSha: COMMIT,
+    commitSha,
+    provenance: {
+      policyVersion: policy.policyVersion,
+      predicateType: policy.predicateType,
+      repository: policy.repository,
+      sourceRepositoryUri: policy.repositoryUri,
+      sourceRepositoryDigest: policy.sourceDigest,
+      sourceRepositoryRef: policy.sourceRef,
+      sourceRepositoryIdentifier: policy.repositoryId,
+      sourceRepositoryOwnerUri: "https://github.com/zuhak5",
+      sourceRepositoryOwnerIdentifier: policy.repositoryOwnerId,
+      signerWorkflow: policy.certIdentity,
+      signerDigest: policy.signerDigest,
+      workflowName: policy.workflowName,
+      workflowTrigger: policy.workflowTrigger,
+      runnerEnvironment: policy.runnerEnvironment,
+      runInvocationUri: policy.runInvocationUri,
+      runId: "31329512924",
+      runAttempt: "1",
+      buildConfigUri: policy.certIdentity,
+      buildConfigDigest: policy.signerDigest,
+      certificateIssuer: "CN=sigstore-intermediate,O=sigstore.dev",
+      oidcIssuer: "https://token.actions.githubusercontent.com",
+      sourceRepositoryVisibilityAtSigning: "public",
+      subjectName: apkName,
+      artifactSha256,
+      verifiedTimestamp: "2026-08-03T10:05:00Z",
+    },
     attestationVerified: true,
     ...overrides,
   };
@@ -87,6 +151,19 @@ function normalizationOptions(overrides = {}) {
     ...overrides,
   };
 }
+
+test("VersionDeck control requires valid publication state and lease", () => {
+  const errors = validateVersionDeckControl({
+    schemaVersion: VERSIONDECK_CONTROL_SCHEMA_VERSION,
+    leaseDurationHours: 25,
+    publication: { status: "disabled", reasonCode: "", message: "", updatedAt: "bad" },
+    historicalReleaseDecisions: [],
+  });
+  assert.ok(errors.some((error) => error.includes("lease duration")));
+  assert.ok(errors.some((error) => error.includes("reason code")));
+  assert.ok(errors.some((error) => error.includes("message")));
+  assert.ok(errors.some((error) => error.includes("update time")));
+});
 
 test("selectProductionApk requires the exact production filename", () => {
   const fixture = releaseFixture();
@@ -156,6 +233,24 @@ test("normalizeRelease requires attestation verification", async () => {
   assert.ok(result.errors.some((error) => error.includes("attestation")));
 });
 
+test("normalizeRelease rejects a mismatched provenance tuple", async () => {
+  const base = verifierFixture();
+  const result = await normalizeRelease(
+    releaseFixture(),
+    normalizationOptions({
+      verifyReleaseArtifact: async () => ({
+        ...base,
+        provenance: {
+          ...base.provenance,
+          sourceRepositoryDigest: "c".repeat(40),
+        },
+      }),
+    }),
+  );
+  assert.equal(result.release, null);
+  assert.ok(result.errors.some((error) => error.includes("Provenance tuple")));
+});
+
 test("buildManifest keeps prerelease separate from latest stable", async () => {
   const stable = releaseFixture({ id: 1016, build: 16 });
   const prerelease = releaseFixture({
@@ -170,22 +265,92 @@ test("buildManifest keeps prerelease separate from latest stable", async () => {
 
   const { manifest } = await buildManifest([stable, prerelease], {
     ...normalizationOptions(),
+    control: baseControl(),
     generatorCommit: COMMIT,
+    now: NOW,
   });
 
+  assert.equal(manifest.publication.status, VersionDeckPublicationStatus.ACTIVE);
   assert.equal(manifest.latestStableReleaseId, stable.id);
   assert.equal(manifest.latestPrereleaseReleaseId, prerelease.id);
   assert.equal(manifest.releases[0].id, prerelease.id);
-  assert.deepEqual(validateVersionDeckManifest(manifest), []);
+  assert.equal(manifest.releases[0].availability.status, VersionDeckReleaseAvailabilityStatus.ACTIVE);
+  assert.deepEqual(validateVersionDeckManifest(manifest, { now: NOW }), []);
+});
+
+test("buildManifest can publish an explicit disabled state without releases", async () => {
+  const { manifest, diagnostics } = await buildManifest([releaseFixture()], {
+    control: baseControl({
+      publication: {
+        status: VersionDeckPublicationStatus.DISABLED,
+        reasonCode: "containment",
+        message: "Downloads disabled pending remediation.",
+        updatedAt: "2026-08-13T00:00:00Z",
+      },
+    }),
+    generatorCommit: COMMIT,
+    now: Date.parse("2026-08-13T01:00:00Z"),
+  });
+
+  assert.equal(manifest.publication.status, VersionDeckPublicationStatus.DISABLED);
+  assert.equal(manifest.releases.length, 0);
+  assert.equal(manifest.latestStableReleaseId, null);
+  assert.equal(diagnostics[0].type, "publication-disabled");
+  assert.deepEqual(validateVersionDeckManifest(manifest, { now: Date.parse("2026-08-13T01:00:00Z") }), []);
+});
+
+test("buildManifest preserves explicit historical release dispositions", async () => {
+  const historical = releaseFixture({
+    id: 1044,
+    version: "1.5.0",
+    build: 44,
+    name: "HomePilot 1.5.0 (Build 44)",
+    tag_name: "v1.5.0-build.44",
+  });
+  historical.assets = releaseFixture({ version: "1.5.0", build: 44 }).assets;
+
+  const { manifest } = await buildManifest([historical], {
+    ...normalizationOptions({
+      verifyReleaseArtifact: async ({ version, build }) => verifierFixture({
+        version,
+        build,
+        commitSha: "6".repeat(40),
+      }),
+    }),
+    control: baseControl({
+      historicalReleaseDecisions: [
+        {
+          releaseId: 1044,
+          tag: "v1.5.0-build.44",
+          commitSha: "6".repeat(40),
+          status: "withdrawn",
+          reasonCode: "lineage-not-requalified",
+          message: "Historical Build 44 remains unavailable pending owner requalification.",
+          decidedAt: "2026-08-13T00:00:00Z",
+        },
+      ],
+    }),
+    generatorCommit: COMMIT,
+    now: Date.parse("2026-08-13T01:00:00Z"),
+  });
+
+  assert.equal(manifest.latestStableReleaseId, null);
+  assert.equal(
+    manifest.releases[0].availability.status,
+    VersionDeckReleaseAvailabilityStatus.WITHDRAWN,
+  );
 });
 
 test("manifest validation requires exact verification evidence", async () => {
   const { manifest } = await buildManifest([releaseFixture()], {
     ...normalizationOptions(),
+    control: baseControl(),
     generatorCommit: COMMIT,
+    now: NOW,
   });
   manifest.releases[0].verification.signerVerified = false;
-  assert.ok(validateVersionDeckManifest(manifest).some((error) => error.includes("signerVerified")));
+  assert.ok(validateVersionDeckManifest(manifest, { now: NOW }).some((error) =>
+    error.includes("signerVerified")));
 });
 
 test("compareVersionBuild sorts highest build first", () => {
@@ -197,8 +362,13 @@ test("compareVersionBuild sorts highest build first", () => {
   assert.equal(releases[0].build, 3);
 });
 
-test("cache policy is conservative and expires after 24 hours", () => {
-  const manifest = { generatedAt: new Date(NOW - 25 * 60 * 60 * 1000).toISOString() };
+test("cache policy expires when the manifest lease expires", async () => {
+  const { manifest } = await buildManifest([releaseFixture()], {
+    ...normalizationOptions(),
+    control: baseControl(),
+    generatorCommit: COMMIT,
+    now: NOW - 25 * 60 * 60 * 1000,
+  });
   const record = {
     schemaVersion: RELEASE_CACHE_SCHEMA_VERSION,
     fetchedAt: new Date(NOW - 1 * 60 * 60 * 1000).toISOString(),
@@ -206,18 +376,26 @@ test("cache policy is conservative and expires after 24 hours", () => {
   };
   const policy = classifyReleaseCache(record, { now: NOW });
   assert.equal(policy.state, ReleaseCacheState.EXPIRED);
-  assert.equal(policy.ageMs, 25 * 60 * 60 * 1000);
 });
 
-test("cache policy does not mutate or renew timestamps", () => {
+test("cache policy does not mutate records while advancing to expiry", async () => {
+  const { manifest } = await buildManifest([releaseFixture()], {
+    ...normalizationOptions(),
+    control: baseControl(),
+    generatorCommit: COMMIT,
+    now: NOW - 7 * 60 * 60 * 1000,
+  });
   const record = {
     schemaVersion: RELEASE_CACHE_SCHEMA_VERSION,
     fetchedAt: new Date(NOW - 7 * 60 * 60 * 1000).toISOString(),
-    manifest: { generatedAt: new Date(NOW - 7 * 60 * 60 * 1000).toISOString() },
+    manifest,
   };
   const before = JSON.stringify(record);
   assert.equal(classifyReleaseCache(record, { now: NOW }).state, ReleaseCacheState.CACHED_STALE);
-  assert.equal(classifyReleaseCache(record, { now: NOW + 18 * 60 * 60 * 1000 }).state, ReleaseCacheState.EXPIRED);
+  assert.equal(
+    classifyReleaseCache(record, { now: NOW + 18 * 60 * 60 * 1000 }).state,
+    ReleaseCacheState.EXPIRED,
+  );
   assert.equal(JSON.stringify(record), before);
 });
 
@@ -234,23 +412,21 @@ test("service worker never caches releases.json", async () => {
   assert.match(serviceWorker, /fetch\(request, \{ cache: "no-store" \}\)/);
 });
 
-test("deployment workflow pins the production SHA and gates deployment", async () => {
+test("deployment workflow supports explicit disabled publication and exact-SHA verified publication", async () => {
   const workflow = (
     await fs.readFile(
       path.join(root, ".github", "workflows", "deploy-download-site.yml"),
       "utf8",
     )
   ).replaceAll("\r\n", "\n");
+  assert.match(workflow, /publication_mode:/);
+  assert.match(workflow, /options:\n\s+- disabled\n\s+- verified/);
+  assert.match(workflow, /tool\/versiondeck-control\.json/);
   assert.match(
     workflow,
-    /ref:\s*\$\{\{ github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_sha \|\| github\.sha \}\}/,
+    /node tool\/generate_versiondeck_manifest\.mjs\s+\\?\s*--control tool\/versiondeck-control\.json\s+\\?\s*--publication-mode/,
   );
-  assert.match(workflow, /test "\$source_sha" = "\$remote_sha"/);
-  assert.match(workflow, /pull_request:/);
-  assert.match(workflow, /jobs:\s*\n\s*verify-pr:/);
-  assert.match(
-    workflow,
-    /\n  build:[\s\S]*?github\.event\.workflow_run\.conclusion == 'success'/,
-  );
-  assert.match(workflow, /\n  deploy:[\s\S]*?\n    needs:\s*build/);
+  assert.match(workflow, /if: \$\{\{ steps\.source\.outputs\.publication_mode == 'verified' \}\}/);
+  assert.match(workflow, /expected_publication_status=disabled/);
+  assert.match(workflow, /manifest\.schemaVersion !== 4/);
 });

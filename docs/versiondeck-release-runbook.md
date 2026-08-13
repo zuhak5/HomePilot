@@ -16,6 +16,7 @@ The authoritative implementation is:
 
 - `download-site/`
 - `tool/generate_versiondeck_manifest.mjs`
+- `tool/versiondeck-control.json`
 - `tool/versiondeck_apk_verifier.mjs`
 - `tool/build_account_deletion_site.mjs`
 - `tool/build_versiondeck_site.mjs`
@@ -36,7 +37,8 @@ A release is downloadable only when the pipeline can verify the expected propert
 - Release/non-debuggable status.
 - Signing certificate identity.
 - Source/release ancestry where required.
-- Available provenance or attestation evidence.
+- The exact provenance tuple: repository, source digest/ref, signer workflow
+  identity/digest, workflow trigger, runner environment, and workflow run URI.
 
 Live workflow status is informational. It must not grant download trust to an in-progress artifact.
 
@@ -54,7 +56,9 @@ VersionDeck keeps validation and production publication deliberately separate:
 
 - Pull requests validate VersionDeck source changes without deploying.
 - A `workflow_run` handoff starts VersionDeck after the protected **Build Production APK** workflow completes successfully on `main`.
-- Manual dispatch is a recovery path and requires the run ID and release attempt ID of a successful **Build Production APK** run for the current `main` SHA.
+- Manual dispatch supports two explicit modes:
+  - `publication_mode: verified` is a recovery path and requires the run ID of a successful **Build Production APK** run for the current `main` SHA.
+  - `publication_mode: disabled` publishes an explicit disabled manifest for the current `main` SHA without requiring artifact lookup or APK verification.
 
 Push and GitHub Release events do not deploy Pages. This prevents a source push or the APK workflow's intermediate Release publication step from racing the required backend, APK, and final VersionDeck sequence. The Play AAB remains an independent exact-SHA evidence rail.
 
@@ -64,10 +68,8 @@ The automated production handoff is deliberately fail-closed:
 2. The upstream event must be `workflow_dispatch`.
 3. The upstream branch must be `main`.
 4. The upstream conclusion must be `success`.
-5. The upstream run must retain exactly one `HomePilot-release-attempt-<attempt_id>` artifact.
-6. The upstream build commit must exactly equal the current `main` SHA and the checked-out VersionDeck source.
-7. The build job must revalidate the source SHA, release attempt ID, and generated manifest `generatorCommit` immediately before uploading the Pages artifact.
-8. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
+5. The upstream build commit must exactly equal the current `main` SHA and the checked-out VersionDeck source.
+6. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
 
 Failed, cancelled, skipped, stale-SHA, or non-production upstream runs do not deploy VersionDeck. Release edits or removals require a reviewed recovery dispatch tied to the successful current-SHA APK run; they do not bypass artifact provenance. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
 
@@ -76,6 +78,25 @@ Sentry, and GitHub Release mutations use separate GitHub environments before
 VersionDeck can receive a successful handoff. Do not broaden the `workflow_run`
 source to an untrusted pull-request workflow because downstream workflows can
 receive repository permissions unavailable to the upstream run.
+
+## Publication control
+
+`tool/versiondeck-control.json` is the reviewed authority for:
+
+- The manifest trust-lease duration.
+- Whether publication is `active` or explicitly `disabled`.
+- The reviewed historical disposition for any release outside current `main`
+  ancestry.
+
+The generated manifest must never exceed a 24-hour absolute trust lease. The
+runtime and cache policy treat any network-fetched or cached manifest past that
+lease as expired and disable downloads until a fresh manifest is revalidated.
+
+As of **August 13, 2026**, the checked-in control keeps publication disabled
+and records Build 44 (`releaseId 367559562`, tag `v1.5.0-build.44`, commit
+`6f5606925964c9794d0f1ba863ec954239a47c9b`) as explicitly **withdrawn**.
+Verified publication remains expected to fail closed until a new trustworthy
+release replaces that withdrawn historical build.
 
 ## Pull-request validation
 
@@ -98,22 +119,22 @@ run until the containment record's VersionDeck/Pages prerequisites are met.
 
 The deployment workflow:
 
-1. Validates the trigger and confirms the successful protected production-build handoff (or the explicitly supplied recovery run ID).
+1. Validates the trigger and selects either explicit disabled publication or the successful protected production-build handoff.
 2. Checks out the APK run's source and verifies it exactly matches `origin/main`.
-3. Confirms the APK run, checked-out source, deployment source, and release attempt ID are the same trusted handoff. Manual recovery must provide the same attempt ID retained by the APK run's release-attempt artifact.
-4. Confirms required GitHub and Android verification tools.
+3. In verified mode, confirms the APK run, checked-out source, and deployment source are the same SHA.
+4. In verified mode, confirms required GitHub and Android verification tools.
 5. Runs syntax checks and tests.
-6. Discovers releases and independently verifies candidate APKs.
-7. Generates the release manifest and diagnostics.
+6. In verified mode, discovers releases and independently verifies candidate APKs.
+7. Generates the release manifest and diagnostics from `tool/versiondeck-control.json`.
 8. Requires and validates the three public account-deletion variables, then builds revisioned static assets. Missing or mismatched production values fail before site output is replaced or emitted.
 9. Validates the site.
-10. Revalidates the source SHA, release attempt ID, and generated manifest identity immediately before uploading diagnostics and the Pages artifact.
-11. Requires the same valid release attempt ID and exact current `main` source immediately before the Pages mutation.
-12. Deploys GitHub Pages with protected permissions through the `github-pages`
+10. Uploads diagnostics and the Pages artifact.
+11. Deploys GitHub Pages with protected permissions through the `github-pages`
     environment. The Pages action may poll for up to 20 minutes before
     declaring a deployment timeout, while the deployment job allows additional
     time for the public-manifest check.
-13. Verifies the public manifest after deployment and requires its generator commit to match the deployment source.
+12. Verifies the public manifest after deployment, including schema, source SHA,
+    and expected publication status.
 
 The Pages workflow does not apply the deletion-recovery migration, deploy either `delete-account` or `account-deletion-status`, or perform a destructive hosted browser test. Apply and verify the compatible migration and both functions first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.
 
@@ -122,17 +143,27 @@ The Pages workflow uses the current Node.js 24-compatible major versions of `act
 ## Manifest rules
 
 - The manifest schema is versioned.
+- The manifest publication state is explicit.
+- Every manifest carries an absolute `leaseExpiresAt` trust deadline.
 - Verified release entries must be deterministic.
 - Stable and prerelease selection must be explicit.
 - Unknown or invalid fields must not silently enable downloads.
 - Failed verification should produce diagnostics without publishing a trusted entry.
 - The newest unverified release must not silently cause an older artifact to be represented as that release.
+- Multiple matching attestations, missing tuple fields, or historical releases
+  that cannot satisfy the current tuple policy must fail closed until they are
+  explicitly superseded or withdrawn by reviewed operator action.
+- Historical release decisions must match the release ID, tag, and verified
+  commit SHA exactly.
+- Disabled manifests must not advertise an active latest stable or prerelease
+  download.
 
 ## Service-worker and cache rules
 
 - Revision all application-shell assets when behavior changes.
 - Update the precache list when adding or removing modules or styles.
 - Separate shell caching from release-manifest freshness.
+- Enforce the manifest's absolute trust lease for both live and cached data.
 - Expired, missing, malformed, or unverifiable release metadata must disable or clearly constrain downloads.
 - Offline UI must distinguish cached verified release data from live build status.
 - Do not cache secrets or GitHub tokens in static assets.
@@ -161,12 +192,16 @@ Validate:
 ## Failure handling
 
 - Fail closed when APK verification is incomplete.
+- If artifact verification is failing but operator action must immediately
+  disable downloads, keep or switch `tool/versiondeck-control.json` to
+  `publication.status = "disabled"` and run the manual disabled publication
+  mode. Do not edit `releases.json` by hand.
 - Preserve diagnostics for operator review.
 - Do not manually edit `releases.json` to force acceptance.
 - Do not bypass package, signer, checksum, ancestry, or provenance checks.
 - Do not expose a token in the public site to obtain richer live status.
 - If the production build fails or is cancelled, do not manually represent it as a verified release.
-- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually with that successful current-SHA APK run ID and release attempt ID only after confirming the release evidence and the generated manifest source identity.
+- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually with that successful current-SHA APK run ID only after confirming the release evidence.
 - If `actions/deploy-pages` remains `deployment_in_progress` until its timeout, confirm that no Pages deployment is still active or queued, retain the existing live site, and rerun the VersionDeck workflow. Do not rebuild or republish the APK solely because Pages timed out.
 - If Pages deploys bad static behavior, correct source and redeploy; do not change verified release metadata independently.
 - If any required public deletion-site variable is absent or rejected, leave the current live site untouched and correct repository configuration. Never enable the inert pull-request flag in production.
@@ -177,8 +212,11 @@ Validate:
 - Confirm the successful production workflow has a corresponding VersionDeck workflow run.
 - Load the public site in a fresh browser session.
 - Confirm the manifest schema and latest stable/prerelease selection.
+- Confirm the public manifest publication status and `leaseExpiresAt` value.
 - Confirm the download link points to the expected verified GitHub artifact.
 - Compare displayed version/build/checksum with release evidence.
+- Compare the displayed provenance tuple and workflow-run link with the
+  verified attestation tuple retained by the APK release workflow.
 - Verify stale/offline/error states.
 - Verify service-worker update behavior.
 - Verify live build status does not replace stable download identity.
@@ -210,6 +248,6 @@ If any hosted check fails, the external flow is not release-ready even when loca
 
 ## Evidence
 
-Record the production workflow run, production source commit, release attempt ID, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
+Record the production workflow run, production source commit, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
 
 For account deletion, additionally record the Edge Function project/version, Supabase Auth callback configuration review, public-config validation, allowed and denied preflight results, revisioned-asset observation, disposable-account OAuth result, strict receipt validation with identifiers redacted, Auth/Postgres/Storage cleanup checks, device-local limitation/result, offline network-only result, operator, and timestamp. Clearly label local automated evidence separately from hosted-service and device evidence.

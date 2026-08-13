@@ -8,7 +8,7 @@ VersionDeck may display the status of an active HomePilot production build while
 
 ### Verified release data
 
-Generated from independently inspected release artifacts. It controls download availability and includes verified identity such as version, build, checksum, signer, and release references.
+Generated from independently inspected release artifacts. It controls download availability and includes verified identity such as version, build, checksum, signer, release references, publication status, and the manifest trust-lease deadline.
 
 ### Live build data
 
@@ -49,7 +49,8 @@ When a new build is active, the sticky download area may show compact build cont
 ## Freshness and cache policy
 
 - Build status should use a short freshness window appropriate to operational data.
-- Verified release metadata can use a different cache policy because it is artifact-derived.
+- Verified release metadata can use a different cache policy because it is artifact-derived, but it must still respect the manifest's absolute trust lease.
+- Verified release state can be `active`, `disabled`, `expired`, or `invalid`. Build-status UI must never override those release-trust states.
 - Stale build data should be labeled or hidden, not represented as live.
 - A cached successful build must not enable a download.
 - Service-worker changes must revision assets and preserve recovery from old caches.

@@ -9,6 +9,9 @@ on:
       - "tool/build_account_deletion_site.mjs"
       - "tool/build_versiondeck_site.mjs"
       - "tool/generate_versiondeck_manifest.mjs"
+      - "tool/provenance_policy.mjs"
+      - "tool/provenance_policy.test.mjs"
+      - "tool/versiondeck-control.json"
       - "tool/versiondeck_apk_verifier.mjs"
       - "tool/versiondeck.test.mjs"
       - "tool/build-status.test.mjs"
@@ -26,13 +29,17 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      publication_mode:
+        description: "Publish verified releases or an explicit disabled manifest"
+        required: true
+        default: disabled
+        type: choice
+        options:
+          - disabled
+          - verified
       production_run_id:
         description: "Successful Build Production APK run ID for the current main SHA"
-        required: true
-        type: string
-      release_attempt_id:
-        description: "Release attempt ID from the production APK run"
-        required: true
+        required: false
         type: string
 
 concurrency:
@@ -69,14 +76,21 @@ jobs:
           node --check tool/build_versiondeck_site.mjs
           node --check tool/build_account_deletion_site.mjs
           node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/provenance_policy.mjs
           node --check tool/versiondeck_apk_verifier.mjs
           node --check tool/validate_versiondeck.mjs
+          node --check tool/provenance_policy.test.mjs
           node --check tool/versiondeck.test.mjs
           node --check tool/build-status.test.mjs
           node --check tool/account-deletion-site.test.mjs
 
       - name: Run VersionDeck tests
-        run: node --test tool/versiondeck.test.mjs tool/build-status.test.mjs tool/account-deletion-site.test.mjs
+        run: >-
+          node --test
+          tool/provenance_policy.test.mjs
+          tool/versiondeck.test.mjs
+          tool/build-status.test.mjs
+          tool/account-deletion-site.test.mjs
 
       - name: Build and validate static pull-request artifact
         shell: bash
@@ -106,7 +120,8 @@ jobs:
       attestations: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
-      release_attempt_id: ${{ steps.source.outputs.release_attempt_id }}
+      publication_mode: ${{ steps.source.outputs.publication_mode }}
+      expected_publication_status: ${{ steps.source.outputs.expected_publication_status }}
 
     steps:
       - name: Check out current VersionDeck source
@@ -133,58 +148,46 @@ jobs:
           echo "- Trigger: \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            publication_mode="verified"
             upstream_sha="${{ github.event.workflow_run.head_sha }}"
             upstream_url="${{ github.event.workflow_run.html_url }}"
-            upstream_run_id="${{ github.event.workflow_run.id }}"
             test -n "$upstream_sha"
             test "$upstream_sha" = "$source_sha"
-            mapfile -t attempt_artifacts < <(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${upstream_run_id}/artifacts" \
-                --jq '.artifacts[].name' |
-                grep -E '^HomePilot-release-attempt-hpra_[0-9a-f]{32}$' || true
-            )
-            if [[ "${#attempt_artifacts[@]}" -ne 1 ]]; then
-              echo "Expected exactly one release attempt artifact on upstream run $upstream_run_id, found ${#attempt_artifacts[@]}." >&2
-              exit 1
-            fi
-            release_attempt_id="${attempt_artifacts[0]#HomePilot-release-attempt-}"
             echo "- Production build commit: \`$upstream_sha\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- Production build run: $upstream_url" >> "$GITHUB_STEP_SUMMARY"
           else
+            publication_mode="${{ inputs.publication_mode }}"
+            test "$publication_mode" = "verified" || test "$publication_mode" = "disabled"
             production_run_id="${{ inputs.production_run_id }}"
-            release_attempt_id="${{ inputs.release_attempt_id }}"
-            test -n "$production_run_id"
-            if [[ ! "$release_attempt_id" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-              echo "Missing or invalid release attempt ID." >&2
-              exit 1
+            if [[ "$publication_mode" == "verified" ]]; then
+              test -n "$production_run_id"
+              run_api="repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}"
+              run_name="$(gh api "$run_api" --jq '.name')"
+              run_conclusion="$(gh api "$run_api" --jq '.conclusion')"
+              run_event="$(gh api "$run_api" --jq '.event')"
+              run_branch="$(gh api "$run_api" --jq '.head_branch')"
+              run_sha="$(gh api "$run_api" --jq '.head_sha')"
+              run_url="$(gh api "$run_api" --jq '.html_url')"
+              test "$run_name" = "Build Production APK"
+              test "$run_conclusion" = "success"
+              test "$run_event" = "workflow_dispatch"
+              test "$run_branch" = "main"
+              test "$run_sha" = "$source_sha"
+              echo "- Production build commit: \`$run_sha\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Production build run: $run_url" >> "$GITHUB_STEP_SUMMARY"
+            else
+              test -z "$production_run_id"
+              echo "- Production build run: not required for disabled publication" >> "$GITHUB_STEP_SUMMARY"
             fi
-            run_api="repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}"
-            run_name="$(gh api "$run_api" --jq '.name')"
-            run_conclusion="$(gh api "$run_api" --jq '.conclusion')"
-            run_event="$(gh api "$run_api" --jq '.event')"
-            run_branch="$(gh api "$run_api" --jq '.head_branch')"
-            run_sha="$(gh api "$run_api" --jq '.head_sha')"
-            run_url="$(gh api "$run_api" --jq '.html_url')"
-            test "$run_name" = "Build Production APK"
-            test "$run_conclusion" = "success"
-            test "$run_event" = "workflow_dispatch"
-            test "$run_branch" = "main"
-            test "$run_sha" = "$source_sha"
-            artifact_count="$(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}/artifacts" \
-                --jq '.artifacts[].name' |
-                grep -Ec "^HomePilot-release-attempt-${release_attempt_id}$" || true
-            )"
-            test "$artifact_count" = "1"
-            echo "- Production build commit: \`$run_sha\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Production build run: $run_url" >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [[ ! "$release_attempt_id" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-            echo "Missing or invalid release attempt ID." >&2
-            exit 1
+
+          echo "publication_mode=$publication_mode" >> "$GITHUB_OUTPUT"
+          if [[ "$publication_mode" == "disabled" ]]; then
+            echo "expected_publication_status=disabled" >> "$GITHUB_OUTPUT"
+          else
+            echo "expected_publication_status=active" >> "$GITHUB_OUTPUT"
           fi
-          echo "release_attempt_id=$release_attempt_id" >> "$GITHUB_OUTPUT"
-          echo "- Release attempt: \`$release_attempt_id\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Publication mode: \`$publication_mode\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -192,6 +195,7 @@ jobs:
           node-version: "24"
 
       - name: Verify release-verification tools
+        if: ${{ steps.source.outputs.publication_mode == 'verified' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -214,20 +218,30 @@ jobs:
           node --check tool/build_versiondeck_site.mjs
           node --check tool/build_account_deletion_site.mjs
           node --check tool/generate_versiondeck_manifest.mjs
+          node --check tool/provenance_policy.mjs
           node --check tool/versiondeck_apk_verifier.mjs
           node --check tool/validate_versiondeck.mjs
+          node --check tool/provenance_policy.test.mjs
           node --check tool/versiondeck.test.mjs
           node --check tool/build-status.test.mjs
           node --check tool/account-deletion-site.test.mjs
 
       - name: Run VersionDeck tests
-        run: node --test tool/versiondeck.test.mjs tool/build-status.test.mjs tool/account-deletion-site.test.mjs
+        run: >-
+          node --test
+          tool/provenance_policy.test.mjs
+          tool/versiondeck.test.mjs
+          tool/build-status.test.mjs
+          tool/account-deletion-site.test.mjs
 
       - name: Generate independently verified release manifest
         env:
           GITHUB_TOKEN: ${{ github.token }}
           VERSIONDECK_GENERATOR_COMMIT: ${{ steps.source.outputs.sha }}
-        run: node tool/generate_versiondeck_manifest.mjs
+        run: >-
+          node tool/generate_versiondeck_manifest.mjs
+          --control tool/versiondeck-control.json
+          --publication-mode ${{ steps.source.outputs.publication_mode }}
 
       - name: Build revisioned VersionDeck artifact
         env:
@@ -243,31 +257,6 @@ jobs:
       - name: Validate generated site
         run: node tool/validate_versiondeck.mjs .versiondeck-site
 
-      - name: Revalidate source and attempt before Pages artifact upload
-        shell: bash
-        env:
-          RELEASE_ATTEMPT_ID: ${{ steps.source.outputs.release_attempt_id }}
-          EXPECTED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: |
-          set -euo pipefail
-          git fetch origin main --tags --force
-          source_sha="$(git rev-parse HEAD)"
-          remote_sha="$(git rev-parse origin/main)"
-          test "$source_sha" = "${{ steps.source.outputs.sha }}"
-          test "$source_sha" = "$remote_sha"
-          if [[ ! "$RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-            echo "Missing or invalid release attempt ID before Pages artifact upload." >&2
-            exit 1
-          fi
-          test -f .versiondeck-site/releases.json
-          node - <<'NODE'
-          const fs = require("node:fs");
-          const manifest = JSON.parse(fs.readFileSync(".versiondeck-site/releases.json", "utf8"));
-          if (manifest.generatorCommit !== process.env.EXPECTED_SOURCE_SHA) {
-            throw new Error(`VersionDeck generator commit ${manifest.generatorCommit} does not match ${process.env.EXPECTED_SOURCE_SHA}.`);
-          }
-          NODE
-
       - name: Summarize generated manifest
         shell: bash
         run: |
@@ -276,6 +265,8 @@ jobs:
           const manifest = require("./.versiondeck-site/releases.json");
           console.log("### Verified releases");
           console.log(`- Schema: ${manifest.schemaVersion}`);
+          console.log(`- Publication status: ${manifest.publication.status}`);
+          console.log(`- Trust lease expires: ${manifest.leaseExpiresAt}`);
           console.log(`- Verified entries: ${manifest.releases.length}`);
           console.log(`- Latest stable ID: ${manifest.latestStableReleaseId ?? "none"}`);
           console.log(`- Latest prerelease ID: ${manifest.latestPrereleaseReleaseId ?? "none"}`);
@@ -288,6 +279,7 @@ jobs:
           name: versiondeck-validation-${{ github.run_id }}
           path: |
             download-site/releases.json
+            tool/versiondeck-control.json
             .versiondeck-diagnostics/release-diagnostics.json
             .versiondeck-site/asset-manifest.json
             .versiondeck-site/build-info.json
@@ -309,7 +301,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
       pages: write
       id-token: write
     environment:
@@ -317,29 +308,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Check out deployment source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ needs.build.outputs.source_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Require release attempt before Pages mutation
-        env:
-          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.build.outputs.release_attempt_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main --tags --force
-          source_sha="$(git rev-parse HEAD)"
-          remote_sha="$(git rev-parse origin/main)"
-          test "$source_sha" = "${{ needs.build.outputs.source_sha }}"
-          test "$source_sha" = "$remote_sha"
-          if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-            echo "Missing or invalid release attempt ID before Pages deployment." >&2
-            exit 1
-          fi
-
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
@@ -350,6 +318,7 @@ jobs:
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           EXPECTED_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          EXPECTED_PUBLICATION_STATUS: ${{ needs.build.outputs.expected_publication_status }}
         shell: bash
         run: |
           set -euo pipefail
@@ -362,9 +331,10 @@ jobs:
               if EXPECTED_SOURCE_SHA="$EXPECTED_SOURCE_SHA" node - <<'NODE'
           const fs = require("node:fs");
           const manifest = JSON.parse(fs.readFileSync("/tmp/releases.json", "utf8"));
-          if (manifest.schemaVersion !== 2) process.exit(1);
+          if (manifest.schemaVersion !== 4) process.exit(1);
           if (manifest.repository !== "zuhak5/HomePilot") process.exit(1);
           if (manifest.generatorCommit !== process.env.EXPECTED_SOURCE_SHA) process.exit(1);
+          if (manifest.publication?.status !== process.env.EXPECTED_PUBLICATION_STATUS) process.exit(1);
           NODE
               then
                 echo "Public VersionDeck manifest matches source $EXPECTED_SOURCE_SHA."

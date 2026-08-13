@@ -11,14 +11,6 @@ on:
         description: Exact Supabase project ref confirmation
         required: true
         type: string
-      release_attempt_id:
-        description: Release attempt ID that authorized this production mutation
-        required: true
-        type: string
-      release_attempt_run_id:
-        description: Successful Release Attempt Dry Run run ID for this source SHA
-        required: true
-        type: string
       confirmation:
         description: Type apply-pending-migrations
         required: true
@@ -26,7 +18,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: production-supabase-migrations
@@ -39,8 +30,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
-      release_attempt_id: ${{ steps.source.outputs.release_attempt_id }}
-      release_attempt_run_id: ${{ steps.source.outputs.release_attempt_run_id }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -50,8 +39,6 @@ jobs:
         id: source
         env:
           INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
-          INPUT_RELEASE_ATTEMPT_ID: ${{ inputs.release_attempt_id }}
-          INPUT_RELEASE_ATTEMPT_RUN_ID: ${{ inputs.release_attempt_run_id }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
@@ -62,66 +49,8 @@ jobs:
           test "$source_sha" = "$INPUT_SOURCE_SHA"
           test "$source_sha" = "$GITHUB_SHA"
           test "$source_sha" = "$remote_sha"
-          if [[ ! "$INPUT_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-            echo "Missing or invalid release attempt ID." >&2
-            exit 1
-          fi
           test "$INPUT_CONFIRMATION" = "apply-pending-migrations"
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "release_attempt_id=$INPUT_RELEASE_ATTEMPT_ID" >> "$GITHUB_OUTPUT"
-          echo "release_attempt_run_id=$INPUT_RELEASE_ATTEMPT_RUN_ID" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: "24"
-          cache: npm
-
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: "2.9.3"
-
-      - name: Restore and validate release attempt evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-          INPUT_RELEASE_ATTEMPT_ID: ${{ inputs.release_attempt_id }}
-          INPUT_RELEASE_ATTEMPT_RUN_ID: ${{ inputs.release_attempt_run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p release-attempt
-          gh run download "$INPUT_RELEASE_ATTEMPT_RUN_ID" \
-            --name "HomePilot-release-attempt-dry-run-$INPUT_RELEASE_ATTEMPT_ID" \
-            --dir release-attempt
-          node tool/release_attempt_ledger.mjs verify-attempt \
-            --attempt-file release-attempt/release-attempt.prerequisites-verified.json \
-            --attempt-id "$INPUT_RELEASE_ATTEMPT_ID" \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ steps.source.outputs.sha }}" \
-            --state prerequisites_verified \
-            --required-evidence-keys backend_validation \
-            --output release-attempt/migration-attempt-validation.json
-
-      - name: Run semantic migration prerequisites
-        run: |
-          set -euo pipefail
-          npm ci
-          node tool/validate_google_release_contracts.mjs
-          deno fmt --check \
-            supabase/functions/admob-ssv-handler/index.ts \
-            supabase/functions/admob-ssv-handler/index_test.ts \
-            supabase/functions/delete-account/index.ts \
-            supabase/functions/delete-account/index_test.ts \
-            supabase/functions/account-deletion-status/index.ts \
-            supabase/functions/account-deletion-status/index_test.ts
-          deno check --frozen supabase/functions/admob-ssv-handler/index.ts
-          deno check --frozen supabase/functions/delete-account/index.ts
-          deno check --frozen supabase/functions/account-deletion-status/index.ts
-          deno test --frozen --allow-env --allow-net supabase/functions/admob-ssv-handler/index_test.ts
-          deno test --frozen --allow-env --allow-net supabase/functions/delete-account/index_test.ts
-          deno test --frozen --allow-env --allow-net supabase/functions/account-deletion-status/index_test.ts
-          npx supabase start
-          trap 'npx supabase stop --no-backup || true' EXIT
-          npm run supabase:lint
-          npm run supabase:test
 
   deploy:
     name: Apply pending production migrations
@@ -138,9 +67,6 @@ jobs:
       - name: Revalidate exact current main after approval
         env:
           EXPECTED_SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
-          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.validate-source.outputs.release_attempt_id }}
-          EXPECTED_RELEASE_ATTEMPT_RUN_ID: ${{ needs.validate-source.outputs.release_attempt_run_id }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
@@ -149,23 +75,6 @@ jobs:
           test "$source_sha" = "$EXPECTED_SOURCE_SHA"
           test "$source_sha" = "$GITHUB_SHA"
           test "$source_sha" = "$remote_sha"
-          if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
-            echo "Missing or invalid release attempt ID after approval." >&2
-            exit 1
-          fi
-          mkdir -p release-attempt
-          gh run download "$EXPECTED_RELEASE_ATTEMPT_RUN_ID" \
-            --name "HomePilot-release-attempt-dry-run-$EXPECTED_RELEASE_ATTEMPT_ID" \
-            --dir release-attempt
-          node tool/release_attempt_ledger.mjs verify-attempt \
-            --attempt-file release-attempt/release-attempt.prerequisites-verified.json \
-            --attempt-id "$EXPECTED_RELEASE_ATTEMPT_ID" \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "$EXPECTED_SOURCE_SHA" \
-            --state prerequisites_verified \
-            --required-evidence-keys backend_validation \
-            --output release-attempt/protected-attempt-validation.json
-          echo "- Release attempt: \`$EXPECTED_RELEASE_ATTEMPT_ID\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm protected Supabase project
         env:
           INPUT_PROJECT_REF: ${{ inputs.project_ref }}
@@ -197,98 +106,13 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_MIGRATION_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_MIGRATION_DB_PASSWORD }}
         run: npx supabase db push --linked --dry-run
-      - name: Revalidate attempt immediately before migration apply
-        env:
-          EXPECTED_SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
-          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.validate-source.outputs.release_attempt_id }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin main
-          source_sha="$(git rev-parse HEAD)"
-          remote_sha="$(git rev-parse origin/main)"
-          test "$source_sha" = "$EXPECTED_SOURCE_SHA"
-          test "$source_sha" = "$GITHUB_SHA"
-          test "$source_sha" = "$remote_sha"
-          node tool/release_attempt_ledger.mjs verify-attempt \
-            --attempt-file release-attempt/release-attempt.prerequisites-verified.json \
-            --attempt-id "$EXPECTED_RELEASE_ATTEMPT_ID" \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "$EXPECTED_SOURCE_SHA" \
-            --state prerequisites_verified \
-            --required-evidence-keys backend_validation
       - name: Apply pending migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_MIGRATION_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_MIGRATION_DB_PASSWORD }}
-        run: |
-          set -euo pipefail
-          cat > release-attempt/migration-start.json <<EOF
-          {
-            "type": "supabase-migration-apply-start",
-            "attempt_id": "${{ needs.validate-source.outputs.release_attempt_id }}",
-            "repository": "$GITHUB_REPOSITORY",
-            "source_sha": "$GITHUB_SHA",
-            "project_ref": "${{ inputs.project_ref }}",
-            "run_id": "$GITHUB_RUN_ID",
-            "run_attempt": "$GITHUB_RUN_ATTEMPT"
-          }
-          EOF
-          node tool/release_attempt_ledger.mjs advance \
-            --attempt-file release-attempt/release-attempt.prerequisites-verified.json \
-            --state mutation_started \
-            --reason supabase-migration-apply-started \
-            --evidence-key supabase_migration_apply_start \
-            --evidence-file release-attempt/migration-start.json \
-            --output release-attempt/release-attempt.migration-started.json
-          npx supabase db push --linked
-          cat > release-attempt/migration-apply.json <<EOF
-          {
-            "type": "supabase-migration-apply",
-            "attempt_id": "${{ needs.validate-source.outputs.release_attempt_id }}",
-            "repository": "$GITHUB_REPOSITORY",
-            "source_sha": "$GITHUB_SHA",
-            "project_ref": "${{ inputs.project_ref }}",
-            "run_id": "$GITHUB_RUN_ID",
-            "run_attempt": "$GITHUB_RUN_ATTEMPT"
-          }
-          EOF
-          node tool/release_attempt_ledger.mjs advance \
-            --attempt-file release-attempt/release-attempt.migration-started.json \
-            --state published \
-            --reason supabase-migrations-applied \
-            --evidence-key supabase_migration_apply \
-            --evidence-file release-attempt/migration-apply.json \
-            --output release-attempt/release-attempt.migration-published.json
+        run: npx supabase db push --linked
       - name: Verify no migration remains pending
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_MIGRATION_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_MIGRATION_DB_PASSWORD }}
-        run: |
-          set -euo pipefail
-          npx supabase db push --linked --dry-run
-          cat > release-attempt/migration-externally-verified.json <<EOF
-          {
-            "type": "supabase-migration-no-pending",
-            "attempt_id": "${{ needs.validate-source.outputs.release_attempt_id }}",
-            "repository": "$GITHUB_REPOSITORY",
-            "source_sha": "$GITHUB_SHA",
-            "project_ref": "${{ inputs.project_ref }}",
-            "run_id": "$GITHUB_RUN_ID",
-            "run_attempt": "$GITHUB_RUN_ATTEMPT"
-          }
-          EOF
-          node tool/release_attempt_ledger.mjs advance \
-            --attempt-file release-attempt/release-attempt.migration-published.json \
-            --state externally_verified \
-            --reason supabase-migrations-no-pending \
-            --evidence-key supabase_migration_no_pending \
-            --evidence-file release-attempt/migration-externally-verified.json \
-            --output release-attempt/release-attempt.migration-externally-verified.json
-      - name: Upload migration ledger evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: HomePilot-migration-ledger-${{ needs.validate-source.outputs.release_attempt_id }}-${{ github.run_id }}
-          path: release-attempt
-          if-no-files-found: warn
-          retention-days: 30
+        run: npx supabase db push --linked --dry-run

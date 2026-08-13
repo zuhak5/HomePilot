@@ -103,11 +103,25 @@ Sentry is optional by configuration. Events are scrubbed and should contain only
 
 `validate-google-backend.yml` is the exact-SHA prerequisite for both Android release rails. It checks Deno formatting, type safety, and tests for AdMob SSV, account deletion, and deletion-status recovery; browser deletion and static Google/Android contracts; and Supabase lint/database authorization tests against a local CI stack. A green run is repository/CI evidence, not proof of hosted Supabase deployment.
 
-The manually dispatched Play rail builds and verifies one signed production AAB, captures manifest/dependency/signature evidence, uploads retained Actions artifacts, and attests provenance. It contains no Google Play API upload or rollout step. Play Console acceptance, App Signing, declarations, and device delivery require the separately authorized operator process in the [Google Play release runbook](../operations/google-play-release-runbook.md).
+The manually dispatched Play rail builds and verifies one signed production
+AAB, captures manifest/dependency/signature evidence, uploads retained Actions
+artifacts, and attests the exact provenance tuple for repository, source
+digest/ref, signer workflow identity/digest, workflow trigger, runner
+environment, and workflow run URI. It contains no Google Play API upload or
+rollout step. Play Console acceptance, App Signing, declarations, and device
+delivery require the separately authorized operator process in the
+[Google Play release runbook](../operations/google-play-release-runbook.md).
 
-The separately dispatched APK rail validates source and production configuration, builds and inspects one signed non-debuggable APK, captures evidence, publishes the Sentry release, attests provenance, and creates the GitHub Release. Those mutations occur only in the protected workflow; source inspection does not establish that a run succeeded.
+The separately dispatched APK rail validates source and production
+configuration, builds and inspects one signed non-debuggable APK, captures
+evidence, publishes the Sentry release, attests the same exact provenance
+tuple, and creates the GitHub Release. Those mutations occur only in the
+protected workflow; source inspection does not establish that a run succeeded.
 
-VersionDeck is separate from the application build. It discovers releases and independently verifies APK identity before generating a static download site. Live workflow status is informational and must remain separate from verified stable-release identity.
+VersionDeck is separate from the application build. It discovers releases and
+independently verifies APK identity plus the exact provenance tuple before
+generating a static download site. Live workflow status is informational and
+must remain separate from verified stable-release identity.
 
 ## Trust boundaries
 

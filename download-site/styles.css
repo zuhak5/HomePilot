@@ -325,6 +325,16 @@ h3 {
   display: none;
 }
 
+.status-withdrawn {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.status-superseded {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .latest-date,
 .release-meta,
 .release-count {
