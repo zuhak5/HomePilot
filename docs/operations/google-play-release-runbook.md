@@ -39,15 +39,16 @@ Before dispatching the AAB workflow:
 2. Confirm `pubspec.yaml` uses `x.y.z+N` and that `N` is greater than every version code ever accepted by Google Play for `com.homepilot.app`.
 3. Obtain a successful `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` equals the final SHA. Require its exact check names—`Deno SSV tests`, `Google contract/static checks`, and `Supabase database tests`—in branch protection and verify that hosted setting separately. The validation run uses a local stack and is not hosted deployment evidence.
 4. Review user-visible release notes, privacy impact, permissions, ads, account deletion, data retention, and store declarations.
-5. Verify the declared GitHub `production` environment configuration and approvals externally. Workflow source alone does not prove required reviewers or correct values.
+5. Verify the declared GitHub `production-play-signing` environment configuration and approvals externally. Workflow source alone does not prove required reviewers or correct values.
 6. Confirm the expected Play application/package is `com.homepilot.app`, the intended initial target is identified, and no conflicting Play edit or rollout is active.
 
-The current AAB workflow requires these exact `production` environment names:
+The current AAB workflow requires these exact `production-play-signing`
+environment names:
 
 | Kind | Names |
 | --- | --- |
 | Variables | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_DSN` |
-| Signing secrets | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD` |
+| Signing secrets | `PLAY_UPLOAD_KEYSTORE_BASE64`, `PLAY_UPLOAD_KEY_ALIAS`, `PLAY_UPLOAD_KEY_PASSWORD`, `PLAY_UPLOAD_STORE_PASSWORD` |
 
 Do not record their values in the release record.
 
@@ -61,7 +62,7 @@ The GitHub workflow does not query Play Console for version-code uniqueness. Pla
 
 Keep these identities separate in evidence:
 
-1. **Upload key certificate.** The AAB is signed with the keystore restored from the `ANDROID_*` secrets. The workflow runs `jarsigner`, reads the AAB certificate with `keytool -printcert -jarfile`, reads the restored keystore certificate, and requires those SHA-256 digests to match. This proves internal consistency with the supplied upload keystore only.
+1. **Upload key certificate.** The AAB is signed with the keystore restored from the `PLAY_UPLOAD_*` secrets. The workflow runs `jarsigner`, reads the AAB certificate with `keytool -printcert -jarfile`, reads the restored keystore certificate, and requires those SHA-256 digests to match. This proves internal consistency with the supplied upload keystore only.
 2. **Play-enrolled upload certificate.** Google Play Console shows the certificate it accepts for bundle uploads. Compare its SHA-256 fingerprint with `aab-signature-verification.txt`. The workflow does not query Console and cannot make this comparison.
 3. **Play App Signing certificate.** When Play App Signing is enabled, Google signs generated/delivered APKs with the app signing key shown in Console. That certificate can differ from the upload certificate and from the signer on HomePilot's standalone GitHub APK. Record it separately and verify a Play-delivered APK against it.
 

@@ -24,9 +24,14 @@ before/after ruleset evidence, restoration, and post-event review.
 
 TASK-002 is complete, but production containment remains active and the app has
 no retained private credential. Later tasks own protected credential
-provisioning, workflow integration, and release authorization. See the
+provisioning, workflow integration, and release authorization. TASK-004 source
+and hosted secret-name placement now define split GitHub credential
+environments, but closure still requires negative run evidence. See the
 [`TASK-002 source and tag protection record`](docs/operations/github-source-and-tag-protection.md)
-for exact hosted state, positive/negative probes, and evidence limits.
+for exact hosted source/tag state, positive/negative probes, and evidence
+limits, and the
+[GitHub environment credential ownership runbook](docs/operations/github-environment-credential-ownership.md)
+for the credential-domain contract.
 
 ## GitHub Actions supply chain
 
@@ -76,6 +81,8 @@ Changes in these areas require elevated review:
 - Sentry initialization, scrubbing, event processors, release publication, and telemetry fields.
 - Android permissions, exact alarms, foreground services, boot receivers, and location.
 - Production configuration, Android signing, APK verification, provenance, GitHub Releases, and VersionDeck.
+- GitHub environment protection, credential ownership, and workflow source
+  trust for secret-bearing jobs.
 
 ## Secret handling
 

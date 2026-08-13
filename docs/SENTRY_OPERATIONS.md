@@ -74,7 +74,10 @@ Scrubber tests must include nested maps/lists and representative authentication,
 
 ## Releases
 
-Production release publication is handled by the protected Android build workflow through `tool/publish_sentry_release.ps1`.
+Production release publication is handled by the protected Android workflow's
+separate `production-sentry` job through `tool/publish_sentry_release.ps1`.
+The Sentry token must not be available to Android signing, Supabase, Pages, or
+GitHub Release jobs. See the [GitHub environment credential ownership runbook](operations/github-environment-credential-ownership.md).
 
 The release identifier must correspond to the built application release and source commit. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
 

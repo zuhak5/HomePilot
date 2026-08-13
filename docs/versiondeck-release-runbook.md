@@ -69,7 +69,11 @@ The automated production handoff is deliberately fail-closed:
 
 Failed, cancelled, skipped, stale-SHA, or non-production upstream runs do not deploy VersionDeck. Release edits or removals require a reviewed recovery dispatch tied to the successful current-SHA APK run; they do not bypass artifact provenance. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
 
-The upstream production workflow is manual and protected. Do not broaden the `workflow_run` source to an untrusted pull-request workflow because downstream workflows can receive repository permissions unavailable to the upstream run.
+The upstream production workflow is manual and protected. Its APK signing,
+Sentry, and GitHub Release mutations use separate GitHub environments before
+VersionDeck can receive a successful handoff. Do not broaden the `workflow_run`
+source to an untrusted pull-request workflow because downstream workflows can
+receive repository permissions unavailable to the upstream run.
 
 ## Pull-request validation
 
@@ -102,7 +106,10 @@ The deployment workflow:
 8. Requires and validates the three public account-deletion variables, then builds revisioned static assets. Missing or mismatched production values fail before site output is replaced or emitted.
 9. Validates the site.
 10. Uploads diagnostics and the Pages artifact.
-11. Deploys GitHub Pages with protected permissions. The Pages action may poll for up to 20 minutes before declaring a deployment timeout, while the deployment job allows additional time for the public-manifest check.
+11. Deploys GitHub Pages with protected permissions through the `github-pages`
+    environment. The Pages action may poll for up to 20 minutes before
+    declaring a deployment timeout, while the deployment job allows additional
+    time for the public-manifest check.
 12. Verifies the public manifest after deployment.
 
 The Pages workflow does not apply the deletion-recovery migration, deploy either `delete-account` or `account-deletion-status`, or perform a destructive hosted browser test. Apply and verify the compatible migration and both functions first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.

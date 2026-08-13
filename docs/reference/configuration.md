@@ -50,7 +50,11 @@ Google sign-in uses OAuth client identifiers appropriate to Android and backend 
 
 ## GitHub Actions
 
-Protected workflows consume environment secrets and variables for production configuration, Android signing, expected signer identity, Sentry, and release publication. Workflow logs and artifacts must not print the source secret values.
+Protected workflows consume environment secrets and variables for production
+configuration, Android signing, Supabase Advisors, Supabase migrations, Sentry,
+GitHub Release publication, and Pages publication. The current split-domain map
+is maintained in the [GitHub environment credential ownership runbook](../operations/github-environment-credential-ownership.md).
+Workflow logs and artifacts must not print the source secret values.
 
 ## VersionDeck
 

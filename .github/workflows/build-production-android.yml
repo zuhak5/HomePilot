@@ -52,13 +52,22 @@ jobs:
     needs: validate-release-source
     runs-on: windows-latest
     timeout-minutes: 60
-    environment: production
+    environment: production-android-signing
+    outputs:
+      handoff_artifact_id: ${{ steps.handoff.outputs.artifact-id }}
+      handoff_artifact_digest: ${{ steps.handoff.outputs.artifact-digest }}
+      apk_name: ${{ steps.release.outputs.apk_name }}
+      apk_sha256: ${{ steps.release.outputs.sha256 }}
+      version_name: ${{ steps.release.outputs.version_name }}
+      build_number: ${{ steps.release.outputs.build_number }}
+      release_tag: ${{ steps.release.outputs.tag }}
+      release_name: ${{ steps.metadata.outputs.release_name }}
+      sentry_release: ${{ steps.metadata.outputs.sentry_release }}
+      sentry_dist: ${{ steps.metadata.outputs.sentry_dist }}
 
     permissions:
-      contents: write
+      contents: read
       actions: read
-      id-token: write
-      attestations: write
 
     steps:
       - name: Check out repository
@@ -315,10 +324,10 @@ jobs:
       - name: Restore Android signing credentials
         shell: pwsh
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_APK_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_APK_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_APK_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_APK_STORE_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -522,10 +531,115 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Upload production APK handoff
+        id: handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HomePilot-production-apk-handoff-${{ github.run_id }}
+          path: |
+            ${{ steps.release.outputs.apk_path }}
+            ${{ steps.release.outputs.checksum_path }}
+            release/apk-evidence
+            build/app/intermediates/flutter/prodRelease
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop Gradle daemons before cache save
+        if: always()
+        shell: pwsh
+        run: |
+          Push-Location "android"
+          try {
+            if (Test-Path ".\gradlew.bat") {
+              & ".\gradlew.bat" --stop
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
+              }
+            }
+            Start-Sleep -Seconds 2
+          }
+          finally {
+            Pop-Location
+          }
+
+      - name: Remove temporary credentials
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath "android\app\homepilot-release.jks" -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "android\key.properties" -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "config\prod.json" -Force -ErrorAction SilentlyContinue
+
+  publish-sentry-release:
+    name: Publish Sentry release
+    needs: build-production-apk
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: production-sentry
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate exact release source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git fetch origin main --no-tags
+          if ($LASTEXITCODE -ne 0) { throw "Could not refresh origin/main." }
+          $SourceSha = (git rev-parse HEAD).Trim()
+          $MainSha = (git rev-parse origin/main).Trim()
+          if ($SourceSha -ne $env:GITHUB_SHA) {
+            throw "Checked-out source $SourceSha differs from GITHUB_SHA $env:GITHUB_SHA."
+          }
+          if ($SourceSha -ne $MainSha) {
+            throw "Sentry publication requires exact current origin/main $MainSha, got $SourceSha."
+          }
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: "3.44.7"
+          channel: stable
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Restore release handoff
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_NAME: HomePilot-production-apk-handoff-${{ github.run_id }}
+          EXPECTED_APK_NAME: ${{ needs.build-production-apk.outputs.apk_name }}
+          EXPECTED_APK_SHA256: ${{ needs.build-production-apk.outputs.apk_sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh run download $env:GITHUB_RUN_ID --name $env:HANDOFF_NAME --dir .
+          $ApkPath = Join-Path $PWD "release\$env:EXPECTED_APK_NAME"
+          if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
+            throw "Expected APK handoff file was not restored: $ApkPath"
+          }
+          $ActualHash = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne $env:EXPECTED_APK_SHA256) {
+            throw "APK handoff hash mismatch before Sentry publication."
+          }
+
       - name: Recheck release tag before Sentry mutation
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ needs.build-production-apk.outputs.release_tag }}
         run: |
           $ErrorActionPreference = "Continue"
           & git ls-remote --exit-code --refs origin "refs/tags/$env:RELEASE_TAG" *> $null
@@ -545,44 +659,119 @@ jobs:
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_RELEASE: ${{ steps.metadata.outputs.sentry_release }}
-          SENTRY_DIST: ${{ steps.metadata.outputs.sentry_dist }}
+          SENTRY_RELEASE: ${{ needs.build-production-apk.outputs.sentry_release }}
+          SENTRY_DIST: ${{ needs.build-production-apk.outputs.sentry_dist }}
         run: |
           $ErrorActionPreference = "Stop"
+          npm ci
+          flutter pub get
           & ".\tool\publish_sentry_release.ps1" `
             -Release $env:SENTRY_RELEASE `
             -Dist $env:SENTRY_DIST `
             -Environment "prod"
 
-      - name: Upload production APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+  publish-github-release:
+    name: Publish GitHub Release
+    needs:
+      - build-production-apk
+      - publish-sentry-release
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: production-github-release
+
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          name: HomePilot-production-apk-${{ github.run_number }}
-          path: |
-            ${{ steps.release.outputs.apk_path }}
-            ${{ steps.release.outputs.checksum_path }}
-          if-no-files-found: error
-          retention-days: 30
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate exact release source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git fetch origin main --no-tags
+          if ($LASTEXITCODE -ne 0) { throw "Could not refresh origin/main." }
+          $SourceSha = (git rev-parse HEAD).Trim()
+          $MainSha = (git rev-parse origin/main).Trim()
+          if ($SourceSha -ne $env:GITHUB_SHA) {
+            throw "Checked-out source $SourceSha differs from GITHUB_SHA $env:GITHUB_SHA."
+          }
+          if ($SourceSha -ne $MainSha) {
+            throw "GitHub Release publication requires exact current origin/main $MainSha, got $SourceSha."
+          }
+
+      - name: Restore and verify release handoff
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_NAME: HomePilot-production-apk-handoff-${{ github.run_id }}
+          APK_NAME: ${{ needs.build-production-apk.outputs.apk_name }}
+          APK_SHA256: ${{ needs.build-production-apk.outputs.apk_sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh run download $env:GITHUB_RUN_ID --name $env:HANDOFF_NAME --dir .
+          $ApkPath = Join-Path $PWD "release\$env:APK_NAME"
+          $ChecksumPath = "$ApkPath.sha256"
+          if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
+            throw "Expected APK handoff file was not restored: $ApkPath"
+          }
+          if (-not (Test-Path -LiteralPath $ChecksumPath -PathType Leaf)) {
+            throw "Expected checksum handoff file was not restored: $ChecksumPath"
+          }
+          $ActualHash = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne $env:APK_SHA256) {
+            throw "APK handoff hash mismatch before GitHub Release publication."
+          }
+          $ExpectedLine = "$($env:APK_SHA256)  $($env:APK_NAME)"
+          $ChecksumLine = (Get-Content -LiteralPath $ChecksumPath -Raw).Trim()
+          if ($ChecksumLine -ne $ExpectedLine) {
+            throw "Checksum handoff contents do not match the release APK."
+          }
+
+      - name: Recheck release tag before GitHub mutation
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.build-production-apk.outputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          & git ls-remote --exit-code --refs origin "refs/tags/$env:RELEASE_TAG" *> $null
+          $TagExitCode = $LASTEXITCODE
+          if ($TagExitCode -eq 0) {
+            throw "Git tag appeared before GitHub Release publication: $env:RELEASE_TAG"
+          }
+          if ($TagExitCode -ne 2) {
+            throw "Could not recheck Git tag $env:RELEASE_TAG before GitHub Release publication."
+          }
+
+          exit 0
 
       - name: Attest production APK provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
-          subject-path: ${{ steps.release.outputs.apk_path }}
+          subject-path: release/${{ needs.build-production-apk.outputs.apk_name }}
 
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           CHANGELOG: ${{ inputs.changelog }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_NAME: ${{ steps.release.outputs.release_name }}
-          VERSION_NAME: ${{ steps.release.outputs.version_name }}
-          BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
-          APK_NAME: ${{ steps.release.outputs.apk_name }}
-          APK_PATH: ${{ steps.release.outputs.apk_path }}
-          CHECKSUM_PATH: ${{ steps.release.outputs.checksum_path }}
-          APK_SHA256: ${{ steps.release.outputs.sha256 }}
-          SENTRY_RELEASE: ${{ steps.metadata.outputs.sentry_release }}
+          RELEASE_TAG: ${{ needs.build-production-apk.outputs.release_tag }}
+          RELEASE_NAME: ${{ needs.build-production-apk.outputs.release_name }}
+          VERSION_NAME: ${{ needs.build-production-apk.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.build-production-apk.outputs.build_number }}
+          APK_NAME: ${{ needs.build-production-apk.outputs.apk_name }}
+          APK_PATH: release\${{ needs.build-production-apk.outputs.apk_name }}
+          CHECKSUM_PATH: release\${{ needs.build-production-apk.outputs.apk_name }}.sha256
+          APK_SHA256: ${{ needs.build-production-apk.outputs.apk_sha256 }}
+          SENTRY_RELEASE: ${{ needs.build-production-apk.outputs.sentry_release }}
         run: |
           $ErrorActionPreference = "Stop"
           if ([string]::IsNullOrWhiteSpace($env:CHANGELOG)) {
@@ -633,29 +822,3 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub Release creation failed."
           }
-
-      - name: Stop Gradle daemons before cache save
-        if: always()
-        shell: pwsh
-        run: |
-          Push-Location "android"
-          try {
-            if (Test-Path ".\gradlew.bat") {
-              & ".\gradlew.bat" --stop
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Gradle stop returned exit code $LASTEXITCODE."
-              }
-            }
-            Start-Sleep -Seconds 2
-          }
-          finally {
-            Pop-Location
-          }
-
-      - name: Remove temporary credentials
-        if: always()
-        shell: pwsh
-        run: |
-          Remove-Item -LiteralPath "android\app\homepilot-release.jks" -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath "android\key.properties" -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath "config\prod.json" -Force -ErrorAction SilentlyContinue

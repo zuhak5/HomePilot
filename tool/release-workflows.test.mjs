@@ -16,7 +16,7 @@ const read = async (path) =>
 test('GitHub Actions use only reviewed immutable references', async () => {
   const result = await validateRepositoryActionReferences();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.externalReferences, 45);
+  assert.equal(result.externalReferences, 51);
   assert.equal(result.localReferences, 0);
   assert.equal(result.files.length, 7);
 });
@@ -123,13 +123,21 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
   assert.match(workflow, /Reject a non-main dispatch/);
   assert.match(workflow, /source_sha" != "\$remote_sha/);
   assert.match(workflow, /needs: validate-release-source/);
+  assert.match(workflow, /environment: production-play-signing/);
   assert.doesNotMatch(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /SUPABASE_URL: \$\{\{ vars\.SUPABASE_URL \}\}/);
   assert.match(
     workflow,
-    /ANDROID_STORE_PASSWORD: \$\{\{ secrets\.ANDROID_STORE_PASSWORD \}\}/,
+    /ANDROID_KEYSTORE_BASE64: \$\{\{ secrets\.PLAY_UPLOAD_KEYSTORE_BASE64 \}\}/,
   );
-  assert.doesNotMatch(workflow, /PROD_SUPABASE_URL|ANDROID_KEYSTORE_PASSWORD/);
+  assert.match(
+    workflow,
+    /ANDROID_STORE_PASSWORD: \$\{\{ secrets\.PLAY_UPLOAD_STORE_PASSWORD \}\}/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /PROD_SUPABASE_URL|ANDROID_KEYSTORE_PASSWORD|ANDROID_APK_|SENTRY_AUTH_TOKEN|SUPABASE_(?:ADVISOR|MIGRATION)_/,
+  );
   assert.match(workflow, /contents: read/);
   assert.match(workflow, /actions: read/);
   assert.match(workflow, /jarsigner -verify/);
@@ -150,7 +158,10 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
       workflow.indexOf('Build and test production AAB'),
     'AAB diagnostics must exist before the build can fail',
   );
-  assert.doesNotMatch(workflow, /play.*upload|publish.*play/i);
+  assert.doesNotMatch(
+    workflow,
+    /googleapis|service_account|supply|edits\.(?:insert|bundles|tracks)|publish.*play/i,
+  );
 });
 
 test('APK rail archives merged manifest and dependency evidence', async () => {
@@ -159,10 +170,19 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
   assert.match(workflow, /Reject a non-main dispatch/);
   assert.match(workflow, /source_sha" != "\$remote_sha/);
   assert.match(workflow, /needs: validate-release-source/);
+  assert.match(workflow, /environment: production-android-signing/);
+  assert.match(workflow, /environment: production-sentry/);
+  assert.match(workflow, /environment: production-github-release/);
   assert.doesNotMatch(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(
+    workflow,
+    /ANDROID_KEYSTORE_BASE64: \$\{\{ secrets\.ANDROID_APK_KEYSTORE_BASE64 \}\}/,
+  );
   assert.match(workflow, /collect_android_release_evidence\.ps1/);
   assert.match(workflow, /production-apk-evidence/);
   assert.match(workflow, /name: Upload APK diagnostics\n\s+if: always\(\)/);
+  assert.match(workflow, /name: Upload production APK handoff/);
+  assert.match(workflow, /HomePilot-production-apk-handoff-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /apk-signature-verification\.txt/);
   assert.match(workflow, /apk-badging\.txt/);
   assert.ok(
@@ -176,9 +196,12 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
   assert.match(workflow, /\.head_branch -eq "main"/);
   assert.match(workflow, /backend_gate_run_url = "\$\{\{ steps\.backend_gate\.outputs\.run_url \}\}"/);
   assert.match(workflow, /git ls-remote --exit-code --refs origin "refs\/tags\/\$env:RELEASE_TAG"/);
+  assert.match(workflow, /name: Recheck release tag before Sentry mutation/);
+  assert.match(workflow, /name: Recheck release tag before GitHub mutation/);
+  assert.match(workflow, /needs:\n\s+- build-production-apk\n\s+- publish-sentry-release/);
   assert.ok(
     workflow.indexOf('Collect APK manifest and dependency evidence') <
-      workflow.indexOf('Publish and verify Sentry release'),
+      workflow.indexOf('Upload production APK handoff'),
     'artifact evidence must fail before Sentry release mutation',
   );
   assert.ok(
@@ -191,6 +214,11 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
       workflow.indexOf('Publish and verify Sentry release'),
     'the remote tag must be rechecked immediately before Sentry mutation',
   );
+  assert.ok(
+    workflow.indexOf('Recheck release tag before GitHub mutation') <
+      workflow.indexOf('Publish GitHub Release', workflow.indexOf('Recheck release tag before GitHub mutation')),
+    'the remote tag must be rechecked before GitHub Release publication',
+  );
   const tagRecheck = workflow.slice(
     workflow.indexOf('Recheck release tag before Sentry mutation'),
     workflow.indexOf('Publish and verify Sentry release'),
@@ -201,6 +229,21 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
     /\n\s+exit 0\n/,
     'an accepted no-tag result must not leak git exit code 2 to the step',
   );
+  const signingJob = workflow.slice(
+    workflow.indexOf('build-production-apk:'),
+    workflow.indexOf('publish-sentry-release:'),
+  );
+  assert.doesNotMatch(signingJob, /SENTRY_AUTH_TOKEN|contents: write|attestations: write/);
+  const sentryJob = workflow.slice(
+    workflow.indexOf('publish-sentry-release:'),
+    workflow.indexOf('publish-github-release:'),
+  );
+  assert.match(sentryJob, /SENTRY_AUTH_TOKEN: \$\{\{ secrets\.SENTRY_AUTH_TOKEN \}\}/);
+  assert.doesNotMatch(sentryJob, /ANDROID_APK_|PLAY_UPLOAD_|contents: write|attestations: write/);
+  const githubReleaseJob = workflow.slice(workflow.indexOf('publish-github-release:'));
+  assert.match(githubReleaseJob, /contents: write/);
+  assert.match(githubReleaseJob, /attestations: write/);
+  assert.doesNotMatch(githubReleaseJob, /ANDROID_APK_|PLAY_UPLOAD_|SENTRY_AUTH_TOKEN/);
 });
 
 test('backend gate covers formatting, type safety, functions, and database', async () => {
@@ -226,7 +269,17 @@ test('backend gate covers formatting, type safety, functions, and database', asy
   assert.match(workflow, /npm run supabase:lint/);
   assert.match(workflow, /npm run supabase:test/);
   assert.match(workflow, /node tool\/audit_supabase_advisors\.mjs/);
-  assert.match(workflow, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/);
+  assert.match(workflow, /environment: production-supabase-advisors/);
+  assert.match(workflow, /needs: validate-advisor-source/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(
+    workflow,
+    /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ADVISOR_ACCESS_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /SUPABASE_MIGRATION_|ANDROID_(?:APK_)?KEY|PLAY_UPLOAD_|SENTRY_AUTH_TOKEN/,
+  );
   assert.match(workflow, /if: github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /if: always\(\)/);
 });
@@ -237,14 +290,17 @@ test('Supabase migration deployment requires exact main and explicit production 
   );
   assert.match(workflow, /name: Deploy Supabase Migrations/);
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-  assert.match(workflow, /test "\$INPUT_SOURCE_SHA" = "\$GITHUB_SHA"/);
-  assert.match(workflow, /test "\$INPUT_SOURCE_SHA" = "\$remote_sha"/);
+  assert.match(workflow, /test "\$source_sha" = "\$INPUT_SOURCE_SHA"/);
+  assert.match(workflow, /test "\$source_sha" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /test "\$source_sha" = "\$remote_sha"/);
   assert.match(workflow, /apply-pending-migrations/);
   assert.match(workflow, /test "\$INPUT_PROJECT_REF" = "\$expected_ref"/);
-  assert.match(workflow, /environment: production/);
+  assert.match(workflow, /environment: production-supabase-migrations/);
   assert.match(workflow, /name: Confirm protected Supabase project/);
   assert.match(workflow, /SUPABASE_URL: \$\{\{ vars\.SUPABASE_URL \}\}/);
-  const protectedEnvironment = workflow.indexOf('environment: production');
+  const protectedEnvironment = workflow.indexOf(
+    'environment: production-supabase-migrations',
+  );
   const projectConfirmation = workflow.indexOf(
     'name: Confirm protected Supabase project',
   );
@@ -257,11 +313,15 @@ test('Supabase migration deployment requires exact main and explicit production 
   );
   assert.match(
     workflow,
-    /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/,
+    /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_MIGRATION_ACCESS_TOKEN \}\}/,
   );
   assert.match(
     workflow,
-    /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/,
+    /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_MIGRATION_DB_PASSWORD \}\}/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /SUPABASE_ADVISOR_|ANDROID_(?:APK_)?KEY|PLAY_UPLOAD_|SENTRY_AUTH_TOKEN/,
   );
   const dryRun = workflow.indexOf('name: Dry-run pending migrations');
   const apply = workflow.indexOf('name: Apply pending migrations');
