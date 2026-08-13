@@ -79,7 +79,7 @@ separate `production-sentry` job through `tool/publish_sentry_release.ps1`.
 The Sentry token must not be available to Android signing, Supabase, Pages, or
 GitHub Release jobs. See the [GitHub environment credential ownership runbook](operations/github-environment-credential-ownership.md).
 
-The release identifier must correspond to the built application release and source commit. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
+The release identifier must correspond to the built application release, source commit, and release attempt ID. The workflow refuses Sentry mutation unless the signed APK job produced a valid `hpra_...` attempt identity. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
 
 Do not run production Sentry release mutation as an ordinary local command.
 During active containment, do not run it through GitHub or the Sentry console

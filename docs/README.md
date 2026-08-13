@@ -30,6 +30,7 @@ This directory is the canonical entry point for product, architecture, developme
 - [`operations/github-source-and-tag-protection.md`](operations/github-source-and-tag-protection.md): active partial TASK-002 `main`/tag rules, executed denial evidence, authority policy, and unresolved tag-creation blocker.
 - [`operations/github-environment-credential-ownership.md`](operations/github-environment-credential-ownership.md): split GitHub environment, reviewer, branch-policy, and credential-domain contract.
 - [`operations/github-hosted-policy-and-exposure.md`](operations/github-hosted-policy-and-exposure.md): hosted Actions allowlist/SHA policy, policy probes, audit coverage limits, and credential-domain exposure disposition.
+- [`operations/release-attempt-ledger.md`](operations/release-attempt-ledger.md): immutable release attempt identity, named backend aggregate, dry-run evidence, and downstream mutation binding.
 - [`operations/release-runbook.md`](operations/release-runbook.md): protected standalone APK, GitHub Release, and VersionDeck release process.
 - [`operations/google-play-release-runbook.md`](operations/google-play-release-runbook.md): verified AAB evidence and the separately authorized Google Play handoff.
 - [`operations/google-play-data-safety-evidence.md`](operations/google-play-data-safety-evidence.md): release-scoped Data safety evidence worksheet and operator-owned gaps.

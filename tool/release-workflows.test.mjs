@@ -18,9 +18,9 @@ const read = async (path) =>
 test('GitHub Actions use only reviewed immutable references', async () => {
   const result = await validateRepositoryActionReferences();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.externalReferences, 47);
+  assert.equal(result.externalReferences, 53);
   assert.equal(result.localReferences, 0);
-  assert.equal(result.files.length, 7);
+  assert.equal(result.files.length, 8);
 });
 
 test('hosted Actions policy allowlist matches reviewed action owners', () => {
@@ -169,9 +169,12 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
     workflow,
     /attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3\.0\.0/,
   );
-  assert.match(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
-  assert.match(workflow, /\.path -eq "\.github\/workflows\/validate-google-backend\.yml"/);
-  assert.match(workflow, /\.head_branch -eq "main"/);
+  assert.match(workflow, /release_attempt_id: \$\{\{ steps\.attempt_guard\.outputs\.attempt_id \}\}/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs create/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs find-backend/);
+  assert.match(workflow, /backend-validation\.json/);
+  assert.doesNotMatch(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
+  assert.doesNotMatch(workflow, /event -in @\("push", "workflow_dispatch"\)/);
   assert.match(workflow, /backend_gate_run_url = "\$\{\{ steps\.backend_gate\.outputs\.run_url \}\}"/);
   assert.match(workflow, /name: Upload AAB evidence\n\s+if: always\(\)/);
   assert.match(workflow, /path: release\/aab-evidence/);
@@ -213,10 +216,15 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
     'APK diagnostics must exist before the first release-identity failure',
   );
   assert.match(workflow, /validate_google_release_contracts\.mjs/);
-  assert.match(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
-  assert.match(workflow, /\.path -eq "\.github\/workflows\/validate-google-backend\.yml"/);
-  assert.match(workflow, /\.head_branch -eq "main"/);
+  assert.match(workflow, /release_attempt_id: \$\{\{ steps\.attempt_guard\.outputs\.attempt_id \}\}/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs create/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs find-backend/);
+  assert.match(workflow, /backend-validation\.json/);
+  assert.doesNotMatch(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
+  assert.doesNotMatch(workflow, /event -in @\("push", "workflow_dispatch"\)/);
   assert.match(workflow, /backend_gate_run_url = "\$\{\{ steps\.backend_gate\.outputs\.run_url \}\}"/);
+  assert.match(workflow, /name: Require release attempt before Sentry mutation/);
+  assert.match(workflow, /name: Require release attempt before GitHub mutation/);
   assert.match(workflow, /git ls-remote --exit-code --refs origin "refs\/tags\/\$env:RELEASE_TAG"/);
   assert.match(workflow, /name: Recheck release tag before Sentry mutation/);
   assert.match(workflow, /name: Recheck release tag before GitHub mutation/);
@@ -315,6 +323,9 @@ test('Supabase migration deployment requires exact main and explicit production 
   assert.match(workflow, /test "\$source_sha" = "\$INPUT_SOURCE_SHA"/);
   assert.match(workflow, /test "\$source_sha" = "\$GITHUB_SHA"/);
   assert.match(workflow, /test "\$source_sha" = "\$remote_sha"/);
+  assert.match(workflow, /release_attempt_id:/);
+  assert.match(workflow, /INPUT_RELEASE_ATTEMPT_ID/);
+  assert.match(workflow, /\^hpra_\[0-9a-f\]\{32\}\$/);
   assert.match(workflow, /apply-pending-migrations/);
   assert.match(workflow, /test "\$INPUT_PROJECT_REF" = "\$expected_ref"/);
   assert.match(workflow, /environment: production-supabase-migrations/);
@@ -387,6 +398,8 @@ test('release runbook names every required backend check exactly', async () => {
   assert.match(runbook, /`Deno SSV tests`/);
   assert.match(runbook, /`Google contract\/static checks`/);
   assert.match(runbook, /`Supabase database tests`/);
+  assert.match(runbook, /`Require current main Advisor source`/);
+  assert.match(runbook, /`Hosted Supabase Advisors`/);
 });
 
 test('VersionDeck production deployment is gated by a successful exact-SHA APK run', async () => {
@@ -395,9 +408,33 @@ test('VersionDeck production deployment is gated by a successful exact-SHA APK r
   assert.doesNotMatch(workflow, /^  release:/m);
   assert.match(workflow, /production_run_id:/);
   assert.match(workflow, /required: true/);
+  assert.match(workflow, /release_attempt_id:/);
+  assert.match(workflow, /HomePilot-release-attempt-\$\{release_attempt_id\}/);
+  assert.match(workflow, /name: Require release attempt before Pages mutation/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(workflow, /test "\$upstream_sha" = "\$source_sha"/);
   assert.match(workflow, /test "\$run_name" = "Build Production APK"/);
   assert.match(workflow, /test "\$run_conclusion" = "success"/);
   assert.match(workflow, /test "\$run_sha" = "\$source_sha"/);
+});
+
+test('release attempt dry run validates named backend evidence without mutation', async () => {
+  const workflow = await read('.github/workflows/release-attempt-dry-run.yml');
+  assert.match(workflow, /name: Release Attempt Dry Run/);
+  assert.match(workflow, /backend_run_id:/);
+  assert.match(workflow, /environment: production-github-release/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs create/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs validate-backend/);
+  assert.match(workflow, /node tool\/release_attempt_ledger\.mjs advance/);
+  assert.match(workflow, /--state prerequisites_verified/);
+  assert.match(workflow, /--evidence-key backend_validation/);
+  assert.match(workflow, /HomePilot-release-attempt-dry-run-/);
+  assert.doesNotMatch(
+    workflow,
+    /ANDROID_(?:APK_)?KEY|PLAY_UPLOAD_|SENTRY_AUTH_TOKEN|SUPABASE_(?:ADVISOR|MIGRATION)_/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /gh release create|deploy-pages|supabase db push|publish_sentry_release|build_prod|build_play/i,
+  );
 });

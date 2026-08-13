@@ -19,6 +19,12 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      attempt_id: ${{ steps.attempt.outputs.attempt_id }}
+      version_name: ${{ steps.metadata.outputs.version_name }}
+      build_number: ${{ steps.metadata.outputs.build_number }}
+      release_tag: ${{ steps.metadata.outputs.tag }}
     steps:
       - name: Reject a non-main dispatch
         shell: bash
@@ -35,6 +41,7 @@ jobs:
           fetch-depth: 0
 
       - name: Require selected SHA to equal current origin/main
+        id: source
         shell: bash
         run: |
           set -euo pipefail
@@ -46,6 +53,55 @@ jobs:
             echo "Selected source $source_sha is not current origin/main $remote_sha." >&2
             exit 1
           fi
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare immutable release attempt identity
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_value="$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -n 1)"
+          if [[ ! "$version_value" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$ ]]; then
+            echo "Expected version format x.y.z+build, got: $version_value" >&2
+            exit 1
+          fi
+          version_name="${BASH_REMATCH[1]}"
+          build_number="${BASH_REMATCH[2]}"
+          release_tag="v${version_name}-build.${build_number}"
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create release attempt ledger
+        id: attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-attempt
+          node tool/release_attempt_ledger.mjs create \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.source.outputs.sha }}" \
+            --source-ref "$GITHUB_REF" \
+            --event "$GITHUB_EVENT_NAME" \
+            --workflow-path ".github/workflows/build-production-android.yml" \
+            --target-kind "apk" \
+            --target-environment "production-android-signing" \
+            --version-name "${{ steps.metadata.outputs.version_name }}" \
+            --version-code "${{ steps.metadata.outputs.build_number }}" \
+            --release-tag "${{ steps.metadata.outputs.tag }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output release-attempt/release-attempt.json
+          attempt_id="$(node -p "JSON.parse(require('node:fs').readFileSync('release-attempt/release-attempt.json', 'utf8')).attempt_id")"
+          echo "- Release attempt: \`$attempt_id\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release attempt ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HomePilot-release-attempt-${{ steps.attempt.outputs.attempt_id }}
+          path: release-attempt/release-attempt.json
+          if-no-files-found: error
+          retention-days: 30
 
   build-production-apk:
     name: Build signed production APK
@@ -64,6 +120,7 @@ jobs:
       release_name: ${{ steps.metadata.outputs.release_name }}
       sentry_release: ${{ steps.metadata.outputs.sentry_release }}
       sentry_dist: ${{ steps.metadata.outputs.sentry_dist }}
+      release_attempt_id: ${{ steps.attempt_guard.outputs.attempt_id }}
 
     permissions:
       contents: read
@@ -90,6 +147,19 @@ jobs:
             throw "Production releases require exact current origin/main $MainSha, got $SourceSha."
           }
           "- Exact source SHA: ``$SourceSha``" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Bind release attempt identity
+        id: attempt_guard
+        shell: pwsh
+        env:
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.validate-release-source.outputs.attempt_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:EXPECTED_RELEASE_ATTEMPT_ID -notmatch '^hpra_[0-9a-f]{32}$') {
+            throw "Missing or invalid release attempt ID."
+          }
+          "attempt_id=$env:EXPECTED_RELEASE_ATTEMPT_ID" >> $env:GITHUB_OUTPUT
+          "- Release attempt: ``$env:EXPECTED_RELEASE_ATTEMPT_ID``" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Set up Java 17
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -145,23 +215,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
-          $Runs = gh api `
-            "repos/$env:GITHUB_REPOSITORY/actions/workflows/validate-google-backend.yml/runs?head_sha=$env:GITHUB_SHA&status=completed&per_page=20" |
+          $EvidenceDirectory = Join-Path $PWD "release\apk-evidence"
+          New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+          node tool/release_attempt_ledger.mjs find-backend `
+            --repository "$env:GITHUB_REPOSITORY" `
+            --source-sha "$env:GITHUB_SHA" `
+            --output (Join-Path $EvidenceDirectory "backend-validation.json")
+          $Gate = Get-Content -Raw -LiteralPath (Join-Path $EvidenceDirectory "backend-validation.json") |
             ConvertFrom-Json
-          $Passed = @($Runs.workflow_runs | Where-Object {
-            $_.path -eq ".github/workflows/validate-google-backend.yml" -and
-            $_.head_sha -eq $env:GITHUB_SHA -and
-            $_.head_branch -eq "main" -and
-            $_.event -in @("push", "workflow_dispatch") -and
-            $_.conclusion -eq "success"
-          })
-          if ($Passed.Count -eq 0) {
-            throw "The exact Google/backend/database workflow has not passed on main for $env:GITHUB_SHA."
-          }
-          $Gate = $Passed | Sort-Object created_at -Descending | Select-Object -First 1
-          "run_id=$($Gate.id)" >> $env:GITHUB_OUTPUT
-          "run_url=$($Gate.html_url)" >> $env:GITHUB_OUTPUT
-          "- Backend gate: [$($Gate.id)]($($Gate.html_url)) for ``$($Gate.head_sha)``" >> $env:GITHUB_STEP_SUMMARY
+          "run_id=$($Gate.run_id)" >> $env:GITHUB_OUTPUT
+          "run_url=$($Gate.run_url)" >> $env:GITHUB_OUTPUT
+          "- Backend gate: [$($Gate.run_id)]($($Gate.run_url)) for ``$env:GITHUB_SHA``" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Prepare release metadata
         id: metadata
@@ -204,6 +268,7 @@ jobs:
         env:
           VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
           BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
+          RELEASE_ATTEMPT_ID: ${{ steps.attempt_guard.outputs.attempt_id }}
         run: |
           $ErrorActionPreference = "Stop"
           $EvidenceDirectory = Join-Path $PWD "release\apk-evidence"
@@ -212,6 +277,7 @@ jobs:
             workflow = $env:GITHUB_WORKFLOW
             run_id = $env:GITHUB_RUN_ID
             run_attempt = $env:GITHUB_RUN_ATTEMPT
+            release_attempt_id = $env:RELEASE_ATTEMPT_ID
             source_sha = $env:GITHUB_SHA
             backend_gate_run_id = "${{ steps.backend_gate.outputs.run_id }}"
             backend_gate_run_url = "${{ steps.backend_gate.outputs.run_url }}"
@@ -601,6 +667,17 @@ jobs:
             throw "Sentry publication requires exact current origin/main $MainSha, got $SourceSha."
           }
 
+      - name: Require release attempt before Sentry mutation
+        shell: pwsh
+        env:
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.build-production-apk.outputs.release_attempt_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:EXPECTED_RELEASE_ATTEMPT_ID -notmatch '^hpra_[0-9a-f]{32}$') {
+            throw "Missing or invalid release attempt ID before Sentry mutation."
+          }
+          "- Release attempt: ``$env:EXPECTED_RELEASE_ATTEMPT_ID``" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Set up Flutter
         shell: pwsh
         run: ./tool/setup_flutter_windows.ps1 -Version 3.44.7
@@ -702,6 +779,17 @@ jobs:
             throw "GitHub Release publication requires exact current origin/main $MainSha, got $SourceSha."
           }
 
+      - name: Require release attempt before GitHub mutation
+        shell: pwsh
+        env:
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.build-production-apk.outputs.release_attempt_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:EXPECTED_RELEASE_ATTEMPT_ID -notmatch '^hpra_[0-9a-f]{32}$') {
+            throw "Missing or invalid release attempt ID before GitHub Release mutation."
+          }
+          "- Release attempt: ``$env:EXPECTED_RELEASE_ATTEMPT_ID``" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Restore and verify release handoff
         shell: pwsh
         env:
@@ -766,6 +854,7 @@ jobs:
           CHECKSUM_PATH: release\${{ needs.build-production-apk.outputs.apk_name }}.sha256
           APK_SHA256: ${{ needs.build-production-apk.outputs.apk_sha256 }}
           SENTRY_RELEASE: ${{ needs.build-production-apk.outputs.sentry_release }}
+          RELEASE_ATTEMPT_ID: ${{ needs.build-production-apk.outputs.release_attempt_id }}
         run: |
           $ErrorActionPreference = "Stop"
           if ([string]::IsNullOrWhiteSpace($env:CHANGELOG)) {
@@ -792,6 +881,7 @@ jobs:
           - SHA-256: ``$env:APK_SHA256``
           - Signer certificate SHA-256: ``3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51``
           - Sentry release: ``$env:SENTRY_RELEASE``
+          - Release attempt: ``$env:RELEASE_ATTEMPT_ID``
 
           Verify build provenance with:
 

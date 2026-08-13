@@ -11,6 +11,10 @@ on:
         description: Exact Supabase project ref confirmation
         required: true
         type: string
+      release_attempt_id:
+        description: Release attempt ID that authorized this production mutation
+        required: true
+        type: string
       confirmation:
         description: Type apply-pending-migrations
         required: true
@@ -30,6 +34,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
+      release_attempt_id: ${{ steps.source.outputs.release_attempt_id }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -39,6 +44,7 @@ jobs:
         id: source
         env:
           INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_RELEASE_ATTEMPT_ID: ${{ inputs.release_attempt_id }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
@@ -49,8 +55,13 @@ jobs:
           test "$source_sha" = "$INPUT_SOURCE_SHA"
           test "$source_sha" = "$GITHUB_SHA"
           test "$source_sha" = "$remote_sha"
+          if [[ ! "$INPUT_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID." >&2
+            exit 1
+          fi
           test "$INPUT_CONFIRMATION" = "apply-pending-migrations"
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "release_attempt_id=$INPUT_RELEASE_ATTEMPT_ID" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Apply pending production migrations
@@ -67,6 +78,7 @@ jobs:
       - name: Revalidate exact current main after approval
         env:
           EXPECTED_SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.validate-source.outputs.release_attempt_id }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
@@ -75,6 +87,11 @@ jobs:
           test "$source_sha" = "$EXPECTED_SOURCE_SHA"
           test "$source_sha" = "$GITHUB_SHA"
           test "$source_sha" = "$remote_sha"
+          if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID after approval." >&2
+            exit 1
+          fi
+          echo "- Release attempt: \`$EXPECTED_RELEASE_ATTEMPT_ID\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm protected Supabase project
         env:
           INPUT_PROJECT_REF: ${{ inputs.project_ref }}

@@ -30,6 +30,10 @@ on:
         description: "Successful Build Production APK run ID for the current main SHA"
         required: true
         type: string
+      release_attempt_id:
+        description: "Release attempt ID from the production APK run"
+        required: true
+        type: string
 
 concurrency:
   group: versiondeck-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'pages' }}
@@ -102,6 +106,7 @@ jobs:
       attestations: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
+      release_attempt_id: ${{ steps.source.outputs.release_attempt_id }}
 
     steps:
       - name: Check out current VersionDeck source
@@ -130,13 +135,29 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             upstream_sha="${{ github.event.workflow_run.head_sha }}"
             upstream_url="${{ github.event.workflow_run.html_url }}"
+            upstream_run_id="${{ github.event.workflow_run.id }}"
             test -n "$upstream_sha"
             test "$upstream_sha" = "$source_sha"
+            mapfile -t attempt_artifacts < <(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${upstream_run_id}/artifacts" \
+                --jq '.artifacts[].name' |
+                grep -E '^HomePilot-release-attempt-hpra_[0-9a-f]{32}$' || true
+            )
+            if [[ "${#attempt_artifacts[@]}" -ne 1 ]]; then
+              echo "Expected exactly one release attempt artifact on upstream run $upstream_run_id, found ${#attempt_artifacts[@]}." >&2
+              exit 1
+            fi
+            release_attempt_id="${attempt_artifacts[0]#HomePilot-release-attempt-}"
             echo "- Production build commit: \`$upstream_sha\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- Production build run: $upstream_url" >> "$GITHUB_STEP_SUMMARY"
           else
             production_run_id="${{ inputs.production_run_id }}"
+            release_attempt_id="${{ inputs.release_attempt_id }}"
             test -n "$production_run_id"
+            if [[ ! "$release_attempt_id" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+              echo "Missing or invalid release attempt ID." >&2
+              exit 1
+            fi
             run_api="repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}"
             run_name="$(gh api "$run_api" --jq '.name')"
             run_conclusion="$(gh api "$run_api" --jq '.conclusion')"
@@ -149,9 +170,21 @@ jobs:
             test "$run_event" = "workflow_dispatch"
             test "$run_branch" = "main"
             test "$run_sha" = "$source_sha"
+            artifact_count="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${production_run_id}/artifacts" \
+                --jq '.artifacts[].name' |
+                grep -Ec "^HomePilot-release-attempt-${release_attempt_id}$" || true
+            )"
+            test "$artifact_count" = "1"
             echo "- Production build commit: \`$run_sha\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- Production build run: $run_url" >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [[ ! "$release_attempt_id" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID." >&2
+            exit 1
+          fi
+          echo "release_attempt_id=$release_attempt_id" >> "$GITHUB_OUTPUT"
+          echo "- Release attempt: \`$release_attempt_id\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -258,6 +291,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - name: Require release attempt before Pages mutation
+        env:
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.build.outputs.release_attempt_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID before Pages deployment." >&2
+            exit 1
+          fi
+
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
