@@ -1,0 +1,181 @@
+name: Release Attempt Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_run_id:
+        description: "Successful Validate Google Backend workflow_dispatch run for the current main SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: homepilot-release-attempt-dry-run
+  cancel-in-progress: false
+
+jobs:
+  validate-source:
+    name: Create dry-run release attempt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      attempt_id: ${{ steps.attempt.outputs.attempt_id }}
+
+    steps:
+      - name: Reject a non-main dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Release attempt dry runs must be dispatched from main, not $GITHUB_REF." >&2
+            exit 1
+          fi
+
+      - name: Check out selected source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Require selected SHA to equal current origin/main
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "$GITHUB_SHA"
+          if [[ "$source_sha" != "$remote_sha" ]]; then
+            echo "Selected source $source_sha is not current origin/main $remote_sha." >&2
+            exit 1
+          fi
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Create release attempt ledger
+        id: attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-attempt
+          node tool/release_attempt_ledger.mjs create \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ steps.source.outputs.sha }}" \
+            --source-ref "$GITHUB_REF" \
+            --event "$GITHUB_EVENT_NAME" \
+            --workflow-path ".github/workflows/release-attempt-dry-run.yml" \
+            --target-kind "dry-run" \
+            --target-environment "production-github-release" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output release-attempt/release-attempt.json
+          attempt_id="$(node -p "JSON.parse(require('node:fs').readFileSync('release-attempt/release-attempt.json', 'utf8')).attempt_id")"
+          echo "- Release attempt: \`$attempt_id\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload created release attempt ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HomePilot-release-attempt-${{ steps.attempt.outputs.attempt_id }}
+          path: release-attempt/release-attempt.json
+          if-no-files-found: error
+          retention-days: 30
+
+  protected-dry-run:
+    name: Validate release attempt evidence aggregate
+    needs: validate-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-github-release
+
+    steps:
+      - name: Check out selected source after approval
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.validate-source.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate exact current main after approval
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
+          EXPECTED_RELEASE_ATTEMPT_ID: ${{ needs.validate-source.outputs.attempt_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_RELEASE_ATTEMPT_ID" =~ ^hpra_[0-9a-f]{32}$ ]]; then
+            echo "Missing or invalid release attempt ID." >&2
+            exit 1
+          fi
+          git fetch origin main --no-tags
+          source_sha="$(git rev-parse HEAD)"
+          remote_sha="$(git rev-parse origin/main)"
+          test "$source_sha" = "$EXPECTED_SOURCE_SHA"
+          test "$source_sha" = "$GITHUB_SHA"
+          test "$source_sha" = "$remote_sha"
+
+      - name: Recreate attempt ledger for protected validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-attempt
+          node tool/release_attempt_ledger.mjs create \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ needs.validate-source.outputs.source_sha }}" \
+            --source-ref "$GITHUB_REF" \
+            --event "$GITHUB_EVENT_NAME" \
+            --workflow-path ".github/workflows/release-attempt-dry-run.yml" \
+            --target-kind "dry-run" \
+            --target-environment "production-github-release" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output release-attempt/release-attempt.json
+          attempt_id="$(node -p "JSON.parse(require('node:fs').readFileSync('release-attempt/release-attempt.json', 'utf8')).attempt_id")"
+          test "$attempt_id" = "${{ needs.validate-source.outputs.attempt_id }}"
+
+      - name: Validate backend evidence aggregate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKEND_RUN_ID: ${{ inputs.backend_run_id }}
+        run: |
+          set -euo pipefail
+          node tool/release_attempt_ledger.mjs validate-backend \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "${{ needs.validate-source.outputs.source_sha }}" \
+            --run-id "$BACKEND_RUN_ID" \
+            --output release-attempt/backend-validation.json
+          node tool/release_attempt_ledger.mjs advance \
+            --attempt-file release-attempt/release-attempt.json \
+            --state prerequisites_verified \
+            --reason backend-aggregate-verified \
+            --evidence-key backend_validation \
+            --evidence-file release-attempt/backend-validation.json \
+            --output release-attempt/release-attempt.prerequisites-verified.json
+
+      - name: Summarize dry-run result
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require("node:fs");
+          const attempt = JSON.parse(
+            fs.readFileSync("release-attempt/release-attempt.prerequisites-verified.json", "utf8"),
+          );
+          const backend = attempt.evidence.backend_validation;
+          console.log("### Release attempt dry run");
+          console.log(`- Attempt: \`${attempt.attempt_id}\``);
+          console.log(`- State: \`${attempt.state}\``);
+          console.log(`- Source: \`${attempt.identity.source_sha}\``);
+          console.log(`- Backend aggregate: ${backend.run_url}`);
+          console.log("- Mutation: none");
+          NODE
+
+      - name: Upload protected dry-run evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HomePilot-release-attempt-dry-run-${{ needs.validate-source.outputs.attempt_id }}
+          path: release-attempt
+          if-no-files-found: error
+          retention-days: 30

@@ -31,7 +31,7 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   movement/deletion while permitting one disposable app-created tag; its token
   and private-key material were destroyed after the proof. Production
   containment and later release-rail prerequisites remain in force.
-- Pinned all 51 external GitHub Actions references to reviewed full commit SHAs,
+- Pinned all external GitHub Actions references to reviewed full commit SHAs,
   retained exact upstream release labels, and added the fail-closed owner/digest
   contract to the active required validation job with mutable, shortened,
   obfuscated, aliased, and unknown-reference fixtures. Weekly Dependabot
@@ -54,6 +54,12 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   probes are rejected by hosted policy before job execution; credential
   exposure disposition remains evidence-limited where user-owned repository
   audit logs are unavailable.
+- Added the release attempt ledger contract for Android, Supabase migration,
+  Sentry/GitHub Release, and VersionDeck rails. Protected release work now
+  creates or requires a `hpra_...` attempt ID, uses an exact five-job
+  manually dispatched backend aggregate, and includes a no-mutation protected
+  dry-run workflow to prove stale, skipped, renamed, or mismatched backend
+  evidence cannot authorize later rails.
 
 ## 1.5.0 (Build 44) — 2026-08-09
 

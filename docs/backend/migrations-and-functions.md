@@ -34,8 +34,8 @@ Each migration should be:
 10. Apply to hosted environments only through an explicitly authorized process.
 
 Active TASK-001 containment is not such authorization. The owning later task
-must identify the exact target, change, operator, split GitHub environment, and
-protection prerequisites.
+must identify the exact target, change, operator, split GitHub environment,
+release attempt ID, and protection prerequisites.
 
 ## Destructive changes
 
@@ -101,5 +101,7 @@ environment with `SUPABASE_MIGRATION_ACCESS_TOKEN` and
 `SUPABASE_MIGRATION_DB_PASSWORD`. Hosted evidence must still prove those names
 exist only in that environment and are not pooled with Advisor or signing
 credentials; see the [GitHub environment credential ownership runbook](../operations/github-environment-credential-ownership.md).
+
+The workflow also requires a `release_attempt_id` shaped like `hpra_<32 lowercase hex characters>` alongside the exact current `main` SHA, project ref, and `apply-pending-migrations` confirmation. This binds hosted migration mutation to the release attempt ledger described in the [release attempt ledger runbook](../operations/release-attempt-ledger.md). A syntactically valid attempt ID is not, by itself, hosted deployment approval or proof that the backend aggregate passed; retain the dry-run ledger evidence and protected workflow approvals in the release record.
 
 Record migration identifiers, function versions/source commits, local test results, hosted target, deployment operator, compatibility assumptions, and any required mobile release ordering.

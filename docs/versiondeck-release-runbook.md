@@ -54,7 +54,7 @@ VersionDeck keeps validation and production publication deliberately separate:
 
 - Pull requests validate VersionDeck source changes without deploying.
 - A `workflow_run` handoff starts VersionDeck after the protected **Build Production APK** workflow completes successfully on `main`.
-- Manual dispatch is a recovery path and requires the run ID of a successful **Build Production APK** run for the current `main` SHA.
+- Manual dispatch is a recovery path and requires the run ID and release attempt ID of a successful **Build Production APK** run for the current `main` SHA.
 
 Push and GitHub Release events do not deploy Pages. This prevents a source push or the APK workflow's intermediate Release publication step from racing the required backend, APK, and final VersionDeck sequence. The Play AAB remains an independent exact-SHA evidence rail.
 
@@ -64,8 +64,9 @@ The automated production handoff is deliberately fail-closed:
 2. The upstream event must be `workflow_dispatch`.
 3. The upstream branch must be `main`.
 4. The upstream conclusion must be `success`.
-5. The upstream build commit must exactly equal the current `main` SHA and the checked-out VersionDeck source.
-6. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
+5. The upstream run must retain exactly one `HomePilot-release-attempt-<attempt_id>` artifact.
+6. The upstream build commit must exactly equal the current `main` SHA and the checked-out VersionDeck source.
+7. VersionDeck then discovers and independently verifies the published release; it does not trust the upstream conclusion as artifact evidence.
 
 Failed, cancelled, skipped, stale-SHA, or non-production upstream runs do not deploy VersionDeck. Release edits or removals require a reviewed recovery dispatch tied to the successful current-SHA APK run; they do not bypass artifact provenance. Shared Pages concurrency serializes production deployment runs without cancelling an active publish; GitHub may replace an older pending run with a newer pending revision.
 
@@ -98,7 +99,7 @@ The deployment workflow:
 
 1. Validates the trigger and confirms the successful protected production-build handoff (or the explicitly supplied recovery run ID).
 2. Checks out the APK run's source and verifies it exactly matches `origin/main`.
-3. Confirms the APK run, checked-out source, and deployment source are the same SHA.
+3. Confirms the APK run, checked-out source, deployment source, and release attempt ID are the same trusted handoff. Manual recovery must provide the same attempt ID retained by the APK run's release-attempt artifact.
 4. Confirms required GitHub and Android verification tools.
 5. Runs syntax checks and tests.
 6. Discovers releases and independently verifies candidate APKs.
@@ -106,11 +107,12 @@ The deployment workflow:
 8. Requires and validates the three public account-deletion variables, then builds revisioned static assets. Missing or mismatched production values fail before site output is replaced or emitted.
 9. Validates the site.
 10. Uploads diagnostics and the Pages artifact.
-11. Deploys GitHub Pages with protected permissions through the `github-pages`
+11. Requires a valid release attempt ID immediately before the Pages mutation.
+12. Deploys GitHub Pages with protected permissions through the `github-pages`
     environment. The Pages action may poll for up to 20 minutes before
     declaring a deployment timeout, while the deployment job allows additional
     time for the public-manifest check.
-12. Verifies the public manifest after deployment.
+13. Verifies the public manifest after deployment.
 
 The Pages workflow does not apply the deletion-recovery migration, deploy either `delete-account` or `account-deletion-status`, or perform a destructive hosted browser test. Apply and verify the compatible migration and both functions first. The Pages production build consumes only GitHub repository variables through the `vars` context; it has no inert or placeholder fallback.
 
@@ -163,7 +165,7 @@ Validate:
 - Do not bypass package, signer, checksum, ancestry, or provenance checks.
 - Do not expose a token in the public site to obtain richer live status.
 - If the production build fails or is cancelled, do not manually represent it as a verified release.
-- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually with that successful current-SHA APK run ID only after confirming the release evidence.
+- If the chained VersionDeck run fails after a successful APK release, keep the existing verified site live, inspect diagnostics, and rerun VersionDeck manually with that successful current-SHA APK run ID and release attempt ID only after confirming the release evidence.
 - If `actions/deploy-pages` remains `deployment_in_progress` until its timeout, confirm that no Pages deployment is still active or queued, retain the existing live site, and rerun the VersionDeck workflow. Do not rebuild or republish the APK solely because Pages timed out.
 - If Pages deploys bad static behavior, correct source and redeploy; do not change verified release metadata independently.
 - If any required public deletion-site variable is absent or rejected, leave the current live site untouched and correct repository configuration. Never enable the inert pull-request flag in production.
@@ -207,6 +209,6 @@ If any hosted check fails, the external flow is not release-ready even when loca
 
 ## Evidence
 
-Record the production workflow run, production source commit, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
+Record the production workflow run, production source commit, release attempt ID, VersionDeck workflow run, VersionDeck source commit, generated manifest summary, verified release IDs, static validation result, Pages deployment URL, and public smoke-test result.
 
 For account deletion, additionally record the Edge Function project/version, Supabase Auth callback configuration review, public-config validation, allowed and denied preflight results, revisioned-asset observation, disposable-account OAuth result, strict receipt validation with identifiers redacted, Auth/Postgres/Storage cleanup checks, device-local limitation/result, offline network-only result, operator, and timestamp. Clearly label local automated evidence separately from hosted-service and device evidence.

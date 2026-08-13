@@ -17,6 +17,7 @@ The executable AAB sources are:
 - [`.github/workflows/build-play-android.yml`](../../.github/workflows/build-play-android.yml)
 - [`tool/build_play_prod.ps1`](../../tool/build_play_prod.ps1)
 - [`tool/collect_android_release_evidence.ps1`](../../tool/collect_android_release_evidence.ps1)
+- [`tool/release_attempt_ledger.mjs`](../../tool/release_attempt_ledger.mjs)
 - [`tool/validate_google_release_contracts.mjs`](../../tool/validate_google_release_contracts.mjs)
 - [`tool/release-workflows.test.mjs`](../../tool/release-workflows.test.mjs)
 - [`pubspec.yaml`](../../pubspec.yaml)
@@ -37,7 +38,7 @@ Before dispatching the AAB workflow:
 
 1. Select the full commit SHA that exactly equals the current `origin/main` tip and freeze it for all release rails. A historical ancestor is not eligible.
 2. Confirm `pubspec.yaml` uses `x.y.z+N` and that `N` is greater than every version code ever accepted by Google Play for `com.homepilot.app`.
-3. Obtain a successful `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` equals the final SHA. Require its exact check names—`Deno SSV tests`, `Google contract/static checks`, and `Supabase database tests`—in branch protection and verify that hosted setting separately. The validation run uses a local stack and is not hosted deployment evidence.
+3. Obtain a successful manually dispatched `Validate Google Backend and Release Contracts` run on `main` whose `head_sha` equals the final SHA. The AAB workflow requires the exact release-attempt backend aggregate, including `Deno SSV tests`, `Google contract/static checks`, `Supabase database tests`, `Require current main Advisor source`, and `Hosted Supabase Advisors`. Branch protection still owns pull-request contexts separately; the validation run uses a local stack plus a protected read-only Advisor audit and is not hosted deployment evidence.
 4. Review user-visible release notes, privacy impact, permissions, ads, account deletion, data retention, and store declarations.
 5. Verify the declared GitHub `production-play-signing` environment configuration and approvals externally. Workflow source alone does not prove required reviewers or correct values.
 6. Confirm the expected Play application/package is `com.homepilot.app`, the intended initial target is identified, and no conflicting Play edit or rollout is active.
@@ -74,7 +75,7 @@ After manual dispatch at the final SHA, require the run to complete all of the f
 
 1. Explicit non-`main` rejection, exact-current-`origin/main` checks before and after the protected-environment wait, and workflow-pinned toolchain setup.
 2. `npm ci`, Google/Android static contract validation, and locked AdMob SSV/account-deletion/deletion-status Deno checks/tests.
-3. Successful lookup of the exact `.github/workflows/validate-google-backend.yml` identity for the same `main` SHA, with the gate run ID/URL recorded in the workflow summary and safe evidence context.
+3. Creation of `HomePilot-release-attempt-<attempt_id>` and successful lookup of the exact `.github/workflows/validate-google-backend.yml` `workflow_dispatch` aggregate for the same `main` SHA, with the gate run ID/URL and attempt ID recorded in the workflow summary and safe evidence context.
 4. Production configuration creation and upload-keystore restoration.
 5. Flutter clean/dependency resolution, localization and Drift generation, analysis, tests, and production-configuration validation.
 6. Release registrant checks and `flutter build appbundle --flavor prod --release` through `tool/build_play_prod.ps1`.
@@ -88,7 +89,7 @@ No step in that list is Play Console acceptance evidence.
 
 ## Exact AAB evidence package
 
-Retain the workflow URL, run ID/attempt, final SHA, and both Actions artifacts:
+Retain the workflow URL, run ID/attempt, final SHA, release attempt ID, and both Actions artifacts:
 
 ### `HomePilot-production-aab-<run_number>`
 
@@ -104,7 +105,7 @@ Recompute SHA-256 after downloading and require it to equal both the checksum fi
 - `AndroidManifest-prodRelease.xml`
 - `output-metadata-aab.json`, when Android generated matching output metadata
 - `aab-signature-verification.txt`
-- `workflow-context.json`, containing only workflow/run/source/backend-gate and release identity (never credentials)
+- `workflow-context.json`, containing only workflow/run/source/release-attempt/backend-gate and release identity (never credentials)
 
 The summary must agree with the AAB on artifact filename/hash, parsed `com.homepilot.app` package, version name/code, parsed target SDK 36, parsed `allowBackup: false`, the exactly-one parsed production AdMob application ID, and `prodReleaseRuntimeClasspath`. The dependency report must be retained in full and contain no direct Firebase Analytics dependency. The merged manifest must contain the required coarse-location, notification, and exact-alarm declarations; it must not contain fine/background location, a Google demo AdMob identifier, or a debuggable production flag.
 
@@ -194,7 +195,7 @@ Never delete or overwrite evidence to make a later run appear continuous with an
 
 Record:
 
-- Final SHA, `pubspec.yaml` version/build, exact-SHA backend gate, and hosted backend deployment dependency.
+- Final SHA, release attempt ID, `pubspec.yaml` version/build, exact-SHA backend aggregate, and hosted backend deployment dependency.
 - AAB workflow URL/run attempt, artifact names, recomputed/checksum/summary hashes, attestation verification, upload certificate, manifest/dependency review, and exceptions.
 - Play application, App integrity fingerprints, uploaded bundle version, Bundle Explorer result, automated checks/warnings, track, testers/countries, rollout/managed-publishing settings, approvals, and timestamps.
 - Data-safety/app-content evidence at the reserved canonical path.

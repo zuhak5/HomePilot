@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test:account-deletion": "node --test tool/account-deletion-site.test.mjs",
-    "test:release-workflows": "node --test tool/release-workflows.test.mjs",
+    "test:release-workflows": "node --test tool/release-workflows.test.mjs tool/release-attempt-ledger.test.mjs",
     "test:supabase-advisors": "node --test tool/supabase-advisors.test.mjs",
     "validate:google-contracts": "node tool/validate_google_release_contracts.mjs",
     "supabase:lint": "supabase db lint --local --level error --fail-on error",
