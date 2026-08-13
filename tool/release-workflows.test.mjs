@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  approvedActionReleases,
+  hostedAllowedActionPatterns,
   validateActionSource,
   validateRepositoryActionReferences,
 } from './github-actions-policy.mjs';
@@ -16,9 +18,29 @@ const read = async (path) =>
 test('GitHub Actions use only reviewed immutable references', async () => {
   const result = await validateRepositoryActionReferences();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.externalReferences, 51);
+  assert.equal(result.externalReferences, 47);
   assert.equal(result.localReferences, 0);
   assert.equal(result.files.length, 7);
+});
+
+test('hosted Actions policy allowlist matches reviewed action owners', () => {
+  assert.deepEqual(
+    hostedAllowedActionPatterns,
+    Object.keys(approvedActionReleases)
+      .map((action) => `${action}@*`)
+      .sort(),
+  );
+  assert.deepEqual(hostedAllowedActionPatterns, [
+    'actions/attest-build-provenance@*',
+    'actions/checkout@*',
+    'actions/configure-pages@*',
+    'actions/deploy-pages@*',
+    'actions/setup-java@*',
+    'actions/setup-node@*',
+    'actions/upload-artifact@*',
+    'actions/upload-pages-artifact@*',
+    'denoland/setup-deno@*',
+  ]);
 });
 
 test('GitHub Actions policy rejects mutable, shortened, and unowned references', () => {

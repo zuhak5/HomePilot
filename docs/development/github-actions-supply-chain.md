@@ -31,8 +31,10 @@ npm run test:release-workflows
 
 The active `Validate Flutter` job runs this contract in its required
 `Format, analyze, and test` context. Source still does not prove a successful
-run for a particular HomePilot commit or GitHub's hosted Actions allowlist and
-require-full-SHA setting. Task 05 owns that hosted policy evidence.
+run for a particular HomePilot commit. GitHub's hosted Actions policy now
+requires full-length SHA pins and limits external actions to the reviewed
+owner/repository patterns derived from
+[`tool/github-actions-policy.mjs`](../../tool/github-actions-policy.mjs).
 
 ## Reviewed action ledger
 
@@ -57,10 +59,13 @@ vulnerability scanning.
 | `actions/upload-pages-artifact` | `v5` | [`v5.0.0`](https://github.com/actions/upload-pages-artifact/releases/tag/v5.0.0) | `fc324d3547104276b827a68afc52ff2a11cc49c9` |
 | `actions/deploy-pages` | `v5` | [`v5.0.0`](https://github.com/actions/deploy-pages/releases/tag/v5.0.0) | `cd2ce8fcbc39b97be8ca5fce6e763baed58fa128` |
 | `denoland/setup-deno` | `v2` branch | [`v2.0.5`](https://github.com/denoland/setup-deno/releases/tag/v2.0.5) | `22d081ff2d3a40755e97629de92e3bcbfa7cf2ed` |
-| `subosito/flutter-action` | `v2` | [`v2.23.0`](https://github.com/subosito/flutter-action/releases/tag/v2.23.0) | `1a449444c387b1966244ae4d4f8c696479add0b2` |
 
 `actions/attest-build-provenance@v3` is an annotated tag. The ledger and
 workflow pin use its peeled release commit, not the tag-object SHA.
+`subosito/flutter-action` was removed during TASK-005 because the hosted
+full-SHA policy also evaluates its transitive `actions/cache@v5` use. Windows
+Flutter setup is now repository-owned in
+[`tool/setup_flutter_windows.ps1`](../../tool/setup_flutter_windows.ps1).
 
 ## Review notes
 

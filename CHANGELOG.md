@@ -48,6 +48,12 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   probes and approved exact-main hosted Advisor runs were recorded, closing
   TASK-004 without rotating credentials or performing release/migration
   mutations.
+- Enabled GitHub's hosted selected-action policy with full-SHA enforcement and
+  removed the transitive third-party Flutter setup action so the required
+  validation workflow can run under the policy. Mutable and unknown action
+  probes are rejected by hosted policy before job execution; credential
+  exposure disposition remains evidence-limited where user-owned repository
+  audit logs are unavailable.
 
 ## 1.5.0 (Build 44) — 2026-08-09
 
