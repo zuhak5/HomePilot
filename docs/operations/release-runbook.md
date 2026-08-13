@@ -68,10 +68,10 @@ containment is lifted. It is not currently executable authorization.
 
 1. **Backend database gate.** Manually dispatch `Validate Google Backend and Release Contracts` on the final `main` SHA and require an exact successful `workflow_dispatch` aggregate with these five job names: `Deno SSV tests`, `Google contract/static checks`, `Supabase database tests`, `Require current main Advisor source`, and `Hosted Supabase Advisors`. Pull-request and push runs still exercise local/static jobs without exposing production credentials, but they cannot authorize a release attempt because protected Advisor jobs are skipped.
 2. **Release attempt dry run.** Manually run `Release Attempt Dry Run` on the same SHA with the backend validation run ID. It creates a `hpra_...` attempt, revalidates current `main` after the `production-github-release` approval boundary, validates the named backend aggregate, advances the attempt to `prerequisites_verified`, and uploads dry-run evidence without signing, publishing, deploying, migrating, or mutating Sentry.
-3. **Hosted migration when needed.** If the release contains pending database migrations, manually run `Deploy Supabase Migrations` on `main` with the exact current SHA, exact project ref, release attempt ID, and `apply-pending-migrations`; inspect the remote list and dry-run evidence and require the post-apply dry run to succeed.
-4. **APK, Sentry, and GitHub Release.** Manually run `Build Production APK` at the same SHA with the required changelog. The workflow creates and retains the release-attempt artifact, requires the named backend aggregate, and embeds the attempt ID in safe evidence context. The APK evidence collector must pass before Sentry mutation. Then require successful Sentry publication, artifact upload, provenance attestation, and GitHub Release creation under the same attempt ID.
-5. **VersionDeck.** A successful manually dispatched `Build Production APK` run can start `Deploy VersionDeck` through `workflow_run` only when the upstream run contains exactly one release-attempt artifact. VersionDeck checks out that run's SHA, requires it to equal current `main`, rediscovers the GitHub Release, and independently verifies the APK before Pages deployment. A manual recovery dispatch requires both the successful current-SHA APK run ID and its release attempt ID.
-6. **Separate AAB evidence and attestation.** Manually run `Build Play Store AAB` at the same frozen SHA as an independent rail. It creates a release-attempt artifact, requires the named backend aggregate, and records the attempt ID in safe evidence context. Wait for the workflow, both retained artifacts, and build-provenance attestation to complete. Review the AAB checksum, upload-key signature evidence, merged manifest, output metadata when present, dependency report, and evidence summary. This workflow does not upload to Google Play.
+3. **Hosted migration when needed.** If the release contains pending database migrations, manually run `Deploy Supabase Migrations` on `main` with the exact current SHA, exact project ref, release attempt ID, release-attempt dry-run run ID, and `apply-pending-migrations`; require the semantic migration prerequisites, linked dry run, immediate pre-apply ledger revalidation, apply evidence, no-pending dry run, and externally verified migration ledger artifact to succeed.
+4. **APK, Sentry, and GitHub Release.** Manually run `Build Production APK` at the same SHA with the required changelog, release attempt ID, and release-attempt dry-run run ID. The workflow restores the dry-run ledger, requires the named backend aggregate, binds the verified APK digest to `artifact_verified`, and revalidates that state before Sentry release publication, provenance attestation, and GitHub Release publication. Sentry release publication creates or reuses the release and uploads debug information without a deploy marker. The GitHub Release job verifies the published target/assets and advances the ledger to `published`; only then does the separate Sentry deploy job create or verify one deterministic production deploy marker.
+5. **VersionDeck.** A successful manually dispatched `Build Production APK` run can start `Deploy VersionDeck` through `workflow_run` only when the upstream run contains exactly one release-attempt artifact. VersionDeck checks out that run's SHA, requires it to equal current `main`, rediscovers the GitHub Release, independently verifies the APK, and revalidates source/attempt/generated-manifest identity immediately before Pages artifact upload and again before Pages deployment. A manual recovery dispatch requires both the successful current-SHA APK run ID and its release attempt ID.
+6. **Separate AAB evidence and attestation.** Manually run `Build Play Store AAB` at the same frozen SHA as an independent rail with the release attempt ID and release-attempt dry-run run ID. It restores the dry-run ledger, requires the named backend aggregate, binds the verified AAB digest and upload-certificate evidence to `artifact_verified`, and revalidates that state before artifact upload and attestation. Wait for the workflow, both retained artifacts, the retained release-attempt evidence, and build-provenance attestation to complete. Review the AAB checksum, upload-key signature evidence, merged manifest, output metadata when present, dependency report, and evidence summary. This workflow does not upload to Google Play.
 
 The workflows intentionally do not encode AAB success as a prerequisite of the APK/VersionDeck rail, and their concurrency groups are distinct. Do not run the protected Android builds concurrently. Keep `main` unchanged until every intended exact-SHA rail and the VersionDeck handoff are complete; VersionDeck fails closed when the APK SHA is not the current `main` SHA. Google Play upload or rollout remains a separate explicitly authorized operator process.
 
@@ -147,10 +147,10 @@ independently inspected.
 Both Android workflows:
 
 1. Explicitly fail a non-`main` dispatch, then require the selected SHA to equal the current `origin/main` tip. The protected build job repeats the exact equality check after any environment-approval wait.
-2. Create and upload `HomePilot-release-attempt-<attempt_id>` from the exact source, workflow path digest, target environment, run identity, and version/build metadata.
+2. Restore the canonical `HomePilot-release-attempt-dry-run-<attempt_id>` artifact from the supplied dry-run workflow run ID, then upload the validated prerequisites ledger into the current workflow's retained evidence.
 3. Install the workflow-pinned Java, Flutter, Node, and Deno toolchains.
 4. Run `npm ci`, `tool/validate_google_release_contracts.mjs`, locked Edge Function checks, and locked Edge Function tests.
-5. Use `tool/release_attempt_ledger.mjs find-backend` to require an exact successful `workflow_dispatch` backend aggregate with all five required job names; record its run ID and URL in the workflow summary and evidence context.
+5. Use `tool/release_attempt_ledger.mjs verify-attempt` and `find-backend` to require the exact `prerequisites_verified` attempt plus an exact successful `workflow_dispatch` backend aggregate with all five required job names; record its run ID and URL in the workflow summary and evidence context.
 6. Derive version/build metadata from `pubspec.yaml`.
 7. Validate required production variables, construct ignored `config/prod.json`, and restore the ignored signing files from secrets.
 8. Clean, resolve Flutter dependencies, regenerate localization and Drift output, analyze, run the Flutter test suite, and run the production configuration test.
@@ -169,11 +169,12 @@ The AAB workflow creates exactly one `prodRelease` bundle and verifies:
 - Package, version name, and version code through generated metadata or the merged manifest.
 - Merged production manifest and runtime-dependency evidence through the shared collector.
 - Build provenance for the AAB subject.
+- A release-attempt `artifact_verified` ledger entry binding the AAB filename, SHA-256, and upload-certificate fingerprint before artifact upload and attestation.
 
 It uploads, for 30 days:
 
 - `HomePilot-production-aab-<run_number>` containing the AAB and checksum file.
-- `HomePilot-production-aab-evidence-<run_number>` containing the collector output and `aab-signature-verification.txt`.
+- `HomePilot-production-aab-evidence-<run_number>` containing the collector output, `aab-signature-verification.txt`, and `release-attempt` ledger evidence.
 
 The evidence upload uses `always()` and a fixed safe path, so partial collector/signature/context diagnostics remain available when a later check fails. A successful rail still requires the complete evidence set; a warning-only partial diagnostic artifact is not release evidence.
 
@@ -190,26 +191,32 @@ The APK workflow additionally validates fixed Sentry organization/project expect
 - The same merged-manifest, output-metadata, and dependency evidence collected for the AAB rail.
 
 The evidence collector runs before the APK handoff artifact is uploaded, so
-manifest/dependency failures occur before Sentry mutation. The separate
-`production-sentry` job restores and verifies the handoff, then creates or
-reuses the Sentry release, associates commits, uploads debug information,
-finalizes the release, records a deploy, and verifies it. Later attestation or
-GitHub Release failures can still leave a valid Sentry release behind; record
-and reconcile that partial state rather than claiming an Android release
-succeeded.
+manifest/dependency failures occur before Sentry mutation. The signing job then
+binds the APK filename and SHA-256 to the attempt ledger and advances it to
+`artifact_verified`; every later mutation job verifies that exact state before
+acting. The separate `production-sentry` job restores and verifies the handoff,
+then creates or reuses the Sentry release, associates commits, uploads debug
+information, and finalizes the release without recording a deploy marker.
+Later attestation or GitHub Release failures can still leave a valid Sentry
+release behind; record and reconcile that partial state rather than claiming an
+Android release succeeded.
 
 Before any Sentry mutation, the workflow requires the release attempt ID,
 rejects an existing remote Git tag or GitHub Release for the derived identity,
 then rechecks the tag immediately before Sentry publication. The separate
 `production-github-release` job requires the same attempt ID,
 revalidates source, restores and verifies the handoff, rechecks the tag again,
-attests the APK, and creates a GitHub Release containing the renamed APK and
-`.sha256` file. The APK diagnostic upload uses `always()` and retains its safe
-workflow context, signer output, `aapt2` badging, merged manifest, dependency
-report, and metadata produced before a failure. Release notes record version,
-build, package, filename, SHA-256, standalone signer, Sentry release, and the
-`gh attestation verify` command. VersionDeck trusts none of those prose claims
-without independently inspecting the release and artifact.
+attests the APK, creates a GitHub Release containing the renamed APK and
+`.sha256` file, verifies the release target/assets, and advances the ledger to
+`published`. The final `production-sentry` deploy job restores that published
+ledger evidence, verifies the GitHub Release again, and creates or verifies one
+deterministic production deploy marker. The APK diagnostic upload uses
+`always()` and retains its safe workflow context, signer output, `aapt2`
+badging, merged manifest, dependency report, and metadata produced before a
+failure. Release notes record version, build, package, filename, SHA-256,
+standalone signer, Sentry release, and the `gh attestation verify` command.
+VersionDeck trusts none of those prose claims without independently inspecting
+the release and artifact.
 
 ## Evidence collector contract
 
@@ -251,7 +258,8 @@ VersionDeck verifies release state, exact filename, checksum, package, version/b
 - **AAB workflow failure before Play upload:** no Play release exists. Preserve diagnostics, discard the candidate, and rerun only after correction.
 - **Play accepts the AAB:** the version code is consumed. Halt or remove the affected rollout through Play Console as appropriate, then publish a corrected build with a higher version code; never replace the accepted bundle under the old code.
 - **APK evidence failure:** occurs before Sentry mutation; do not publish the APK.
-- **Sentry succeeds but a later APK step fails:** record the partial Sentry release/deploy. The script tolerates an existing Sentry release on retry, but the operator must ensure the same release identity and SHA before retrying.
+- **Sentry release succeeds but a later APK step fails:** record the partial Sentry release. The script tolerates an existing Sentry release on retry, but the operator must ensure the same release identity, source SHA, artifact digest, and attempt ID before retrying. A production deploy marker must not be created until the GitHub Release has been verified and the ledger is `published`.
+- **Sentry deploy marker retry:** the deploy step uses a deterministic name and environment. If exactly one matching deploy already exists, treat it as reconciliation evidence; if multiple matching deploys exist, stop and investigate before recording the release complete.
 - **GitHub Release already exists:** the APK workflow fails closed. Do not overwrite assets or bypass the tag check. Inspect whether the release is valid, withdraw/supersede it when necessary, and use a new build number for corrected binaries.
 - **APK succeeds but VersionDeck fails:** the GitHub Release can remain directly reachable while the previous verified Pages site stays live. Fix the downstream cause and rerun VersionDeck only after rechecking release integrity.
 - **Play rollback versus GitHub rollback:** these are independent distribution rails. Halting a Play rollout does not remove the GitHub APK, and withdrawing a GitHub Release does not halt Play. Record and execute both actions when both channels are affected.

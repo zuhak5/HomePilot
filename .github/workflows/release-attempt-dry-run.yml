@@ -172,6 +172,84 @@ jobs:
           console.log("- Mutation: none");
           NODE
 
+      - name: Prove mutation-boundary negative fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          import assert from "node:assert/strict";
+          import fs from "node:fs";
+          import {
+            createReleaseAttempt,
+            transitionReleaseAttempt,
+            validateAttemptLedger,
+          } from "./tool/release_attempt_ledger.mjs";
+
+          const attempt = JSON.parse(
+            fs.readFileSync("release-attempt/release-attempt.prerequisites-verified.json", "utf8"),
+          );
+          const sourceSha = attempt.identity.source_sha;
+          assert.throws(
+            () => validateAttemptLedger({
+              attempt,
+              attemptId: "hpra_00000000000000000000000000000000",
+              repository: process.env.GITHUB_REPOSITORY,
+              sourceSha,
+              allowedStates: ["prerequisites_verified"],
+              requiredEvidenceKeys: ["backend_validation"],
+            }),
+            /attempt ID mismatch/,
+          );
+          assert.throws(
+            () => validateAttemptLedger({
+              attempt,
+              attemptId: attempt.attempt_id,
+              repository: process.env.GITHUB_REPOSITORY,
+              sourceSha: "0".repeat(40),
+              allowedStates: ["prerequisites_verified"],
+              requiredEvidenceKeys: ["backend_validation"],
+            }),
+            /attempt source SHA mismatch/,
+          );
+          const incomplete = await createReleaseAttempt({
+            repository: process.env.GITHUB_REPOSITORY,
+            runId: process.env.GITHUB_RUN_ID,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            sourceSha,
+            sourceRef: process.env.GITHUB_REF,
+            event: process.env.GITHUB_EVENT_NAME,
+            workflowPath: ".github/workflows/release-attempt-dry-run.yml",
+            targetKind: "dry-run-negative-fixture",
+            targetEnvironment: "production-github-release",
+          });
+          assert.throws(
+            () => validateAttemptLedger({
+              attempt: incomplete,
+              attemptId: incomplete.attempt_id,
+              repository: process.env.GITHUB_REPOSITORY,
+              sourceSha,
+              allowedStates: ["prerequisites_verified"],
+              requiredEvidenceKeys: ["backend_validation"],
+            }),
+            /expected one of prerequisites_verified/,
+          );
+          assert.throws(
+            () => validateAttemptLedger({
+              attempt,
+              attemptId: attempt.attempt_id,
+              repository: process.env.GITHUB_REPOSITORY,
+              sourceSha,
+              allowedStates: ["prerequisites_verified"],
+              requiredEvidenceKeys: ["backend_validation", "apk_artifact"],
+            }),
+            /missing required evidence: apk_artifact/,
+          );
+          assert.throws(
+            () => transitionReleaseAttempt(attempt, "published"),
+            /Invalid release attempt transition/,
+          );
+          NODE
+
       - name: Upload protected dry-run evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

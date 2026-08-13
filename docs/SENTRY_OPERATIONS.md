@@ -75,11 +75,14 @@ Scrubber tests must include nested maps/lists and representative authentication,
 ## Releases
 
 Production release publication is handled by the protected Android workflow's
-separate `production-sentry` job through `tool/publish_sentry_release.ps1`.
-The Sentry token must not be available to Android signing, Supabase, Pages, or
-GitHub Release jobs. See the [GitHub environment credential ownership runbook](operations/github-environment-credential-ownership.md).
+separate `production-sentry` job through `tool/publish_sentry_release.ps1`
+with `-Mode publish`. The Sentry token must not be available to Android
+signing, Supabase, Pages, or GitHub Release jobs. See the
+[GitHub environment credential ownership runbook](operations/github-environment-credential-ownership.md).
 
-The release identifier must correspond to the built application release, source commit, and release attempt ID. The workflow refuses Sentry mutation unless the signed APK job produced a valid `hpra_...` attempt identity. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
+The release identifier must correspond to the built application release, source commit, artifact digest, and release attempt ID. The workflow refuses Sentry release mutation unless the signed APK job produced a valid `artifact_verified` `hpra_...` attempt ledger. Release publication should associate commits/artifacts needed for symbolication without uploading user data or repository secrets.
+
+Production deploy markers are intentionally separate from release publication. After the GitHub Release job verifies the published target/assets and advances the attempt ledger to `published`, a later `production-sentry` job runs `tool/publish_sentry_release.ps1 -Mode deploy` with a deterministic deploy name for the same release, attempt, and environment. The deploy path lists existing deploys before creation so retries verify one existing marker instead of creating duplicates; more than one matching deploy is an incident to reconcile.
 
 Do not run production Sentry release mutation as an ordinary local command.
 During active containment, do not run it through GitHub or the Sentry console
