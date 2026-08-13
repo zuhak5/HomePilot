@@ -70,6 +70,24 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   the exact-source backend aggregate and new mutation-boundary negative
   fixtures without production signing, hosted migration apply, release
   publication, Pages deployment, or Play upload.
+- Bound Android release provenance to the exact source/workflow tuple. The AAB
+  and APK rails now retain trusted workflow context, exact
+  `gh attestation verify --format json` output, and a normalized tuple report
+  that requires repository, source digest/ref, signer workflow
+  identity/digest, workflow trigger, runner environment, and workflow run URI
+  to match one exact artifact. GitHub Release notes, operator runbooks, and
+  VersionDeck now publish and verify that exact tuple rather than a
+  repository-only attestation claim, and ambiguous or incompatible
+  attestations fail closed.
+- Added fail-closed VersionDeck publication control and absolute trust leases.
+  The manifest now carries explicit publication state plus `leaseExpiresAt`,
+  the browser disables downloads when live or cached trust expires, and the
+  Pages workflow can publish an explicit disabled manifest from current `main`
+  without requiring a successful APK artifact run first. Verified publication
+  now requires an exact reviewed historical decision for any non-ancestor
+  release before it can pass verification. The checked-in control currently
+  keeps VersionDeck disabled and records Build 44 as explicitly withdrawn until
+  a new trustworthy release replaces it.
 
 ## 1.5.0 (Build 44) — 2026-08-09
 

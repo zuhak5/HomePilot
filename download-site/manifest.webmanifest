@@ -2,7 +2,7 @@
   "id": "./",
   "name": "VersionDeck — HomePilot Releases",
   "short_name": "VersionDeck",
-  "description": "Official independently verified HomePilot APK releases, changelogs, checksums, signing details, and provenance attestations.",
+  "description": "Official independently verified HomePilot APK releases, changelogs, checksums, signing details, and exact provenance tuples.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

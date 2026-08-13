@@ -36,11 +36,11 @@ Node tests cover the public account-deletion PKCE flow, token-storage boundary, 
 
 ### VersionDeck tests
 
-Use Node's test runner for manifest schema, build status, cache policy, relative time, APK-verification helpers, and UI state helpers. Build and validate the static artifact after focused tests.
+Use Node's test runner for manifest schema, provenance policy, build status, cache policy, relative time, APK-verification helpers, and UI state helpers. Build and validate the static artifact after focused tests.
 
 ### Protected release validation
 
-The AAB and APK rails are separate. Both create an immutable release attempt ID and require a successful manually dispatched `Validate Google Backend and Release Contracts` aggregate for their exact commit SHA, including the protected Advisor source and hosted Advisor jobs. The AAB rail verifies one signed bundle and emits manifest, dependency, signing, checksum, release-attempt, and provenance evidence; it does not upload to Google Play. The APK rail additionally verifies the standalone signer/package/version, mutates Sentry release state, and creates a GitHub Release only after binding the same attempt ID. Play Console acceptance, Play App Signing, rollout, public Pages behavior, hosted backend deployment, protected release-attempt dry-run execution, and physical-device behavior remain operator/hosted evidence. Local tests and workflow-source tests cannot substitute for them.
+The AAB and APK rails are separate. Both create an immutable release attempt ID and require a successful manually dispatched `Validate Google Backend and Release Contracts` aggregate for their exact commit SHA, including the protected Advisor source and hosted Advisor jobs. The AAB rail verifies one signed bundle and emits manifest, dependency, signing, checksum, release-attempt, and exact provenance-tuple evidence; it does not upload to Google Play. The APK rail additionally verifies the standalone signer/package/version, mutates Sentry release state, and creates a GitHub Release only after binding the same attempt ID and retaining the exact attestation tuple. VersionDeck can then publish either a verified manifest from that successful current-SHA APK run or an explicit disabled manifest from current `main` via reviewed publication control. Play Console acceptance, Play App Signing, rollout, public Pages behavior, hosted backend deployment, protected release-attempt dry-run execution, and physical-device behavior remain operator/hosted evidence. Local tests and workflow-source tests cannot substitute for them.
 
 ### Hosted source-protection tests
 
@@ -69,7 +69,7 @@ branches, shortened or unknown references, YAML aliases, and local-action path
 escapes. The locked YAML parser evaluates escaped and explicit mapping keys
 semantically, while custom tags, anchors, and aliases fail closed.
 `tool/release-workflows.test.mjs` and `tool/release-attempt-ledger.test.mjs`
-validate the current 53-reference workflow inventory, release attempt state
+validate the current 59-reference workflow inventory, release attempt state
 machine, exact backend aggregate, and negative fixtures:
 
 ```powershell

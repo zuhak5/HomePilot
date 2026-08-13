@@ -169,6 +169,7 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
     workflow,
     /attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3\.0\.0/,
   );
+  assert.match(workflow, /node \.\\tool\\provenance_policy\.mjs/);
   assert.match(workflow, /release_attempt_id: \$\{\{ steps\.attempt_guard\.outputs\.attempt_id \}\}/);
   assert.match(workflow, /release_attempt_run_id:/);
   assert.match(workflow, /HomePilot-release-attempt-dry-run-\$INPUT_RELEASE_ATTEMPT_ID/);
@@ -177,6 +178,14 @@ test('Play AAB rail uses protected production names and verifiable evidence', as
   assert.match(workflow, /required-evidence-keys backend_validation,aab_artifact/);
   assert.match(workflow, /name: Revalidate attempt before AAB artifact upload and attestation/);
   assert.match(workflow, /backend-validation\.json/);
+  assert.match(workflow, /repository_id = \$env:GITHUB_REPOSITORY_ID/);
+  assert.match(workflow, /source_ref = \$env:GITHUB_REF/);
+  assert.match(workflow, /event_name = \$env:GITHUB_EVENT_NAME/);
+  assert.match(workflow, /runner_environment = "github-hosted"/);
+  assert.match(workflow, /source_repository_visibility = "public"/);
+  assert.match(workflow, /name: Verify and record AAB provenance tuple/);
+  assert.match(workflow, /--attestation-output \(Join-Path \$PWD "release\\aab-evidence\\provenance-attestation\.json"\)/);
+  assert.match(workflow, /--verification-output \(Join-Path \$PWD "release\\aab-evidence\\provenance-verification\.json"\)/);
   assert.doesNotMatch(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
   assert.doesNotMatch(workflow, /event -in @\("push", "workflow_dispatch"\)/);
   assert.match(workflow, /backend_gate_run_url = "\$\{\{ steps\.backend_gate\.outputs\.run_url \}\}"/);
@@ -211,10 +220,12 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
     /ANDROID_KEYSTORE_BASE64: \$\{\{ secrets\.ANDROID_APK_KEYSTORE_BASE64 \}\}/,
   );
   assert.match(workflow, /collect_android_release_evidence\.ps1/);
+  assert.match(workflow, /node \.\\tool\\provenance_policy\.mjs/);
   assert.match(workflow, /production-apk-evidence/);
   assert.match(workflow, /name: Upload APK diagnostics\n\s+if: always\(\)/);
   assert.match(workflow, /name: Upload production APK handoff/);
   assert.match(workflow, /HomePilot-production-apk-handoff-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /HomePilot-production-apk-provenance-\$\{\{ github\.run_number \}\}/);
   assert.match(workflow, /apk-signature-verification\.txt/);
   assert.match(workflow, /apk-badging\.txt/);
   assert.ok(
@@ -230,6 +241,11 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
   assert.match(workflow, /node tool\/release_attempt_ledger\.mjs find-backend/);
   assert.match(workflow, /required-evidence-keys backend_validation,apk_artifact/);
   assert.match(workflow, /backend-validation\.json/);
+  assert.match(workflow, /repository_id = \$env:GITHUB_REPOSITORY_ID/);
+  assert.match(workflow, /source_ref = \$env:GITHUB_REF/);
+  assert.match(workflow, /event_name = \$env:GITHUB_EVENT_NAME/);
+  assert.match(workflow, /runner_environment = "github-hosted"/);
+  assert.match(workflow, /source_repository_visibility = "public"/);
   assert.doesNotMatch(workflow, /validate-google-backend\.yml\/runs\?head_sha=/);
   assert.doesNotMatch(workflow, /event -in @\("push", "workflow_dispatch"\)/);
   assert.match(workflow, /backend_gate_run_url = "\$\{\{ steps\.backend_gate\.outputs\.run_url \}\}"/);
@@ -238,6 +254,16 @@ test('APK rail archives merged manifest and dependency evidence', async () => {
   assert.match(workflow, /name: Revalidate artifact attempt before Sentry release publish/);
   assert.match(workflow, /name: Revalidate attempt before attestation/);
   assert.match(workflow, /name: Revalidate attempt before GitHub Release publication/);
+  assert.match(workflow, /name: Verify and record APK provenance tuple/);
+  assert.match(workflow, /--attestation-output \(Join-Path \$PWD "release\\apk-evidence\\provenance-attestation\.json"\)/);
+  assert.match(workflow, /--verification-output \(Join-Path \$PWD "release\\apk-evidence\\provenance-verification\.json"\)/);
+  assert.match(workflow, /--predicate-type https:\/\/slsa\.dev\/provenance\/v1/);
+  assert.match(workflow, /--source-digest \$env:GITHUB_SHA/);
+  assert.match(workflow, /--source-ref refs\/heads\/main/);
+  assert.match(workflow, /--cert-identity \$CertIdentity/);
+  assert.match(workflow, /--signer-digest \$env:GITHUB_SHA/);
+  assert.match(workflow, /--deny-self-hosted-runners/);
+  assert.match(workflow, /--format json/);
   assert.match(workflow, /name: Create Sentry deploy marker/);
   assert.match(workflow, /Mode publish/);
   assert.match(workflow, /Mode deploy/);
@@ -467,18 +493,28 @@ test('VersionDeck production deployment is gated by a successful exact-SHA APK r
   const workflow = await read('.github/workflows/deploy-download-site.yml');
   assert.doesNotMatch(workflow, /^  push:/m);
   assert.doesNotMatch(workflow, /^  release:/m);
+  assert.match(workflow, /publication_mode:/);
+  assert.match(workflow, /default: disabled/);
   assert.match(workflow, /production_run_id:/);
-  assert.match(workflow, /required: true/);
-  assert.match(workflow, /release_attempt_id:/);
-  assert.match(workflow, /HomePilot-release-attempt-\$\{release_attempt_id\}/);
-  assert.match(workflow, /name: Revalidate source and attempt before Pages artifact upload/);
-  assert.match(workflow, /name: Check out deployment source/);
-  assert.match(workflow, /name: Require release attempt before Pages mutation/);
+  assert.match(workflow, /required: false/);
+  assert.doesNotMatch(workflow, /release_attempt_id:/);
+  assert.doesNotMatch(workflow, /HomePilot-release-attempt-/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(workflow, /test "\$upstream_sha" = "\$source_sha"/);
   assert.match(workflow, /test "\$run_name" = "Build Production APK"/);
   assert.match(workflow, /test "\$run_conclusion" = "success"/);
   assert.match(workflow, /test "\$run_sha" = "\$source_sha"/);
+  assert.match(workflow, /publication_mode="\$\{\{ inputs\.publication_mode \}\}"/);
+  assert.match(workflow, /test "\$publication_mode" = "verified" \|\| test "\$publication_mode" = "disabled"/);
+  assert.match(workflow, /if \[\[ "\$publication_mode" == "verified" \]\]; then/);
+  assert.match(workflow, /test -z "\$production_run_id"/);
+  assert.match(workflow, /expected_publication_status/);
+  assert.match(workflow, /tool\/versiondeck-control\.json/);
+  assert.match(workflow, /tool\/provenance_policy\.mjs/);
+  assert.match(workflow, /tool\/provenance_policy\.test\.mjs/);
+  assert.match(workflow, /if: \$\{\{ steps\.source\.outputs\.publication_mode == 'verified' \}\}/);
+  assert.match(workflow, /manifest\.schemaVersion !== 4/);
+  assert.match(workflow, /manifest\.publication\?\.status !== process\.env\.EXPECTED_PUBLICATION_STATUS/);
 });
 
 test('release attempt dry run validates named backend evidence without mutation', async () => {

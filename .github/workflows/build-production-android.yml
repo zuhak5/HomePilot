@@ -316,10 +316,17 @@ jobs:
           New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
           $Context = [ordered]@{
             workflow = $env:GITHUB_WORKFLOW
+            repository = $env:GITHUB_REPOSITORY
+            repository_id = $env:GITHUB_REPOSITORY_ID
+            repository_owner_id = $env:GITHUB_REPOSITORY_OWNER_ID
             run_id = $env:GITHUB_RUN_ID
             run_attempt = $env:GITHUB_RUN_ATTEMPT
             release_attempt_id = $env:RELEASE_ATTEMPT_ID
             source_sha = $env:GITHUB_SHA
+            source_ref = $env:GITHUB_REF
+            event_name = $env:GITHUB_EVENT_NAME
+            runner_environment = "github-hosted"
+            source_repository_visibility = "public"
             backend_gate_run_id = "${{ steps.backend_gate.outputs.run_id }}"
             backend_gate_run_url = "${{ steps.backend_gate.outputs.run_url }}"
             artifact_type = "apk"
@@ -999,6 +1006,19 @@ jobs:
             --state artifact_verified `
             --required-evidence-keys backend_validation,apk_artifact
 
+      - name: Verify and record APK provenance tuple
+        shell: pwsh
+        env:
+          APK_PATH: release\${{ needs.build-production-apk.outputs.apk_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & node .\tool\provenance_policy.mjs `
+            --artifact-path $env:APK_PATH `
+            --workflow-context (Join-Path $PWD "release\apk-evidence\workflow-context.json") `
+            --release-evidence (Join-Path $PWD "release\apk-evidence\release-evidence-summary.json") `
+            --attestation-output (Join-Path $PWD "release\apk-evidence\provenance-attestation.json") `
+            --verification-output (Join-Path $PWD "release\apk-evidence\provenance-verification.json")
+
       - name: Publish GitHub Release
         id: github_release
         shell: pwsh
@@ -1027,6 +1047,8 @@ jobs:
           }
 
           $NotesPath = Join-Path $PWD "release\release-notes.md"
+          $CertIdentity = "https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/build-production-android.yml@refs/heads/main"
+          $RunInvocationUri = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT"
           $Notes = @"
           ## What's changed
 
@@ -1042,11 +1064,24 @@ jobs:
           - Signer certificate SHA-256: ``3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51``
           - Sentry release: ``$env:SENTRY_RELEASE``
           - Release attempt: ``$env:RELEASE_ATTEMPT_ID``
+          - Provenance source digest: ``$env:GITHUB_SHA``
+          - Provenance source ref: ``refs/heads/main``
+          - Provenance signer workflow: ``$CertIdentity``
+          - Provenance trigger: ``workflow_dispatch``
+          - Provenance workflow run: ``$RunInvocationUri``
 
           Verify build provenance with:
 
           ``````bash
-          gh attestation verify $env:APK_NAME --repo $env:GITHUB_REPOSITORY
+          gh attestation verify $env:APK_NAME \
+            --repo $env:GITHUB_REPOSITORY \
+            --predicate-type https://slsa.dev/provenance/v1 \
+            --source-digest $env:GITHUB_SHA \
+            --source-ref refs/heads/main \
+            --cert-identity $CertIdentity \
+            --signer-digest $env:GITHUB_SHA \
+            --deny-self-hosted-runners \
+            --format json
           ``````
           "@
 
@@ -1110,6 +1145,17 @@ jobs:
             --evidence-file "release-attempt\github-release.json" `
             --output "release-attempt\release-attempt.published.json"
           "release_url=$($Release.url)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload APK provenance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HomePilot-production-apk-provenance-${{ github.run_number }}
+          path: |
+            release/apk-evidence/provenance-attestation.json
+            release/apk-evidence/provenance-verification.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload publication evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

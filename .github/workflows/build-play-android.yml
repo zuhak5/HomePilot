@@ -280,10 +280,17 @@ jobs:
           New-Item -ItemType Directory -Path $EvidencePath -Force | Out-Null
           $Context = [ordered]@{
             workflow = $env:GITHUB_WORKFLOW
+            repository = $env:GITHUB_REPOSITORY
+            repository_id = $env:GITHUB_REPOSITORY_ID
+            repository_owner_id = $env:GITHUB_REPOSITORY_OWNER_ID
             run_id = $env:GITHUB_RUN_ID
             run_attempt = $env:GITHUB_RUN_ATTEMPT
             release_attempt_id = $env:RELEASE_ATTEMPT_ID
             source_sha = $env:GITHUB_SHA
+            source_ref = $env:GITHUB_REF
+            event_name = $env:GITHUB_EVENT_NAME
+            runner_environment = "github-hosted"
+            source_repository_visibility = "public"
             backend_gate_run_id = "${{ steps.backend_gate.outputs.run_id }}"
             backend_gate_run_url = "${{ steps.backend_gate.outputs.run_url }}"
             artifact_type = "aab"
@@ -512,6 +519,24 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Attest production AAB provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: ${{ steps.release.outputs.aab_path }}
+
+      - name: Verify and record AAB provenance tuple
+        shell: pwsh
+        env:
+          AAB_PATH: ${{ steps.release.outputs.aab_path }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & node .\tool\provenance_policy.mjs `
+            --artifact-path $env:AAB_PATH `
+            --workflow-context (Join-Path $PWD "release\aab-evidence\workflow-context.json") `
+            --release-evidence (Join-Path $PWD "release\aab-evidence\release-evidence-summary.json") `
+            --attestation-output (Join-Path $PWD "release\aab-evidence\provenance-attestation.json") `
+            --verification-output (Join-Path $PWD "release\aab-evidence\provenance-verification.json")
+
       - name: Upload AAB evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -522,11 +547,6 @@ jobs:
             release-attempt
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Attest production AAB provenance
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
-        with:
-          subject-path: ${{ steps.release.outputs.aab_path }}
 
       - name: Stop Gradle daemons
         if: always()

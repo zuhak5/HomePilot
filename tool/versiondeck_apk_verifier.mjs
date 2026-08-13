@@ -10,6 +10,11 @@ import {
   VERSIONDECK_PACKAGE_NAME,
   VERSIONDECK_REPOSITORY,
 } from "../download-site/manifest-schema.js";
+import {
+  buildAndroidProvenancePolicy,
+  buildGhAttestationVerifyArgs,
+  verifyAttestationVerificationJson,
+} from "./provenance_policy.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_APK_SIZE_BYTES = 1024 * 1024 * 1024;
@@ -131,15 +136,36 @@ async function runChecked(command, args, options = {}) {
   }
 }
 
-async function resolveReleaseCommit(tag) {
+async function isCurrentMainAncestor(commitSha) {
+  try {
+    await runChecked("git", ["merge-base", "--is-ancestor", commitSha, "origin/main"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveReleaseCommit(tag, historicalDecision) {
   const { stdout } = await runChecked("git", ["rev-parse", `${tag}^{commit}`]);
   const commitSha = stdout.trim().toLowerCase();
   if (!COMMIT_PATTERN.test(commitSha)) throw new Error("Release tag did not resolve to a commit.");
-  await runChecked("git", ["merge-base", "--is-ancestor", commitSha, "origin/main"]);
+  if (await isCurrentMainAncestor(commitSha)) return commitSha;
+
+  if (!historicalDecision) {
+    throw new Error(
+      "Release commit is not an ancestor of current main and no explicit historical decision exists.",
+    );
+  }
+  if (historicalDecision.tag !== tag) {
+    throw new Error("Historical release decision does not match the release tag.");
+  }
+  if (String(historicalDecision.commitSha || "").toLowerCase() !== commitSha) {
+    throw new Error("Historical release decision does not match the release commit.");
+  }
   return commitSha;
 }
 
-export async function verifyReleaseArtifact({ release, apkAsset }, token) {
+export async function verifyReleaseArtifact({ release, apkAsset, historicalDecision }, token) {
   const temporaryDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), "versiondeck-"));
   const apkPath = path.join(temporaryDirectory, apkAsset.name);
   try {
@@ -160,9 +186,20 @@ export async function verifyReleaseArtifact({ release, apkAsset }, token) {
     if (!packageMatch) throw new Error("APK package metadata could not be extracted.");
     if (/^application-debuggable/m.test(badging.stdout)) throw new Error("APK is debuggable.");
 
-    await runChecked("gh", [
-      "attestation", "verify", apkPath, "--repo", VERSIONDECK_REPOSITORY,
-    ], { env: { ...process.env, GH_TOKEN: token } });
+    const commitSha = await resolveReleaseCommit(release.tag_name, historicalDecision);
+    const provenancePolicy = buildAndroidProvenancePolicy({
+      artifactType: "apk",
+      repository: VERSIONDECK_REPOSITORY,
+      sourceDigest: commitSha,
+      artifactName: apkAsset.name,
+      artifactSha256: sha256,
+    });
+    const { stdout } = await runChecked(
+      "gh",
+      buildGhAttestationVerifyArgs(provenancePolicy, apkPath, { formatJson: true }),
+      { env: { ...process.env, GH_TOKEN: token } },
+    );
+    const provenance = verifyAttestationVerificationJson(stdout, provenancePolicy);
 
     return {
       sha256,
@@ -170,7 +207,8 @@ export async function verifyReleaseArtifact({ release, apkAsset }, token) {
       version: packageMatch[3],
       build: Number(packageMatch[2]),
       signerCertificateSha256: normalizedSigner(signerMatch[1]),
-      commitSha: await resolveReleaseCommit(release.tag_name),
+      commitSha,
+      provenance,
       attestationVerified: true,
     };
   } finally {

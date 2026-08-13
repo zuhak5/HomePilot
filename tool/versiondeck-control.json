@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "leaseDurationHours": 24,
+  "publication": {
+    "status": "disabled",
+    "reasonCode": "containment",
+    "message": "Verified HomePilot downloads remain disabled until the VersionDeck lineage and freshness controls are requalified.",
+    "updatedAt": "2026-08-13T00:00:00Z"
+  },
+  "historicalReleaseDecisions": [
+    {
+      "releaseId": 367559562,
+      "tag": "v1.5.0-build.44",
+      "commitSha": "6f5606925964c9794d0f1ba863ec954239a47c9b",
+      "status": "withdrawn",
+      "reasonCode": "owner-withdrawn-non-ancestor-lineage",
+      "message": "Repository owner withdrew Build 44 pending a new trustworthy release on current main lineage.",
+      "decidedAt": "2026-08-13T00:00:00Z"
+    }
+  ]
+}

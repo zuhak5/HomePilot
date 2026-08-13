@@ -1,17 +1,39 @@
-export const VERSIONDECK_SCHEMA_VERSION = 2;
+export const VERSIONDECK_SCHEMA_VERSION = 4;
 export const VERSIONDECK_REPOSITORY = "zuhak5/HomePilot";
 export const VERSIONDECK_PACKAGE_NAME = "com.homepilot.app";
 export const VERSIONDECK_SIGNER_SHA256 =
   "3E:98:0E:B5:BB:68:A5:19:90:E7:70:56:D4:E1:09:95:B2:E0:4F:B3:88:A7:34:42:B7:9A:46:C8:53:36:1E:51";
+export const VERSIONDECK_PROVENANCE_POLICY_VERSION = 1;
+export const MAX_VERSIONDECK_MANIFEST_LEASE_MS = 24 * 60 * 60 * 1000;
+
+export const VersionDeckPublicationStatus = Object.freeze({
+  ACTIVE: "active",
+  DISABLED: "disabled",
+});
+
+export const VersionDeckReleaseAvailabilityStatus = Object.freeze({
+  ACTIVE: "active",
+  WITHDRAWN: "withdrawn",
+  SUPERSEDED: "superseded",
+});
+
+export const VersionDeckManifestState = Object.freeze({
+  ACTIVE: "active",
+  DISABLED: "disabled",
+  EXPIRED: "expired",
+  INVALID: "invalid",
+});
 
 const MAX_RELEASES = 200;
 const MAX_SUMMARY_LENGTH = 240;
 const MAX_CHANGELOG_ITEMS = 50;
 const MAX_CHANGELOG_ITEM_LENGTH = 500;
 const MAX_APK_SIZE_BYTES = 1024 * 1024 * 1024;
+const MAX_STATE_TEXT_LENGTH = 240;
 const FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SHA256_PATTERN = /^[a-f\d]{64}$/i;
 const COMMIT_PATTERN = /^[a-f\d]{40}$/i;
+const DIGIT_PATTERN = /^\d+$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const SIGNER_PATTERN = /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/;
 const DOWNLOAD_HOSTS = new Set([
@@ -19,13 +41,19 @@ const DOWNLOAD_HOSTS = new Set([
   "objects.githubusercontent.com",
   "release-assets.githubusercontent.com",
 ]);
+const GITHUB_TOKEN_ACTIONS_ISSUER = "https://token.actions.githubusercontent.com";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isValidDate(value, now) {
+function parseDate(value) {
   const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function isValidDate(value, now) {
+  const parsed = parseDate(value);
   return Number.isFinite(parsed) && parsed <= now + FUTURE_CLOCK_SKEW_MS;
 }
 
@@ -51,7 +79,15 @@ function compareVersionBuild(left, right) {
       return rightParts[index] - leftParts[index];
     }
   }
-  return Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+  return parseDate(right.publishedAt) - parseDate(left.publishedAt);
+}
+
+function expectedProvenanceWorkflow(repository) {
+  return `https://github.com/${repository}/.github/workflows/build-production-android.yml@refs/heads/main`;
+}
+
+function validateOptionalStateText(value) {
+  return value == null || (typeof value === "string" && value.length <= MAX_STATE_TEXT_LENGTH);
 }
 
 export function validateVersionDeckManifest(manifest, { now = Date.now() } = {}) {
@@ -70,6 +106,20 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
   if (!COMMIT_PATTERN.test(manifest.generatorCommit || "")) {
     errors.push("Manifest generator commit is invalid.");
   }
+
+  const generatedAt = parseDate(manifest.generatedAt);
+  const leaseExpiresAt = parseDate(manifest.leaseExpiresAt);
+  if (!Number.isFinite(leaseExpiresAt)) {
+    errors.push("Manifest trust lease expiry is invalid.");
+  } else if (Number.isFinite(generatedAt)) {
+    if (leaseExpiresAt <= generatedAt) {
+      errors.push("Manifest trust lease must end after generation.");
+    }
+    if (leaseExpiresAt - generatedAt > MAX_VERSIONDECK_MANIFEST_LEASE_MS + FUTURE_CLOCK_SKEW_MS) {
+      errors.push("Manifest trust lease exceeds the maximum duration.");
+    }
+  }
+
   if (manifest.package?.name !== VERSIONDECK_PACKAGE_NAME) {
     errors.push("Unexpected production package identity.");
   }
@@ -79,6 +129,42 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
   if (!SIGNER_PATTERN.test(manifest.package?.signerCertificateSha256 || "")) {
     errors.push("Production signer fingerprint has invalid formatting.");
   }
+
+  if (!isPlainObject(manifest.publication)) {
+    errors.push("Manifest publication state is missing.");
+  } else {
+    const publicationStatus = manifest.publication.status;
+    if (
+      publicationStatus !== VersionDeckPublicationStatus.ACTIVE &&
+      publicationStatus !== VersionDeckPublicationStatus.DISABLED
+    ) {
+      errors.push("Manifest publication status is invalid.");
+    }
+    if (!validateOptionalStateText(manifest.publication.reasonCode)) {
+      errors.push("Manifest publication reason is invalid.");
+    }
+    if (!validateOptionalStateText(manifest.publication.message)) {
+      errors.push("Manifest publication message is invalid.");
+    }
+    if (
+      manifest.publication.updatedAt != null &&
+      !isValidDate(manifest.publication.updatedAt, now)
+    ) {
+      errors.push("Manifest publication update time is invalid.");
+    }
+    if (publicationStatus === VersionDeckPublicationStatus.DISABLED) {
+      if (typeof manifest.publication.reasonCode !== "string" || !manifest.publication.reasonCode) {
+        errors.push("Disabled manifests must record a publication reason.");
+      }
+      if (typeof manifest.publication.message !== "string" || !manifest.publication.message) {
+        errors.push("Disabled manifests must record a publication message.");
+      }
+      if (!isValidDate(manifest.publication.updatedAt, now)) {
+        errors.push("Disabled manifests must record a publication update time.");
+      }
+    }
+  }
+
   if (!Array.isArray(manifest.releases)) {
     errors.push("Release list is missing.");
     return errors;
@@ -88,6 +174,7 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
   }
 
   const ids = new Set();
+  const supersededTargets = [];
   for (const release of manifest.releases) {
     if (!isPlainObject(release)) {
       errors.push("Release entry is not an object.");
@@ -137,6 +224,37 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
       errors.push(`${releaseLabel} has an invalid changelog.`);
     }
 
+    const availability = release.availability;
+    if (!isPlainObject(availability)) {
+      errors.push(`${releaseLabel} availability is missing.`);
+    } else {
+      if (!Object.values(VersionDeckReleaseAvailabilityStatus).includes(availability.status)) {
+        errors.push(`${releaseLabel} availability status is invalid.`);
+      }
+      if (!validateOptionalStateText(availability.reasonCode)) {
+        errors.push(`${releaseLabel} availability reason is invalid.`);
+      }
+      if (!validateOptionalStateText(availability.message)) {
+        errors.push(`${releaseLabel} availability message is invalid.`);
+      }
+      if (availability.decidedAt != null && !isValidDate(availability.decidedAt, now)) {
+        errors.push(`${releaseLabel} availability decision time is invalid.`);
+      }
+      if (availability.status === VersionDeckReleaseAvailabilityStatus.SUPERSEDED) {
+        if (
+          !Number.isInteger(availability.supersededByReleaseId) ||
+          availability.supersededByReleaseId < 1 ||
+          availability.supersededByReleaseId === release.id
+        ) {
+          errors.push(`${releaseLabel} superseded target is invalid.`);
+        } else {
+          supersededTargets.push([releaseLabel, availability.supersededByReleaseId]);
+        }
+      } else if (availability.supersededByReleaseId != null) {
+        errors.push(`${releaseLabel} has an unexpected superseded target.`);
+      }
+    }
+
     const expectedApkName = `HomePilot-${release.version}-build-${release.build}.apk`;
     if (release.apk?.name !== expectedApkName) {
       errors.push(`${releaseLabel} APK name does not match release metadata.`);
@@ -178,6 +296,103 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
       if (verification.attestationRepository !== VERSIONDECK_REPOSITORY) {
         errors.push(`${releaseLabel} attestation repository is invalid.`);
       }
+      const provenance = verification.provenance;
+      const expectedWorkflow = expectedProvenanceWorkflow(VERSIONDECK_REPOSITORY);
+      if (!isPlainObject(provenance)) {
+        errors.push(`${releaseLabel} provenance tuple is missing.`);
+      } else {
+        if (provenance.policyVersion !== VERSIONDECK_PROVENANCE_POLICY_VERSION) {
+          errors.push(`${releaseLabel} provenance policy version is invalid.`);
+        }
+        if (provenance.predicateType !== "https://slsa.dev/provenance/v1") {
+          errors.push(`${releaseLabel} provenance predicate type is invalid.`);
+        }
+        if (provenance.repository !== VERSIONDECK_REPOSITORY) {
+          errors.push(`${releaseLabel} provenance repository is invalid.`);
+        }
+        if (provenance.sourceRepositoryUri !== `https://github.com/${VERSIONDECK_REPOSITORY}`) {
+          errors.push(`${releaseLabel} provenance source repository URI is invalid.`);
+        }
+        if (provenance.sourceRepositoryDigest !== release.commitSha) {
+          errors.push(`${releaseLabel} provenance source digest is invalid.`);
+        }
+        if (provenance.sourceRepositoryRef !== "refs/heads/main") {
+          errors.push(`${releaseLabel} provenance source ref is invalid.`);
+        }
+        if (provenance.subjectName !== expectedApkName) {
+          errors.push(`${releaseLabel} provenance subject name is invalid.`);
+        }
+        if (provenance.artifactSha256 !== release.apk.sha256) {
+          errors.push(`${releaseLabel} provenance artifact SHA-256 is invalid.`);
+        }
+        if (provenance.signerWorkflow !== expectedWorkflow) {
+          errors.push(`${releaseLabel} provenance signer workflow is invalid.`);
+        }
+        if (provenance.signerDigest !== release.commitSha) {
+          errors.push(`${releaseLabel} provenance signer digest is invalid.`);
+        }
+        if (provenance.workflowName !== "Build Production APK") {
+          errors.push(`${releaseLabel} provenance workflow name is invalid.`);
+        }
+        if (provenance.workflowTrigger !== "workflow_dispatch") {
+          errors.push(`${releaseLabel} provenance workflow trigger is invalid.`);
+        }
+        if (provenance.runnerEnvironment !== "github-hosted") {
+          errors.push(`${releaseLabel} provenance runner environment is invalid.`);
+        }
+        if (provenance.buildConfigUri !== expectedWorkflow) {
+          errors.push(`${releaseLabel} provenance build-config URI is invalid.`);
+        }
+        if (provenance.buildConfigDigest !== release.commitSha) {
+          errors.push(`${releaseLabel} provenance build-config digest is invalid.`);
+        }
+        if (provenance.oidcIssuer !== GITHUB_TOKEN_ACTIONS_ISSUER) {
+          errors.push(`${releaseLabel} provenance OIDC issuer is invalid.`);
+        }
+        if (provenance.sourceRepositoryVisibilityAtSigning !== "public") {
+          errors.push(`${releaseLabel} provenance visibility is invalid.`);
+        }
+        if (!isValidDate(provenance.verifiedTimestamp, now)) {
+          errors.push(`${releaseLabel} provenance verification timestamp is invalid.`);
+        }
+        if (!DIGIT_PATTERN.test(String(provenance.runId || ""))) {
+          errors.push(`${releaseLabel} provenance run ID is invalid.`);
+        }
+        if (!DIGIT_PATTERN.test(String(provenance.runAttempt || ""))) {
+          errors.push(`${releaseLabel} provenance run attempt is invalid.`);
+        }
+        if (!validateUrl(
+          provenance.runInvocationUri,
+          new Set(["github.com"]),
+          `/${VERSIONDECK_REPOSITORY}/actions/runs/`,
+        )) {
+          errors.push(`${releaseLabel} provenance run URI is invalid.`);
+        } else if (
+          provenance.runInvocationUri !==
+            `https://github.com/${VERSIONDECK_REPOSITORY}/actions/runs/${provenance.runId}/attempts/${provenance.runAttempt}`
+        ) {
+          errors.push(`${releaseLabel} provenance run URI disagrees with run identifiers.`);
+        }
+        if (
+          typeof provenance.sourceRepositoryIdentifier !== "string" ||
+          !DIGIT_PATTERN.test(provenance.sourceRepositoryIdentifier)
+        ) {
+          errors.push(`${releaseLabel} provenance source repository identifier is invalid.`);
+        }
+        if (
+          typeof provenance.sourceRepositoryOwnerIdentifier !== "string" ||
+          !DIGIT_PATTERN.test(provenance.sourceRepositoryOwnerIdentifier)
+        ) {
+          errors.push(`${releaseLabel} provenance source repository owner identifier is invalid.`);
+        }
+        if (!validateUrl(
+          provenance.sourceRepositoryOwnerUri,
+          new Set(["github.com"]),
+          "/zuhak5",
+        )) {
+          errors.push(`${releaseLabel} provenance source repository owner URI is invalid.`);
+        }
+      }
       for (const property of [
         "apkSha256Verified",
         "checksumAssetVerified",
@@ -196,6 +411,12 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
     }
   }
 
+  for (const [releaseLabel, supersededByReleaseId] of supersededTargets) {
+    if (!ids.has(supersededByReleaseId)) {
+      errors.push(`${releaseLabel} superseded target does not exist in the manifest.`);
+    }
+  }
+
   for (let index = 1; index < manifest.releases.length; index += 1) {
     if (compareVersionBuild(manifest.releases[index - 1], manifest.releases[index]) > 0) {
       errors.push("Release list is not sorted by descending build and version.");
@@ -206,17 +427,56 @@ export function validateVersionDeckManifest(manifest, { now = Date.now() } = {})
   const stable = manifest.latestStableReleaseId;
   if (
     stable !== null &&
-    !manifest.releases.some((release) => release.id === stable && !release.prerelease)
+    !manifest.releases.some((release) =>
+      release.id === stable &&
+      !release.prerelease &&
+      release.availability?.status === VersionDeckReleaseAvailabilityStatus.ACTIVE)
   ) {
-    errors.push("Latest stable release does not reference a stable release.");
+    errors.push("Latest stable release does not reference an active stable release.");
   }
   const prerelease = manifest.latestPrereleaseReleaseId;
   if (
     prerelease !== null &&
-    !manifest.releases.some((release) => release.id === prerelease && release.prerelease)
+    !manifest.releases.some((release) =>
+      release.id === prerelease &&
+      release.prerelease &&
+      release.availability?.status === VersionDeckReleaseAvailabilityStatus.ACTIVE)
   ) {
-    errors.push("Latest prerelease does not reference a prerelease.");
+    errors.push("Latest prerelease does not reference an active prerelease.");
+  }
+
+  if (
+    manifest.publication?.status === VersionDeckPublicationStatus.DISABLED &&
+    (stable !== null || prerelease !== null)
+  ) {
+    errors.push("Disabled manifests must not advertise active latest releases.");
   }
 
   return errors;
+}
+
+export function classifyVersionDeckManifest(manifest, { now = Date.now() } = {}) {
+  const errors = validateVersionDeckManifest(manifest, { now });
+  if (errors.length) {
+    return {
+      state: VersionDeckManifestState.INVALID,
+      errors,
+      leaseExpiresAt: Number.NaN,
+    };
+  }
+  const leaseExpiresAt = parseDate(manifest.leaseExpiresAt);
+  if (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= now) {
+    return {
+      state: VersionDeckManifestState.EXPIRED,
+      errors: [],
+      leaseExpiresAt,
+    };
+  }
+  return {
+    state: manifest.publication.status === VersionDeckPublicationStatus.DISABLED
+      ? VersionDeckManifestState.DISABLED
+      : VersionDeckManifestState.ACTIVE,
+    errors: [],
+    leaseExpiresAt,
+  };
 }

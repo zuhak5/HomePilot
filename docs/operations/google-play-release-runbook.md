@@ -17,6 +17,7 @@ The executable AAB sources are:
 - [`.github/workflows/build-play-android.yml`](../../.github/workflows/build-play-android.yml)
 - [`tool/build_play_prod.ps1`](../../tool/build_play_prod.ps1)
 - [`tool/collect_android_release_evidence.ps1`](../../tool/collect_android_release_evidence.ps1)
+- [`tool/provenance_policy.mjs`](../../tool/provenance_policy.mjs)
 - [`tool/release_attempt_ledger.mjs`](../../tool/release_attempt_ledger.mjs)
 - [`tool/validate_google_release_contracts.mjs`](../../tool/validate_google_release_contracts.mjs)
 - [`tool/release-workflows.test.mjs`](../../tool/release-workflows.test.mjs)
@@ -85,7 +86,8 @@ After manual dispatch at the final SHA, require the run to complete all of the f
 10. Revalidation of that `artifact_verified` ledger before AAB/checksum artifact upload and attestation.
 11. Upload of the AAB/checksum artifact and evidence artifact, each with 30-day retention. The fixed-path evidence upload runs even after failure so safe partial diagnostics are retained, but a partial artifact never qualifies as release evidence.
 12. `actions/attest-build-provenance` for the exact AAB path.
-13. Always-run cleanup of Gradle daemons and temporary signing/configuration files.
+13. Exact `gh attestation verify --format json` capture plus normalized provenance-tuple verification for the expected repository, source digest/ref, signer workflow identity/digest, workflow trigger, runner environment, and workflow run URI.
+14. Always-run cleanup of Gradle daemons and temporary signing/configuration files.
 
 No step in that list is Play Console acceptance evidence.
 
@@ -109,10 +111,12 @@ Recompute SHA-256 after downloading and require it to equal both the checksum fi
 - `aab-signature-verification.txt`
 - `release-attempt` containing the restored prerequisites ledger and the `artifact_verified` AAB digest/upload-signer binding
 - `workflow-context.json`, containing only workflow/run/source/release-attempt/backend-gate and release identity (never credentials)
+- `provenance-attestation.json`, the exact successful `gh attestation verify --format json` output for the expected AAB tuple
+- `provenance-verification.json`, the normalized tuple report generated from trusted workflow context plus the verified attestation JSON
 
 The summary must agree with the AAB on artifact filename/hash, parsed `com.homepilot.app` package, version name/code, parsed target SDK 36, parsed `allowBackup: false`, the exactly-one parsed production AdMob application ID, and `prodReleaseRuntimeClasspath`. The dependency report must be retained in full and contain no direct Firebase Analytics dependency. The merged manifest must contain the required coarse-location, notification, and exact-alarm declarations; it must not contain fine/background location, a Google demo AdMob identifier, or a debuggable production flag.
 
-`aab-signature-verification.txt` must show successful JAR verification and the upload-certificate SHA-256 emitted by the workflow. Compare that fingerprint with Play Console rather than assuming the protected secret is current.
+`aab-signature-verification.txt` must show successful JAR verification and the upload-certificate SHA-256 emitted by the workflow. Compare that fingerprint with Play Console rather than assuming the protected secret is current. `provenance-verification.json` must agree with the final SHA, repository, workflow path, run URI, and attested AAB digest.
 
 Safe independent inspection after downloading includes:
 
@@ -199,7 +203,7 @@ Never delete or overwrite evidence to make a later run appear continuous with an
 Record:
 
 - Final SHA, release attempt ID, `pubspec.yaml` version/build, exact-SHA backend aggregate, and hosted backend deployment dependency.
-- AAB workflow URL/run attempt, artifact names, recomputed/checksum/summary hashes, attestation verification, upload certificate, manifest/dependency review, and exceptions.
+- AAB workflow URL/run attempt, artifact names, recomputed/checksum/summary hashes, attestation verification, normalized provenance tuple, upload certificate, manifest/dependency review, and exceptions.
 - Play application, App integrity fingerprints, uploaded bundle version, Bundle Explorer result, automated checks/warnings, track, testers/countries, rollout/managed-publishing settings, approvals, and timestamps.
 - Data-safety/app-content evidence at the reserved canonical path.
 - Physical-device install/update results, Play-delivered signer, functional/privacy checks, and deferred cases.
