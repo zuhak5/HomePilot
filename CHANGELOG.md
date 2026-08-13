@@ -31,12 +31,21 @@ The current application version is defined only in `pubspec.yaml`. Released vers
   movement/deletion while permitting one disposable app-created tag; its token
   and private-key material were destroyed after the proof. Production
   containment and later release-rail prerequisites remain in force.
-- Pinned all 45 external GitHub Actions references to reviewed full commit SHAs,
+- Pinned all 51 external GitHub Actions references to reviewed full commit SHAs,
   retained exact upstream release labels, and added the fail-closed owner/digest
   contract to the active required validation job with mutable, shortened,
   obfuscated, aliased, and unknown-reference fixtures. Weekly Dependabot
   discovery cannot auto-merge; hosted require-SHA policy and exact-commit CI
   evidence remain separately required before task closure.
+- Split production workflow source across dedicated GitHub credential
+  environments for Supabase Advisors, Supabase migrations, Play AAB signing,
+  standalone APK signing, Sentry publication, GitHub Release/provenance, and
+  Pages publication. Advisor and migration rails now use distinct secret names,
+  Android signing rails no longer share secret aliases, and the APK release rail
+  hands verified artifacts to separate Sentry and GitHub Release jobs. Hosted
+  split secret-name placement is complete and the legacy pooled production
+  environment no longer holds active secret names; negative protected-run
+  evidence remains required before TASK-004 can close.
 
 ## 1.5.0 (Build 44) — 2026-08-09
 

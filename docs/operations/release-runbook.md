@@ -9,8 +9,8 @@
 > TASK-002 source/tag protection is complete: reviewed/current-check `main`
 > entry and automation-only immutable production tags are enforced. See the
 > [TASK-002 protection record](github-source-and-tag-protection.md). Production
-> authorization remains blocked by containment and the later environment,
-> credential, workflow, and release-evidence tasks.
+> authorization remains blocked by containment and the remaining credential,
+> workflow, and release-evidence tasks.
 
 ## Scope
 
@@ -31,7 +31,14 @@ Use the dedicated [Google Play release runbook](google-play-release-runbook.md) 
 
 ## Do not infer protected or successful state
 
-The AAB and APK workflows declare `workflow_dispatch`, a separate unprotected preflight job that explicitly fails non-`main` dispatches, an exact-current-`origin/main` recheck inside the protected build job, `environment: production`, non-cancelling concurrency groups, and explicit permissions. Those declarations are source evidence only. They do not prove that the GitHub `production` environment currently has required reviewers, branch restrictions, correctly scoped secrets, or a successful run. Capture those settings and run results separately.
+The AAB, APK, Sentry, GitHub Release, Supabase Advisor, Supabase migration, and
+Pages rails declare split GitHub environments, no-secret source preflights where
+applicable, exact-current-`origin/main` rechecks inside protected jobs,
+non-cancelling production concurrency groups, and explicit permissions. Those
+declarations are source evidence only. They do not prove that hosted
+environments currently have required reviewers, branch restrictions, correctly
+scoped secrets, or successful runs. Capture those settings and run results
+separately, using the [GitHub environment credential ownership runbook](github-environment-credential-ownership.md).
 
 Likewise, the backend validation workflow proves local/static contracts only. It does not prove that migrations, RLS, RPCs, Storage policies, Auth configuration, or Edge Functions are deployed to the intended hosted Supabase project.
 
@@ -91,8 +98,9 @@ requires them.
 
 All current external `uses:` entries are pinned to reviewed 40-character
 commits without changing their existing major versions. Production workflow
-triggers, permissions, environments, gates, and commands remain unchanged; the
-active read-only validation job adds the required pin-policy contract. The
+triggers, permissions, environment trust domains, gates, and commands are
+covered by the source contract, and the active read-only validation job adds the
+required pin-policy contract. The
 authoritative allowlist and source validator are in
 [`tool/github-actions-policy.mjs`](../../tool/github-actions-policy.mjs), and
 the official owner/release/commit ledger plus review procedure is in the
@@ -110,19 +118,24 @@ to obtain execution evidence.
 
 ## Required GitHub configuration names
 
-Do not invent aliases. The current workflows consume these existing names from the declared `production` environment.
+Do not invent aliases. The current workflows consume the split environment
+names documented in the [GitHub environment credential ownership runbook](github-environment-credential-ownership.md).
 
-| Scope | Variables | Secrets |
-| --- | --- | --- |
-| AAB and APK runtime configuration | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_DSN` | — |
-| AAB and APK signing | — | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD` |
-| APK Sentry publication | `SENTRY_ORG`, `SENTRY_PROJECT` | `SENTRY_AUTH_TOKEN` |
+| Scope | Environment | Variables | Secrets |
+| --- | --- | --- | --- |
+| AAB runtime configuration and Play upload signing | `production-play-signing` | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_DSN` | `PLAY_UPLOAD_KEYSTORE_BASE64`, `PLAY_UPLOAD_KEY_ALIAS`, `PLAY_UPLOAD_KEY_PASSWORD`, `PLAY_UPLOAD_STORE_PASSWORD` |
+| APK runtime configuration and standalone signing | `production-android-signing` | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_WEB_CLIENT_ID`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_DSN` | `ANDROID_APK_KEYSTORE_BASE64`, `ANDROID_APK_KEY_ALIAS`, `ANDROID_APK_KEY_PASSWORD`, `ANDROID_APK_STORE_PASSWORD` |
+| APK Sentry publication | `production-sentry` | `SENTRY_ORG`, `SENTRY_PROJECT` | `SENTRY_AUTH_TOKEN` |
+| GitHub Release and provenance publication | `production-github-release` | none | none |
 
-The workflows also use the ephemeral `${{ github.token }}` for exact-SHA run lookup and, on the APK rail, GitHub Release publication. The repository does not define or consume a Google Play upload API credential in these workflows. Do not add a Play service-account secret merely to follow this runbook; automated Play upload requires a separate reviewed implementation.
+The workflows also use the ephemeral `${{ github.token }}` for exact-SHA run lookup and, on the GitHub Release job, release/provenance publication. The repository does not define or consume a Google Play upload API credential in these workflows. Do not add a Play service-account secret merely to follow this runbook; automated Play upload requires a separate reviewed implementation.
 
 The downstream VersionDeck build separately consumes the public repository variables `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `ACCOUNT_DELETION_SITE_URL`. Missing values can fail Pages artifact generation after the APK GitHub Release already exists.
 
-Before dispatch, record—not the values themselves—that every required item is present in the intended environment, that secret access is limited to the expected workflow, and that current environment reviewer/branch rules have been independently inspected.
+Before dispatch, record - not the values themselves - that every required item
+is present in the intended environment, that secret access is limited to the
+expected workflow, and that current environment reviewer/branch rules have been
+independently inspected.
 
 ## Shared build and security gates
 
@@ -170,9 +183,26 @@ The APK workflow additionally validates fixed Sentry organization/project expect
 - SHA-256 stability and exact checksum-file contents.
 - The same merged-manifest, output-metadata, and dependency evidence collected for the AAB rail.
 
-The evidence collector runs before `tool/publish_sentry_release.ps1`, so manifest/dependency failures occur before Sentry mutation. Sentry publication then creates or reuses the release, associates commits, uploads debug information, finalizes the release, records a deploy, and verifies it. Later artifact, attestation, or GitHub failures can still leave a valid Sentry release behind; record and reconcile that partial state rather than claiming an Android release succeeded.
+The evidence collector runs before the APK handoff artifact is uploaded, so
+manifest/dependency failures occur before Sentry mutation. The separate
+`production-sentry` job restores and verifies the handoff, then creates or
+reuses the Sentry release, associates commits, uploads debug information,
+finalizes the release, records a deploy, and verifies it. Later attestation or
+GitHub Release failures can still leave a valid Sentry release behind; record
+and reconcile that partial state rather than claiming an Android release
+succeeded.
 
-Before any Sentry mutation, the workflow rejects an existing remote Git tag or GitHub Release for the derived identity, then rechecks the tag immediately before publication. The workflow uploads the APK/checksum and APK evidence as separate 30-day Actions artifacts, attests the APK, and creates a GitHub Release containing the renamed APK and `.sha256` file. The APK diagnostic upload uses `always()` and retains its safe workflow context, signer output, `aapt2` badging, merged manifest, dependency report, and metadata produced before a failure. Release notes record version, build, package, filename, SHA-256, standalone signer, Sentry release, and the `gh attestation verify` command. VersionDeck trusts none of those prose claims without independently inspecting the release and artifact.
+Before any Sentry mutation, the workflow rejects an existing remote Git tag or
+GitHub Release for the derived identity, then rechecks the tag immediately
+before Sentry publication. The separate `production-github-release` job
+revalidates source, restores and verifies the handoff, rechecks the tag again,
+attests the APK, and creates a GitHub Release containing the renamed APK and
+`.sha256` file. The APK diagnostic upload uses `always()` and retains its safe
+workflow context, signer output, `aapt2` badging, merged manifest, dependency
+report, and metadata produced before a failure. Release notes record version,
+build, package, filename, SHA-256, standalone signer, Sentry release, and the
+`gh attestation verify` command. VersionDeck trusts none of those prose claims
+without independently inspecting the release and artifact.
 
 ## Evidence collector contract
 
@@ -187,10 +217,15 @@ The collector parses the merged XML rather than accepting substring matches. It 
 
 ## Upload key, standalone APK signer, and Play App Signing
 
-The same restored `ANDROID_*` keystore is currently used to sign both build outputs, but its evidence has different meaning:
+The Play AAB and standalone APK rails use distinct secret names and may use
+different keystores. Keep their evidence meanings separate:
 
-- For the AAB it is the **upload key**. The workflow proves the bundle matches the restored keystore, not that the key matches the upload certificate currently enrolled in Play Console.
-- For the GitHub APK it is the **standalone distribution signer**. The APK workflow also compares it with the fixed signer identity in workflow source.
+- For the AAB, `PLAY_UPLOAD_*` secrets represent the **upload key**. The
+  workflow proves the bundle matches the restored keystore, not that the key
+  matches the upload certificate currently enrolled in Play Console.
+- For the GitHub APK, `ANDROID_APK_*` secrets represent the **standalone
+  distribution signer**. The APK workflow also compares it with the fixed
+  signer identity in workflow source.
 - Under Play App Signing, Google signs Play-delivered APKs with the separate **app signing key** shown in Play Console. The Play app-signing certificate must be recorded and verified against a Play-delivered APK. Do not substitute the upload certificate or standalone GitHub APK signer unless Play Console independently proves they are the same certificate.
 
 Never export the Play app-signing private key. Store only certificate fingerprints and provenance needed for comparison. See the [Google Play release runbook](google-play-release-runbook.md) for the required Console and device checks.

@@ -52,7 +52,7 @@ jobs:
     needs: validate-release-source
     runs-on: windows-latest
     timeout-minutes: 75
-    environment: production
+    environment: production-play-signing
 
     permissions:
       contents: read
@@ -240,10 +240,10 @@ jobs:
       - name: Restore Android upload signing credentials
         shell: pwsh
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.PLAY_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
           $Required = @{
@@ -284,8 +284,8 @@ jobs:
           VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
           BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
           AAB_NAME: ${{ steps.metadata.outputs.aab_name }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
           $EvidencePath = Join-Path $PWD "release\aab-evidence"
