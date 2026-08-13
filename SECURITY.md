@@ -32,7 +32,7 @@ See the
 for exact hosted source/tag state, positive/negative probes, and evidence
 limits, and the
 [GitHub environment credential ownership runbook](docs/operations/github-environment-credential-ownership.md)
-for the credential-domain contract. TASK-005 enforces GitHub's hosted
+for the credential-domain contract. TASK-005 now enforces GitHub's hosted
 selected-action and full-SHA policy and records the credential exposure
 disposition in the
 [GitHub hosted policy and exposure record](docs/operations/github-hosted-policy-and-exposure.md).

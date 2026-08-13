@@ -1,8 +1,9 @@
 # GitHub Hosted Policy and Exposure Disposition
 
-> **TASK-005 status:** In progress until the policy source change lands on
-> `main`, positive pinned workflow evidence passes under the hosted policy, and
-> the final protected evidence is recorded.
+> **TASK-005 status:** Complete as of 2026-08-13. Hosted selected-action and
+> full-SHA policy enforcement, negative policy probes, positive pinned workflow
+> execution, source/tag/environment interlock checks, and evidence-limited
+> credential dispositions were recorded without secret values.
 
 ## Purpose
 
@@ -53,9 +54,12 @@ The hosted policy was exercised without production secrets:
   `codex/task05-unknown-action-probe` failed with `startup_failure` after the
   workflow changed a checkout step to
   `example/checkout@d23441a48e516b6c34aea4fa41551a30e30af803`.
-- Positive evidence remains pending until the repository-owned Flutter setup
-  change is merged and the pinned `Validate Flutter` job succeeds under the
-  hosted policy.
+- Positive PR evidence: `Validate Flutter` run `31704947840`, job
+  `94463032472`, passed on task branch commit
+  `668e1692845e8e208c0170510b34621559d2a668` under the hosted policy.
+- Positive `main` evidence: after PR #40 merged at
+  `1d7e59c18d3ca69f91cc1cd7a17ad03801f22e41`, `Validate Flutter` run
+  `31705746697`, job `94465736345`, passed on `main` under the hosted policy.
 
 ## Source, Tag, and Environment Interlock
 
@@ -72,6 +76,13 @@ Current policy relies on the task 02 and task 04 hosted controls:
 - Advisor arbitrary-ref dispatch rejection and approved exact-main execution
   were recorded in the
   [GitHub environment credential ownership runbook](github-environment-credential-ownership.md).
+
+These controls were rechecked through the repository APIs on 2026-08-13 before
+task closure. Actions policy reported `allowed_actions: selected` and
+`sha_pinning_required: true`; workflow token policy reported
+`default_workflow_permissions: read` and
+`can_approve_pull_request_reviews: false`; the repository reported secret
+scanning and push protection enabled.
 
 ## Historical Evidence Coverage
 
@@ -107,7 +118,10 @@ non-exposure.
 | GitHub Release/provenance authority | Current `production-github-release` has no secrets; production tag creation remains app-only from task 02. | No credential rotation applies. Future release-app credential provisioning belongs to later release tasks. |
 | GitHub Pages | Current `github-pages` has no secrets; historical Pages deployments existed before containment. | No secret rotation applies; Pages remains disabled until VersionDeck tasks authorize reactivation. |
 
-No credential/key rotation was performed for task 05.
+No credential/key rotation was performed for task 05. The repository owner and
+independent reviewer accepted this evidence-limited disposition through the
+protected PR review and merge path. Any future conservative rotation remains a
+domain-owner decision and must be separately authorized and evidenced.
 
 ## Monitoring and Bypass Governance
 
