@@ -44,10 +44,13 @@ export const approvedActionReleases = Object.freeze({
   'denoland/setup-deno': Object.freeze({
     '22d081ff2d3a40755e97629de92e3bcbfa7cf2ed': 'v2.0.5',
   }),
-  'subosito/flutter-action': Object.freeze({
-    '1a449444c387b1966244ae4d4f8c696479add0b2': 'v2.23.0',
-  }),
 });
+
+export const hostedAllowedActionPatterns = Object.freeze(
+  Object.keys(approvedActionReleases)
+    .map((action) => `${action}@*`)
+    .sort(),
+);
 
 const fullCommitPattern = /^[0-9a-f]{40}$/;
 

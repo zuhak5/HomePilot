@@ -32,7 +32,10 @@ See the
 for exact hosted source/tag state, positive/negative probes, and evidence
 limits, and the
 [GitHub environment credential ownership runbook](docs/operations/github-environment-credential-ownership.md)
-for the credential-domain contract.
+for the credential-domain contract. TASK-005 enforces GitHub's hosted
+selected-action and full-SHA policy and records the credential exposure
+disposition in the
+[GitHub hosted policy and exposure record](docs/operations/github-hosted-policy-and-exposure.md).
 
 ## GitHub Actions supply chain
 
@@ -42,7 +45,7 @@ contract scans workflows and local composite actions and rejects movable,
 shortened, aliased, unknown, or unreviewed references. See the
 [GitHub Actions supply-chain policy](docs/development/github-actions-supply-chain.md)
 for the owner/release/commit ledger, upstream review notes, Dependabot limits,
-and independent-review procedure.
+independent-review procedure, and hosted selected-action enforcement.
 
 Action update pull requests never auto-merge. A proposed digest must be checked
 against the official upstream release and security information, the policy and

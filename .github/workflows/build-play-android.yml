@@ -90,11 +90,8 @@ jobs:
           cache: gradle
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.44.8"
-          channel: stable
-          cache: true
+        shell: pwsh
+        run: ./tool/setup_flutter_windows.ps1 -Version 3.44.8
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
