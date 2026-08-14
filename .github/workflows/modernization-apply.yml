@@ -86,7 +86,7 @@ jobs:
 
       - name: Remove temporary modernization rail before source-contract tests
         shell: pwsh
-        run: git rm tool/modernize_zero_user.py .github/workflows/modernization-apply.yml
+        run: git rm -f tool/modernize_zero_user.py .github/workflows/modernization-apply.yml
 
       - name: Regenerate Flutter sources
         shell: pwsh
