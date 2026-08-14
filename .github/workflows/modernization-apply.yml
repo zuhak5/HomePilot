@@ -7,6 +7,7 @@ on:
     paths:
       - "tool/modernize_zero_user.py"
       - "tool/modernize_zero_user_fixes.py"
+      - "tool/modernize_zero_user_fixes2.py"
       - ".github/workflows/modernization-apply.yml"
 
 permissions:
@@ -55,6 +56,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           python tool/modernize_zero_user.py
           python tool/modernize_zero_user_fixes.py
+          python tool/modernize_zero_user_fixes2.py
 
       - name: Resolve latest stable compatible Flutter dependencies
         shell: pwsh
@@ -95,7 +97,7 @@ jobs:
 
       - name: Remove temporary modernization rail before source-contract tests
         shell: pwsh
-        run: git rm -f tool/modernize_zero_user.py tool/modernize_zero_user_fixes.py .github/workflows/modernization-apply.yml
+        run: git rm -f tool/modernize_zero_user.py tool/modernize_zero_user_fixes.py tool/modernize_zero_user_fixes2.py .github/workflows/modernization-apply.yml
 
       - name: Regenerate Flutter sources
         shell: pwsh
