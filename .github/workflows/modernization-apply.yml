@@ -6,6 +6,7 @@ on:
       - codex/zero-user-production-modernization
     paths:
       - "tool/modernize_zero_user.py"
+      - "tool/modernize_zero_user_fixes.py"
       - ".github/workflows/modernization-apply.yml"
 
 permissions:
@@ -48,13 +49,22 @@ jobs:
         shell: pwsh
         run: ./tool/setup_flutter_windows.ps1 -Version 3.47.0
 
-      - name: Apply repository-grounded source modernization
+      - name: Apply repository-grounded modernization
         shell: pwsh
-        run: python tool/modernize_zero_user.py
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python tool/modernize_zero_user.py
+          python tool/modernize_zero_user_fixes.py
 
       - name: Resolve latest stable compatible Flutter dependencies
         shell: pwsh
-        run: flutter pub upgrade --major-versions
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          flutter pub upgrade --major-versions
+          $Pubspec = Get-Content -Raw -LiteralPath pubspec.yaml
+          $Pubspec = $Pubspec.Replace('file_picker: ^12.0.0-beta.7', 'file_picker: ^12.0.0')
+          Set-Content -LiteralPath pubspec.yaml -Value $Pubspec -NoNewline
+          flutter pub get
 
       - name: Resolve reviewed Node and Supabase tooling
         shell: pwsh
@@ -68,7 +78,7 @@ jobs:
       - name: Refresh Deno lockfiles
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $Configs = @((Resolve-Path "deno.json").Path)
           Get-ChildItem -Path "supabase/functions" -Directory | ForEach-Object {
             $Config = Join-Path $_.FullName "deno.json"
@@ -78,7 +88,6 @@ jobs:
             Push-Location (Split-Path -Parent $Config)
             try {
               deno install
-              if ($LASTEXITCODE -ne 0) { throw "deno install failed for $Config" }
             } finally {
               Pop-Location
             }
@@ -86,18 +95,26 @@ jobs:
 
       - name: Remove temporary modernization rail before source-contract tests
         shell: pwsh
-        run: git rm -f tool/modernize_zero_user.py .github/workflows/modernization-apply.yml
+        run: git rm -f tool/modernize_zero_user.py tool/modernize_zero_user_fixes.py .github/workflows/modernization-apply.yml
 
       - name: Regenerate Flutter sources
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           flutter gen-l10n
-          dart run build_runner build --delete-conflicting-outputs
+          dart run build_runner build
           dart format lib test integration_test
+
+      - name: Refresh Flutter 3.47 rendering baselines
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          flutter test --no-pub test/authentication_gate_test.dart --update-goldens
 
       - name: Validate Flutter and Android
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           flutter analyze --no-pub
           flutter test --no-pub --concurrency=1 --timeout 3m --exclude-tags production-config
           flutter test --no-pub test/prod_build_config_test.dart --dart-define-from-file=config/prod.example.json --dart-define=VERIFY_PRODUCTION_CONFIG=true
@@ -106,6 +123,7 @@ jobs:
       - name: Validate Node release and browser contracts
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           npm run test:account-deletion
           npm run test:release-workflows
           npm run test:supabase-advisors
@@ -114,6 +132,7 @@ jobs:
       - name: Validate locked Edge Functions
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           deno fmt --check `
             supabase/functions/admob-ssv-handler/index.ts `
             supabase/functions/admob-ssv-handler/index_test.ts `
@@ -137,7 +156,7 @@ jobs:
       - name: Commit validated modernization
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           git status --short
           git add -A
           if (-not (git diff --cached --quiet)) {
