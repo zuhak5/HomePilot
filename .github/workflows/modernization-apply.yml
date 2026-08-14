@@ -1,0 +1,181 @@
+name: Zero User Modernization Apply
+
+on:
+  push:
+    branches:
+      - codex/zero-user-production-modernization
+    paths:
+      - "tool/modernize_zero_user.py"
+      - ".github/workflows/modernization-apply.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zero-user-modernization
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    name: Apply and validate modernization
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out modernization branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Set up Deno 2.9.5
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.5"
+
+      - name: Set up Flutter 3.47.0
+        shell: pwsh
+        run: ./tool/setup_flutter_windows.ps1 -Version 3.47.0
+
+      - name: Apply repository-grounded source modernization
+        shell: pwsh
+        run: python tool/modernize_zero_user.py
+
+      - name: Resolve latest stable compatible Flutter dependencies
+        shell: pwsh
+        run: flutter pub upgrade --major-versions
+
+      - name: Resolve reviewed Node and Supabase tooling
+        shell: pwsh
+        run: >-
+          npm install --save-dev --save-exact
+          @supabase/supabase-js@2.112.3
+          esbuild@0.28.1
+          supabase@2.110.0
+          yaml@2.9.0
+
+      - name: Refresh Deno lockfiles
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Configs = @((Resolve-Path "deno.json").Path)
+          Get-ChildItem -Path "supabase/functions" -Directory | ForEach-Object {
+            $Config = Join-Path $_.FullName "deno.json"
+            if (Test-Path -LiteralPath $Config) { $Configs += $Config }
+          }
+          foreach ($Config in $Configs) {
+            Push-Location (Split-Path -Parent $Config)
+            try {
+              deno install
+              if ($LASTEXITCODE -ne 0) { throw "deno install failed for $Config" }
+            } finally {
+              Pop-Location
+            }
+          }
+
+      - name: Remove temporary modernization rail before source-contract tests
+        shell: pwsh
+        run: git rm tool/modernize_zero_user.py .github/workflows/modernization-apply.yml
+
+      - name: Regenerate Flutter sources
+        shell: pwsh
+        run: |
+          flutter gen-l10n
+          dart run build_runner build --delete-conflicting-outputs
+          dart format lib test integration_test
+
+      - name: Validate Flutter and Android
+        shell: pwsh
+        run: |
+          flutter analyze --no-pub
+          flutter test --no-pub --concurrency=1 --timeout 3m --exclude-tags production-config
+          flutter test --no-pub test/prod_build_config_test.dart --dart-define-from-file=config/prod.example.json --dart-define=VERIFY_PRODUCTION_CONFIG=true
+          flutter build apk --debug --flavor dev --no-pub
+
+      - name: Validate Node release and browser contracts
+        shell: pwsh
+        run: |
+          npm run test:account-deletion
+          npm run test:release-workflows
+          npm run test:supabase-advisors
+          npm run validate:google-contracts
+
+      - name: Validate locked Edge Functions
+        shell: pwsh
+        run: |
+          deno fmt --check `
+            supabase/functions/admob-ssv-handler/index.ts `
+            supabase/functions/admob-ssv-handler/index_test.ts `
+            supabase/functions/delete-account/index.ts `
+            supabase/functions/delete-account/index_test.ts `
+            supabase/functions/account-deletion-status/index.ts `
+            supabase/functions/account-deletion-status/index_test.ts
+          Push-Location supabase/functions/admob-ssv-handler
+          deno check --frozen index.ts
+          deno test --frozen --allow-env --allow-net index_test.ts
+          Pop-Location
+          Push-Location supabase/functions/delete-account
+          deno check --frozen index.ts
+          deno test --frozen --allow-env --allow-net index_test.ts
+          Pop-Location
+          Push-Location supabase/functions/account-deletion-status
+          deno check --frozen index.ts
+          deno test --frozen --allow-env --allow-net index_test.ts
+          Pop-Location
+
+      - name: Commit validated modernization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git status --short
+          git add -A
+          if (-not (git diff --cached --quiet)) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Modernize zero-user production baseline"
+            git push origin HEAD:codex/zero-user-production-modernization
+          } else {
+            throw "Modernization produced no committed changes."
+          }
+
+  supabase-local-validation:
+    name: Validate Supabase locally
+    needs: apply-and-validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out committed modernization
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: codex/zero-user-production-modernization
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Validate local Supabase reset, lint, and pgTAP contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npx supabase start
+          trap 'npx supabase stop --no-backup || true' EXIT
+          npm run supabase:lint
+          npm run supabase:test
